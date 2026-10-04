@@ -140,6 +140,13 @@ export const STATES: Record<string, State> = {
     blocked:
       "needs a scans row: without a database the route 404s, and the not-found page is already swept under its own name",
   },
+  // 4 Oct 2026: case studies published from the Nomada agency hub, read from
+  // its feed (lib/case-studies.ts). None published yet, so the route has no
+  // URL to render; once one is live it is prerendered and swept as a page.
+  "/case-studies/[id]": {
+    urls: [],
+    blocked: "renders only a study published on the agency hub; with none published it 404s, and the not-found page is swept under its own name",
+  },
   "/coverage-check/[token]": {
     urls: [],
     blocked: "needs a campaign row and its token; 404s without a database",

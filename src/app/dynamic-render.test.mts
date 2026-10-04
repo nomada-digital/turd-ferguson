@@ -173,6 +173,9 @@ test("the routes that cannot be rendered here are exactly the seven known ones",
   // Six since 30 Sep 2026: /admin/tracking/usage (R98 T10), same auth.
   // Seven since 1 Oct 2026: /admin/funnel (R152), same auth.
   // Eight since 1 Oct 2026: /admin/emails (R159 part 2), same auth.
+  // Nine since 4 Oct 2026: /case-studies/[id], studies published from the
+  // Nomada agency hub. Not auth: it has no URL until one is published, and
+  // then it is prerendered and swept like any page.
   assert.deepEqual(blocked, [
     "/admin/emails",
     "/admin/funnel",
@@ -180,6 +183,7 @@ test("the routes that cannot be rendered here are exactly the seven known ones",
     "/admin/tracking",
     "/admin/tracking/[client]/placements",
     "/admin/tracking/usage",
+    "/case-studies/[id]",
     "/coverage-check/[token]",
     "/scan/[token]",
   ]);

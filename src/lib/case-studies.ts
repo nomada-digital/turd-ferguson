@@ -1,0 +1,84 @@
+import { z } from "zod";
+
+/**
+ * Case studies published from the Nomada agency hub.
+ *
+ * The figures are not typed anywhere in this repo. Each one is a reading from
+ * the dashboards' daily Google and AI tracking, frozen when the study was
+ * requested, written up, signed off by the client and published by Danny on
+ * the hub - the database refuses anyone else, refuses without the client's
+ * sign-off recorded, and leak-checks the public text at the moment of
+ * publishing (no prices, vendors, tools or placement wording; no client name
+ * in an anonymised study). Every study carries its window (`from`, `to`), the
+ * keyword set it was measured on and a method line, which is the dated source
+ * AGENTS.md asks a client figure to stand on.
+ *
+ * Read through a public edge function on the nomada-dashboards Supabase
+ * project: no key here, and the table itself is closed to anon. The workflow
+ * lives in nomada-dashboards `ops/case-studies/README.md`.
+ *
+ * Never fatal: a feed that fails to load renders the static page without its
+ * studies, and ISR keeps serving the last good render until it answers again.
+ */
+export const CASE_STUDY_FEED = "https://qpsrvmnmtozvailsyqqz.supabase.co/functions/v1/case-studies?site=alwayscited.com";
+
+/** Seconds between re-reads of the feed. A study goes live within this of being published. */
+export const CASE_STUDY_REVALIDATE = 300;
+
+const Kpi = z.object({ n: z.string(), l: z.string() });
+const Point = z.object({ d: z.string(), p1: z.number() });
+const Keyword = z.object({ k: z.string(), vol: z.number().nullish(), then: z.number().nullish(), now: z.number().nullish() });
+
+const CaseStudy = z.object({
+  id: z.string().regex(/^[a-z0-9-]+$/),
+  site: z.literal("alwayscited.com"),
+  published: z.string(),
+  client: z.string(),
+  named: z.boolean().optional(),
+  domain: z.string().optional(),
+  market: z.string().optional(),
+  period: z.string().optional(),
+  periodLabel: z.string().optional(),
+  from: z.string().optional(),
+  to: z.string().optional(),
+  headline: z.string(),
+  intro: z.string().optional(),
+  challenge: z.string().optional(),
+  approach: z.string().optional(),
+  results: z.string().optional(),
+  kpis: z.array(Kpi).optional(),
+  series: z.array(Point).optional(),
+  keywords: z.array(Keyword).optional(),
+  method: z.string().optional(),
+});
+export type CaseStudy = z.infer<typeof CaseStudy>;
+
+export async function publishedCaseStudies(): Promise<CaseStudy[]> {
+  try {
+    const res = await fetch(CASE_STUDY_FEED, { next: { revalidate: CASE_STUDY_REVALIDATE } });
+    if (!res.ok) return [];
+    const body = (await res.json()) as { case_studies?: unknown[] };
+    // One malformed study is dropped rather than taking the others down with it.
+    return (body.case_studies ?? []).flatMap((x) => {
+      const r = CaseStudy.safeParse(x);
+      return r.success ? [r.data] : [];
+    });
+  } catch {
+    return [];
+  }
+}
+
+export async function caseStudy(id: string): Promise<CaseStudy | null> {
+  return (await publishedCaseStudies()).find((s) => s.id === id) ?? null;
+}
+
+/** "1 October 2026" from an ISO date. */
+export function longDate(iso: string): string {
+  const d = new Date(iso.slice(0, 10) + "T12:00:00Z");
+  return d.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
+}
+
+/** The window a study was measured over, in words: "24 June 2026 to 1 October 2026". */
+export function windowOf(s: CaseStudy): string | null {
+  return s.from && s.to ? `${longDate(s.from)} to ${longDate(s.to)}` : null;
+}

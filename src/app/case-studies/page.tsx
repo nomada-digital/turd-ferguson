@@ -4,6 +4,7 @@ import Link from "next/link";
 
 import { CHATGPT_VISIBILITY, KEYWORD_EIGHT_WEEKS, KEYWORD_FOUR_MONTHS } from "@/config/client-results";
 import { CARD, MICRO, SHELL, T } from "@/config/tokens";
+import { publishedCaseStudies } from "@/lib/case-studies";
 
 /**
  * The evidence index, from CaseStudies.dc.html.
@@ -63,7 +64,16 @@ export const metadata: Metadata = {
   },
 };
 
-export default function CaseStudiesPage() {
+/**
+ * Studies published from the Nomada agency hub (4 Oct 2026) list under the
+ * Vibe Retail study. Their figures are not typed here or in client-results:
+ * each comes with its own window from the hub's tracking - see
+ * `lib/case-studies.ts`. Re-read every five minutes; none published, none drawn.
+ */
+export const revalidate = 300;
+
+export default async function CaseStudiesPage() {
+  const studies = await publishedCaseStudies();
   return (
     <section style={{ ...SHELL, paddingTop: "44px", display: "flex", flexDirection: "column", gap: "26px" }}>
       <div className="board-head confirm-head">
@@ -174,6 +184,40 @@ export default function CaseStudiesPage() {
           </div>
         </div>
       </Link>
+
+      {studies.map((st) => (
+        <Link
+          key={st.id}
+          className="ac-row"
+          href={`/case-studies/${st.id}`}
+          style={{ ...CARD, display: "block", padding: "28px 30px", textDecoration: "none" }}
+        >
+          <div className="confirm-top study-top">
+            <div>
+              <div style={{ ...MICRO, color: T.accent }}>
+                {[st.named ? st.client : null, st.market, st.periodLabel].filter(Boolean).join(" - ")}
+              </div>
+              <h2 style={{ margin: "10px 0 0", fontSize: "23px", fontWeight: 700, letterSpacing: "-0.03em", lineHeight: 1.24, color: T.ink }}>
+                {st.headline}
+              </h2>
+              {st.intro && (
+                <p style={{ margin: "10px 0 0", fontSize: "14px", lineHeight: 1.6, color: T.soft, maxWidth: "62ch" }}>{st.intro}</p>
+              )}
+            </div>
+            {!!st.kpis?.length && (
+              <div style={{ display: "flex", background: T.bg, border: "1px solid " + T.line, borderRadius: "14px", overflow: "hidden", alignSelf: "start", flexWrap: "wrap" }}>
+                {st.kpis.slice(0, 3).map((k, i) => (
+                  <div key={k.l} style={{ flexGrow: 1, flexBasis: "150px", padding: "18px 20px", borderLeft: i ? "1px solid " + T.line : undefined }}>
+                    <div style={{ fontSize: "12.5px", color: T.soft }}>{k.l}</div>
+                    <div style={{ fontSize: "27px", fontWeight: 700, letterSpacing: "-0.035em", lineHeight: 1.15, marginTop: "2px", color: T.ink }}>{k.n}</div>
+                    <div style={{ fontSize: "12px", color: T.soft, marginTop: "5px" }}>Over {st.periodLabel ?? "the window"}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </Link>
+      ))}
 
       <p className="ac-row" style={{ margin: 0, fontSize: "13px", color: T.soft, lineHeight: 1.6 }}>
         Nothing on this page is modelled or projected. Where a reading came from a third-party tracker rather than our
