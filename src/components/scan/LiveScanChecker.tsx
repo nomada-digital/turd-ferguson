@@ -45,7 +45,18 @@ export default function LiveScanChecker({
   const id = "scan" + useId().replace(/[^\w-]/g, "");
   const router = useRouter();
   const [domain, setDomain] = useState(initialDomain);
-  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const [turnstileToken, setTurnstileTokenState] = useState<string | null>(null);
+  // Mirrors of the token and the widget's failure, read by the wait in onDomain.
+  const tokenRef = useRef<string | null>(null);
+  const widgetFailed = useRef(false);
+  function setTurnstileToken(t: string | null) {
+    tokenRef.current = t;
+    if (t) widgetFailed.current = false;
+    setTurnstileTokenState(t);
+  }
+  function onWidgetError() {
+    widgetFailed.current = true;
+  }
   const [busy, setBusyState] = useState(false);
   function setBusy(next: boolean) {
     setBusyState(next);
@@ -83,6 +94,7 @@ export default function LiveScanChecker({
   const [attempt, setAttempt] = useState(0);
   function freshToken() {
     setTurnstileToken(null);
+    widgetFailed.current = false;
     setAttempt((a) => a + 1);
   }
 
@@ -104,6 +116,31 @@ export default function LiveScanChecker({
     timers.current = [setTimeout(() => setStep(1), 1500), setTimeout(() => setStep(2), 3500)];
     track("scan_started", { domain });
 
+    /**
+     * Wait for Turnstile rather than posting without it (4 Oct 2026). The
+     * widget is invisible and issues its token a second or two after load, and
+     * again after every refusal (freshToken remounts it). A paste-and-click, or
+     * a retry straight after an error, posted turnstileToken: null and was told
+     * "We could not verify that request. Please reload" - which reloading did
+     * not fix. Up to 15s, then a message that names the likely cause.
+     */
+    const needsToken = Boolean(process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY);
+    if (needsToken && !tokenRef.current) {
+      const deadline = Date.now() + 15_000;
+      while (!tokenRef.current && !widgetFailed.current && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 200));
+      }
+      if (!tokenRef.current) {
+        stopSteps();
+        setError(
+          "Our bot check did not load. If you use a content or ad blocker, allow challenges.cloudflare.com, or try another browser.",
+        );
+        setBusy(false);
+        freshToken();
+        return;
+      }
+    }
+
     try {
       const headers = new Headers();
       headers.set("content-type", "application/json");
@@ -113,7 +150,7 @@ export default function LiveScanChecker({
         // No market: the start route picks it from the domain (market-pick.ts).
         // This used to send a hard-coded "UK", which meant every scan opened
         // on the UK whatever the domain said.
-        body: JSON.stringify({ domain, turnstileToken }),
+        body: JSON.stringify({ domain, turnstileToken: tokenRef.current ?? turnstileToken }),
       });
       const data = await res.json();
 
@@ -151,7 +188,7 @@ export default function LiveScanChecker({
           status={busy ? steps[step] : ""}
           busy={busy}
         />
-        <Turnstile key={attempt} onToken={setTurnstileToken} />
+        <Turnstile key={attempt} onToken={setTurnstileToken} onError={onWidgetError} />
       </div>
     );
   }
@@ -168,7 +205,7 @@ export default function LiveScanChecker({
         busy={busy}
         dark={dark}
       />
-      <Turnstile key={attempt} onToken={setTurnstileToken} theme={dark ? "dark" : "light"} />
+      <Turnstile key={attempt} onToken={setTurnstileToken} onError={onWidgetError} theme={dark ? "dark" : "light"} />
     </div>
   );
 }

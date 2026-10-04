@@ -19,7 +19,16 @@ const SCRIPT_SRC = "https://challenges.cloudflare.com/turnstile/v0/api.js?render
  * local development works without a Cloudflare account; the server still
  * refuses unverified requests in production.
  */
-export default function Turnstile({ onToken, theme = "light" }: { onToken: (token: string | null) => void; theme?: "light" | "dark" }) {
+export default function Turnstile({
+  onToken,
+  onError,
+  theme = "light",
+}: {
+  onToken: (token: string | null) => void;
+  /** The widget failed or its script could not load - no token is coming. */
+  onError?: () => void;
+  theme?: "light" | "dark";
+}) {
   const holder = useRef<HTMLDivElement>(null);
   const widget = useRef<string | null>(null);
   const cb = useRef(onToken);
@@ -27,9 +36,11 @@ export default function Turnstile({ onToken, theme = "light" }: { onToken: (toke
 
   // Kept in a ref so a changing callback does not tear down and re-render the
   // widget, which would drop a token the visitor has already solved for.
+  const errCb = useRef(onError);
   useEffect(() => {
     cb.current = onToken;
-  }, [onToken]);
+    errCb.current = onError;
+  }, [onToken, onError]);
 
   const siteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
 
@@ -43,7 +54,10 @@ export default function Turnstile({ onToken, theme = "light" }: { onToken: (toke
         sitekey: siteKey,
         callback: (token: string) => cb.current(token),
         "expired-callback": () => cb.current(null),
-        "error-callback": () => cb.current(null),
+        "error-callback": () => {
+          cb.current(null);
+          errCb.current?.();
+        },
         // Invisible unless Cloudflare decides to challenge (Danny, 25 Sep). The
         // server check is unchanged: a token is still required to start a scan.
         appearance: "interaction-only",
@@ -64,6 +78,9 @@ export default function Turnstile({ onToken, theme = "light" }: { onToken: (toke
         document.head.appendChild(script);
       }
       script.addEventListener("load", render);
+      // A content blocker or a network that refuses challenges.cloudflare.com
+      // never fires load, and the visitor's click used to post a null token.
+      script.addEventListener("error", () => errCb.current?.());
     }
 
     return () => {
