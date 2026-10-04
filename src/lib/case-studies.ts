@@ -26,7 +26,9 @@ export const CASE_STUDY_FEED = "https://qpsrvmnmtozvailsyqqz.supabase.co/functio
 export const CASE_STUDY_REVALIDATE = 300;
 
 const Kpi = z.object({ n: z.string(), l: z.string() });
-const Point = z.object({ d: z.string(), p1: z.number() });
+const Point = z.object({ d: z.string(), p1: z.number(), vol: z.number().optional() });
+const Pair = z.object({ l: z.string(), then: z.number(), now: z.number() });
+const Engine = z.object({ e: z.string(), then: z.number(), now: z.number(), of: z.number() });
 const Keyword = z.object({ k: z.string(), vol: z.number().nullish(), then: z.number().nullish(), now: z.number().nullish() });
 
 const CaseStudy = z.object({
@@ -49,6 +51,9 @@ const CaseStudy = z.object({
   kpis: z.array(Kpi).optional(),
   series: z.array(Point).optional(),
   keywords: z.array(Keyword).optional(),
+  compare: z.object({ kw: z.number(), rows: z.array(Pair) }).optional(),
+  movers: z.array(Keyword).optional(),
+  engines: z.object({ from: z.string(), to: z.string(), rows: z.array(Engine) }).optional(),
   method: z.string().optional(),
 });
 export type CaseStudy = z.infer<typeof CaseStudy>;
