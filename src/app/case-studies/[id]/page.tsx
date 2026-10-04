@@ -59,36 +59,85 @@ const P = ({ children }: { children: React.ReactNode }) => (
 
 const pos = (p: number | null | undefined) => (p ? `#${p}` : "outside the top 100");
 
-/** Keywords on page 1, weekly. Drawn here so the page needs no chart library. */
-function Chart({ series }: { series: { d: string; p1: number }[] }) {
-  const W = 640, H = 200, L = 34, B = 26, top = 12;
-  const max = Math.max(1, ...series.map((x) => x.p1));
-  const step = max <= 5 ? 1 : max <= 20 ? 5 : max <= 50 ? 10 : 25;
+const nice = (max: number) => {
+  for (const s of [1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 25000, 50000, 100000]) if (max / s <= 6) return s;
+  return 250000;
+};
+
+/** A weekly line, drawn here so the page needs no chart library. */
+function Chart({ series, metric = "p1", caption }: { series: { d: string; p1: number; vol?: number }[]; metric?: "p1" | "vol"; caption: string }) {
+  const W = 640, H = 200, L = 52, B = 26, top = 12;
+  const val = (p: { p1: number; vol?: number }) => (metric === "vol" ? p.vol ?? 0 : p.p1);
+  const max = Math.max(1, ...series.map(val));
+  const step = nice(max);
   const yMax = Math.ceil(max / step) * step;
   const x = (i: number) => L + (i / Math.max(1, series.length - 1)) * (W - L - 8);
   const y = (v: number) => top + (1 - v / yMax) * (H - top - B);
   const ticks = Array.from({ length: yMax / step + 1 }, (_, i) => i * step);
-  const pts = series.map((p, i) => `${x(i).toFixed(1)},${y(p.p1).toFixed(1)}`).join(" ");
+  const pts = series.map((p, i) => `${x(i).toFixed(1)},${y(val(p)).toFixed(1)}`).join(" ");
   const first = series[0]!, last = series[series.length - 1]!;
   return (
     <figure style={{ margin: 0 }}>
       <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img"
-        aria-label={`Tracked keywords on Google page 1, weekly: ${first.p1} on ${longDate(first.d)}, ${last.p1} on ${longDate(last.d)}`}>
+        aria-label={`${caption} ${val(first).toLocaleString("en-US")} on ${longDate(first.d)}, ${val(last).toLocaleString("en-US")} on ${longDate(last.d)}`}>
         {ticks.map((t) => (
           <g key={t}>
             <line x1={L} x2={W - 8} y1={y(t)} y2={y(t)} stroke={T.line} strokeWidth="1" />
-            <text x={L - 8} y={y(t) + 4} textAnchor="end" fontSize="11" fill={T.soft}>{t}</text>
+            <text x={L - 8} y={y(t) + 4} textAnchor="end" fontSize="11" fill={T.soft}>{t.toLocaleString("en-US")}</text>
           </g>
         ))}
         <polyline points={pts} fill="none" stroke={T.accent} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
-        {series.map((p, i) => <circle key={p.d} cx={x(i)} cy={y(p.p1)} r="3" fill={T.accent} />)}
+        {series.map((p, i) => <circle key={p.d} cx={x(i)} cy={y(val(p))} r="3" fill={T.accent} />)}
         <text x={L} y={H - 6} fontSize="11" fill={T.soft}>{longDate(first.d)}</text>
         <text x={W - 8} y={H - 6} fontSize="11" fill={T.soft} textAnchor="end">{longDate(last.d)}</text>
       </svg>
-      <figcaption style={{ marginTop: "6px", fontSize: "13px", color: T.soft }}>
-        Tracked keywords on Google page 1, one reading a week.
-      </figcaption>
+      <figcaption style={{ marginTop: "6px", fontSize: "13px", color: T.soft }}>{caption}</figcaption>
     </figure>
+  );
+}
+
+/** Start against now, as paired bars on one scale. */
+function Bars({ rows, of, unit }: { rows: { l: string; then: number; now: number; of?: number }[]; of: number; unit: string }) {
+  const pc = (n: number, d: number) => `${Math.max(0, Math.min(100, (n / Math.max(1, d)) * 100))}%`;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+      {rows.map((r) => (
+        <div key={r.l}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", fontSize: "14px", color: T.ink }}>
+            <span>{r.l}</span>
+            <span style={{ fontWeight: 600 }}>{r.then} to {r.now} <span style={{ fontWeight: 400, color: T.soft }}>of {r.of ?? of} {unit}</span></span>
+          </div>
+          <div aria-hidden="true" style={{ marginTop: "6px", display: "flex", flexDirection: "column", gap: "4px" }}>
+            <div style={{ height: "8px", borderRadius: "4px", background: T.chip }}>
+              <div style={{ width: pc(r.then, r.of ?? of), height: "100%", borderRadius: "4px", background: T.faint }} />
+            </div>
+            <div style={{ height: "8px", borderRadius: "4px", background: T.chip }}>
+              <div style={{ width: pc(r.now, r.of ?? of), height: "100%", borderRadius: "4px", background: T.accent }} />
+            </div>
+          </div>
+        </div>
+      ))}
+      <div style={{ display: "flex", gap: "16px", fontSize: "12px", color: T.soft }}>
+        <span><span style={{ display: "inline-block", width: "10px", height: "10px", borderRadius: "3px", background: T.faint, marginRight: "6px" }} />At the start</span>
+        <span><span style={{ display: "inline-block", width: "10px", height: "10px", borderRadius: "3px", background: T.accent, marginRight: "6px" }} />Now</span>
+      </div>
+    </div>
+  );
+}
+
+function KeywordRows({ rows }: { rows: { k: string; vol?: number | null; then?: number | null; now?: number | null }[] }) {
+  return (
+    <div style={{ marginTop: "10px" }}>
+      {rows.map((k) => (
+        <div key={k.k} className="cs-row" style={{ borderTop: "1px solid " + T.hair }}>
+          <span style={{ fontSize: "14px", color: T.ink }}>{k.k}</span>
+          <span style={{ fontSize: "14px", fontWeight: 600, color: T.ink, flexShrink: 0, maxWidth: "100%" }}>
+            {pos(k.then)} to {pos(k.now)}
+            {k.vol ? <span style={{ fontWeight: 400, color: T.soft }}> - {k.vol.toLocaleString("en-US")} searches a month</span> : null}
+          </span>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -135,9 +184,32 @@ export default async function PublishedCaseStudy({ params }: { params: Promise<{
           </div>
         )}
 
+        {s.compare && (
+          <div className="ac-row" style={{ ...CARD, padding: "22px 24px" }}>
+            <div style={{ ...MICRO, marginBottom: "14px" }}>Google positions, start against now{w ? `, ${w}` : ""}</div>
+            <Bars rows={s.compare.rows} of={s.compare.kw} unit="keywords" />
+          </div>
+        )}
+
         {s.series && s.series.length > 1 && (
           <div className="ac-row" style={{ ...CARD, padding: "22px 24px" }}>
-            <Chart series={s.series} />
+            <Chart series={s.series} caption="Tracked keywords on Google page 1, one reading a week." />
+          </div>
+        )}
+
+        {s.series && s.series.length > 1 && s.series.some((p) => (p.vol ?? 0) > 0) && (
+          <div className="ac-row" style={{ ...CARD, padding: "22px 24px" }}>
+            <Chart series={s.series} metric="vol" caption="Monthly searches for the keywords on Google page 1, one reading a week." />
+          </div>
+        )}
+
+        {s.engines && (
+          <div className="ac-row" style={{ ...CARD, padding: "22px 24px" }}>
+            <div style={{ ...MICRO, marginBottom: "14px" }}>
+              AI answers naming {s.named ? s.client : "the brand"}, {longDate(s.engines.from)} against {longDate(s.engines.to)}
+            </div>
+            <Bars rows={s.engines.rows.map((e) => ({ l: e.e, then: e.then, now: e.now, of: e.of }))}
+              of={Math.max(...s.engines.rows.map((e) => e.of))} unit="answers" />
           </div>
         )}
 
@@ -150,17 +222,14 @@ export default async function PublishedCaseStudy({ params }: { params: Promise<{
         {!!s.keywords?.length && (
           <div className="ac-row" style={{ ...CARD, padding: "22px 24px" }}>
             <div style={MICRO}>Keywords that reached page 1{w ? `, ${w}` : ""}</div>
-            <div style={{ marginTop: "10px" }}>
-              {s.keywords.map((k) => (
-                <div key={k.k} className="cs-row" style={{ borderTop: "1px solid " + T.hair }}>
-                  <span style={{ fontSize: "14px", color: T.ink }}>{k.k}</span>
-                  <span style={{ fontSize: "14px", fontWeight: 600, color: T.ink, flexShrink: 0, maxWidth: "100%" }}>
-                    {pos(k.then)} to {pos(k.now)}
-                    {k.vol ? <span style={{ fontWeight: 400, color: T.soft }}> - {k.vol.toLocaleString("en-US")} searches a month</span> : null}
-                  </span>
-                </div>
-              ))}
-            </div>
+            <KeywordRows rows={s.keywords} />
+          </div>
+        )}
+
+        {!!s.movers?.length && (
+          <div className="ac-row" style={{ ...CARD, padding: "22px 24px" }}>
+            <div style={MICRO}>Biggest climbs{w ? `, ${w}` : ""}</div>
+            <KeywordRows rows={s.movers} />
           </div>
         )}
 
