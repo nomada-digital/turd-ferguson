@@ -66,6 +66,11 @@ const CaseStudy = z.object({
   aiRuns: z.array(AiRun).optional(),
   prompts: z.array(PromptCard).optional(),
   tracked: z.object({ kw: z.number().nullish(), prompts: z.number().nullish() }).optional(),
+  // dashboard screenshots, embedded (img-src allows data:), checked for wording at capture
+  shots: z.array(z.object({
+    section: z.enum(["google", "ai", "prompts"]), alt: z.string(), w: z.number(), h: z.number(),
+    src: z.string().regex(/^data:image\/(webp|png|jpeg);base64,/),
+  })).optional(),
   method: z.string().optional(),
 });
 export type CaseStudy = z.infer<typeof CaseStudy>;

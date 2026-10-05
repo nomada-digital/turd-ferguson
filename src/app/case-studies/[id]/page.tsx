@@ -6,7 +6,7 @@ import TwoWays from "@/components/home/TwoWays";
 import { OG_IMAGE } from "@/config/og";
 import { ORG_REF, ld } from "@/config/schema";
 import { CARD, MICRO, SHELL, T } from "@/config/tokens";
-import { CASE_STUDY_REVALIDATE, caseStudy, longDate, publishedCaseStudies, windowOf, type CaseStudy } from "@/lib/case-studies";
+import { caseStudy, longDate, publishedCaseStudies, windowOf, type CaseStudy } from "@/lib/case-studies";
 
 /**
  * A case study published from the Nomada agency hub (see `lib/case-studies.ts`).
@@ -195,6 +195,22 @@ function PromptCardView({ c }: { c: { q: string; engines: { e: string; then?: bo
   );
 }
 
+/** A screenshot of the client's live dashboard for one section of the study. */
+function Shot({ s, section, date }: { s: CaseStudy; section: "google" | "ai" | "prompts"; date?: string }) {
+  const sh = s.shots?.find((x) => x.section === section);
+  if (!sh) return null;
+  return (
+    <figure style={{ margin: "16px 0 0" }}>
+      {/* eslint-disable-next-line @next/next/no-img-element -- an embedded data: image, nothing for next/image to optimise */}
+      <img src={sh.src} alt={sh.alt} width={sh.w} height={sh.h} loading="lazy"
+        style={{ width: "100%", height: "auto", borderRadius: "12px", border: "1px solid " + T.line, display: "block" }} />
+      <figcaption style={{ marginTop: "6px", fontSize: "12.5px", color: T.soft }}>
+        From the client&rsquo;s live dashboard{date ? `, as at ${longDate(date)}` : ""}.
+      </figcaption>
+    </figure>
+  );
+}
+
 /** Start against now, as paired bars on one scale. */
 function Bars({ rows, of, unit }: { rows: { l: string; then: number; now: number; of?: number }[]; of: number; unit: string }) {
   const pc = (n: number, d: number) => `${Math.max(0, Math.min(100, (n / Math.max(1, d)) * 100))}%`;
@@ -295,6 +311,7 @@ export default async function PublishedCaseStudy({ params }: { params: Promise<{
             {s.series.some((p) => p.b3 !== undefined)
               ? <BandChart series={s.series} kw={s.compare?.kw ?? s.tracked?.kw} />
               : <Chart series={s.series} caption="Tracked keywords on Google page 1, one reading a week." />}
+            <Shot s={s} section="google" date={s.to} />
           </div>
         )}
 
@@ -314,6 +331,7 @@ export default async function PublishedCaseStudy({ params }: { params: Promise<{
               </span>
             </div>
             {s.aiRuns && s.aiRuns.length > 1 && <div style={{ marginTop: "16px" }}><AiLine runs={s.aiRuns} /></div>}
+            <Shot s={s} section="ai" date={s.ai.to} />
           </div>
         )}
 
@@ -323,6 +341,7 @@ export default async function PublishedCaseStudy({ params }: { params: Promise<{
             <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
               {s.prompts.map((c) => <PromptCardView key={c.q} c={c} />)}
             </div>
+            <Shot s={s} section="prompts" date={s.ai?.to} />
           </div>
         )}
 
