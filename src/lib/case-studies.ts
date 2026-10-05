@@ -26,7 +26,15 @@ export const CASE_STUDY_FEED = "https://qpsrvmnmtozvailsyqqz.supabase.co/functio
 export const CASE_STUDY_REVALIDATE = 300;
 
 const Kpi = z.object({ n: z.string(), l: z.string() });
-const Point = z.object({ d: z.string(), p1: z.number(), vol: z.number().optional() });
+const Point = z.object({
+  d: z.string(), p1: z.number(), vol: z.number().optional(),
+  b3: z.number().optional(), b10: z.number().optional(), b20: z.number().optional(),
+});
+const AiRun = z.object({ d: z.string(), pc: z.number(), named: z.number(), cells: z.number() });
+const PromptCard = z.object({
+  q: z.string(),
+  engines: z.array(z.object({ e: z.string(), then: z.boolean().nullish(), now: z.boolean(), pos: z.number().nullish(), of: z.number().nullish() })),
+});
 const Pair = z.object({ l: z.string(), then: z.number(), now: z.number() });
 const Engine = z.object({ e: z.string(), then: z.number(), now: z.number(), of: z.number() });
 const Keyword = z.object({ k: z.string(), vol: z.number().nullish(), then: z.number().nullish(), now: z.number().nullish() });
@@ -54,6 +62,10 @@ const CaseStudy = z.object({
   compare: z.object({ kw: z.number(), rows: z.array(Pair) }).optional(),
   movers: z.array(Keyword).optional(),
   engines: z.object({ from: z.string(), to: z.string(), rows: z.array(Engine) }).optional(),
+  ai: z.object({ from: z.string(), to: z.string(), pc: z.array(z.number()), cells: z.number(), prompts: z.number() }).optional(),
+  aiRuns: z.array(AiRun).optional(),
+  prompts: z.array(PromptCard).optional(),
+  tracked: z.object({ kw: z.number().nullish(), prompts: z.number().nullish() }).optional(),
   method: z.string().optional(),
 });
 export type CaseStudy = z.infer<typeof CaseStudy>;

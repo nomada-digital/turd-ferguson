@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import TwoWays from "@/components/home/TwoWays";
 import { OG_IMAGE } from "@/config/og";
 import { ORG_REF, ld } from "@/config/schema";
 import { CARD, MICRO, SHELL, T } from "@/config/tokens";
@@ -93,6 +94,104 @@ function Chart({ series, metric = "p1", caption }: { series: { d: string; p1: nu
       </svg>
       <figcaption style={{ marginTop: "6px", fontSize: "13px", color: T.soft }}>{caption}</figcaption>
     </figure>
+  );
+}
+
+type Pt = { d: string; p1: number; b3?: number; b10?: number; b20?: number };
+
+/** Tracked keywords by position band, one reading a week - the dashboards' "search positions over time". */
+function BandChart({ series, kw }: { series: Pt[]; kw?: number | null }) {
+  const W = 640, H = 220, L = 34, B = 26, top = 12;
+  const tot = (p: Pt) => (p.b3 ?? 0) + (p.b10 ?? 0) + (p.b20 ?? 0);
+  const max = Math.max(1, ...series.map(tot));
+  const step = nice(max);
+  const yMax = Math.ceil((max * 1.08) / step) * step;   // headroom: the top band never touches the frame
+  const x = (i: number) => L + (i / Math.max(1, series.length - 1)) * (W - L - 8);
+  const y = (v: number) => top + (1 - v / yMax) * (H - top - B);
+  const layer = (lo: (p: Pt) => number, hi: (p: Pt) => number) =>
+    series.map((p, i) => `${x(i).toFixed(1)},${y(hi(p)).toFixed(1)}`).join(" ") + " " +
+    series.map((p, i) => `${x(i).toFixed(1)},${y(lo(p)).toFixed(1)}`).reverse().join(" ");
+  const a = (p: Pt) => p.b3 ?? 0, b = (p: Pt) => a(p) + (p.b10 ?? 0), c = (p: Pt) => b(p) + (p.b20 ?? 0);
+  const ticks = Array.from({ length: yMax / step + 1 }, (_, i) => i * step);
+  const first = series[0]!, last = series[series.length - 1]!;
+  const key = (o: number, t: string) => (
+    <span><span style={{ display: "inline-block", width: "10px", height: "10px", borderRadius: "3px", background: T.accent, opacity: o, marginRight: "6px" }} />{t}</span>
+  );
+  return (
+    <figure style={{ margin: 0 }}>
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img"
+        aria-label={`Tracked keywords in the top 20 by band: ${tot(first)} on ${longDate(first.d)}, ${tot(last)} on ${longDate(last.d)}, of which ${a(last)} in the top 3`}>
+        {ticks.map((t) => (
+          <g key={t}>
+            <line x1={L} x2={W - 8} y1={y(t)} y2={y(t)} stroke={T.line} strokeWidth="1" />
+            <text x={L - 8} y={y(t) + 4} textAnchor="end" fontSize="11" fill={T.soft}>{t}</text>
+          </g>
+        ))}
+        <polygon points={layer(b, c)} fill={T.accent} fillOpacity="0.22" />
+        <polygon points={layer(a, b)} fill={T.accent} fillOpacity="0.5" />
+        <polygon points={layer(() => 0, a)} fill={T.accent} fillOpacity="0.95" />
+        <text x={L} y={H - 6} fontSize="11" fill={T.soft}>{longDate(first.d)}</text>
+        <text x={W - 8} y={H - 6} fontSize="11" fill={T.soft} textAnchor="end">{longDate(last.d)}</text>
+      </svg>
+      <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", fontSize: "12px", color: T.soft, marginTop: "8px" }}>
+        {key(0.95, "Top 3")}{key(0.5, "4-10")}{key(0.22, "11-20")}
+      </div>
+      <figcaption style={{ marginTop: "6px", fontSize: "13px", color: T.soft }}>
+        {kw ? `How many of the ${kw} tracked keywords sit in the top 20, by band, one reading a week.` : "Tracked keywords in the top 20, by band, one reading a week."}
+      </figcaption>
+    </figure>
+  );
+}
+
+/** Share of the AI answers naming the brand, every full run in the window. */
+function AiLine({ runs }: { runs: { d: string; pc: number; cells: number }[] }) {
+  const W = 640, H = 180, L = 40, B = 26, top = 12;
+  const yMax = Math.min(100, Math.max(20, Math.ceil(Math.max(...runs.map((r) => r.pc)) / 10) * 10 + 10));
+  const x = (i: number) => L + (i / Math.max(1, runs.length - 1)) * (W - L - 8);
+  const y = (v: number) => top + (1 - v / yMax) * (H - top - B);
+  const ticks = Array.from({ length: yMax / 10 + 1 }, (_, i) => i * 10).filter((t) => t % (yMax > 50 ? 20 : 10) === 0);
+  const first = runs[0]!, last = runs[runs.length - 1]!;
+  return (
+    <figure style={{ margin: 0 }}>
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img"
+        aria-label={`AI answers naming the brand: ${first.pc}% on ${longDate(first.d)}, ${last.pc}% on ${longDate(last.d)}`}>
+        {ticks.map((t) => (
+          <g key={t}>
+            <line x1={L} x2={W - 8} y1={y(t)} y2={y(t)} stroke={T.line} strokeWidth="1" />
+            <text x={L - 8} y={y(t) + 4} textAnchor="end" fontSize="11" fill={T.soft}>{t}%</text>
+          </g>
+        ))}
+        <polyline points={runs.map((r, i) => `${x(i).toFixed(1)},${y(r.pc).toFixed(1)}`).join(" ")}
+          fill="none" stroke={T.accent} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+        {runs.map((r, i) => <circle key={r.d} cx={x(i)} cy={y(r.pc)} r="3" fill={T.accent} />)}
+        <text x={L} y={H - 6} fontSize="11" fill={T.soft}>{longDate(first.d)}</text>
+        <text x={W - 8} y={H - 6} fontSize="11" fill={T.soft} textAnchor="end">{longDate(last.d)}</text>
+      </svg>
+      <figcaption style={{ marginTop: "6px", fontSize: "13px", color: T.soft }}>
+        Share of ChatGPT, Perplexity, Gemini and Claude answers naming the brand, every full run.
+      </figcaption>
+    </figure>
+  );
+}
+
+/** One tracked prompt: what each engine said at the start and now. */
+function PromptCardView({ c }: { c: { q: string; engines: { e: string; then?: boolean | null; now: boolean; pos?: number | null; of?: number | null }[] } }) {
+  const mark = (v?: boolean | null) => (v == null ? "not asked yet" : v ? "named" : "not named");
+  return (
+    <div style={{ border: "1px solid " + T.line, borderRadius: "12px", padding: "16px 18px", background: T.surface }}>
+      <div style={{ fontSize: "14.5px", fontWeight: 600, color: T.ink }}>&ldquo;{c.q}&rdquo;</div>
+      <div style={{ marginTop: "10px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: "8px" }}>
+        {c.engines.map((e) => (
+          <div key={e.e} style={{ borderRadius: "10px", padding: "8px 10px", background: e.now ? T.wash : T.chip, border: "1px solid " + (e.now ? T.washLine : T.line) }}>
+            <div style={{ fontSize: "12.5px", fontWeight: 600, color: e.now ? T.accent : T.soft }}>{e.e}</div>
+            <div style={{ fontSize: "12px", color: T.soft, marginTop: "2px" }}>
+              {e.now ? `Named${e.pos ? ` #${e.pos}${e.of ? ` of ${e.of}` : ""}` : ""}` : "Not named"}
+            </div>
+            <div style={{ fontSize: "11.5px", color: T.faint, marginTop: "2px" }}>At the start: {mark(e.then)}</div>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -193,13 +292,37 @@ export default async function PublishedCaseStudy({ params }: { params: Promise<{
 
         {s.series && s.series.length > 1 && (
           <div className="ac-row" style={{ ...CARD, padding: "22px 24px" }}>
-            <Chart series={s.series} caption="Tracked keywords on Google page 1, one reading a week." />
+            {s.series.some((p) => p.b3 !== undefined)
+              ? <BandChart series={s.series} kw={s.compare?.kw ?? s.tracked?.kw} />
+              : <Chart series={s.series} caption="Tracked keywords on Google page 1, one reading a week." />}
           </div>
         )}
 
         {s.series && s.series.length > 1 && s.series.some((p) => (p.vol ?? 0) > 0) && (
           <div className="ac-row" style={{ ...CARD, padding: "22px 24px" }}>
             <Chart series={s.series} metric="vol" caption="Monthly searches for the keywords on Google page 1, one reading a week." />
+          </div>
+        )}
+
+        {s.ai && (
+          <div className="ac-row" style={{ ...CARD, padding: "22px 24px" }}>
+            <div style={MICRO}>AI visibility</div>
+            <div style={{ display: "flex", alignItems: "baseline", gap: "12px", flexWrap: "wrap", marginTop: "8px" }}>
+              <span style={{ fontSize: "34px", fontWeight: 700, letterSpacing: "-0.035em", color: T.ink }}>{s.ai.pc[0]}% to {s.ai.pc[1]}%</span>
+              <span style={{ fontSize: "14px", color: T.soft }}>
+                of AI answers naming {s.named ? s.client : "the brand"}, {longDate(s.ai.from)} to {longDate(s.ai.to)}, across {s.ai.prompts} tracked prompts{s.engines ? ` on ${s.engines.rows.length} engines` : ""}
+              </span>
+            </div>
+            {s.aiRuns && s.aiRuns.length > 1 && <div style={{ marginTop: "16px" }}><AiLine runs={s.aiRuns} /></div>}
+          </div>
+        )}
+
+        {!!s.prompts?.length && (
+          <div className="ac-row" style={{ ...CARD, padding: "22px 24px" }}>
+            <div style={{ ...MICRO, marginBottom: "12px" }}>What the engines say now, {longDate(s.ai?.to ?? s.to ?? s.published)}</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+              {s.prompts.map((c) => <PromptCardView key={c.q} c={c} />)}
+            </div>
           </div>
         )}
 
@@ -217,6 +340,11 @@ export default async function PublishedCaseStudy({ params }: { params: Promise<{
           {s.challenge && (<><H2>The starting point</H2><P>{s.challenge}</P></>)}
           {s.approach && (<><H2>What we did</H2><P>{s.approach}</P></>)}
           {s.results && (<><H2>What moved</H2><P>{s.results}</P></>)}
+        </div>
+
+        {/* How the work gets a brand into answers: the homepage's illustrative pair, its own heading and made-up brands. */}
+        <div className="ac-row" style={{ margin: "0 -24px" }}>
+          <TwoWays />
         </div>
 
         {!!s.keywords?.length && (
