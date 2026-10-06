@@ -28,6 +28,7 @@ import { type Facts, type PromptCta, pickPrompt, promptCopy } from "@/lib/tracki
 
 import { Chip } from "./Overview";
 import UpgradePrompt from "./UpgradePrompt";
+import { appPath } from "@/lib/app-host";
 
 /**
  * The Clusters page (BRIEF-3 T6 part 1, 30 Sep 2026; boards-3/Questions.dc.html):
@@ -266,7 +267,7 @@ export default function Clusters({
           <span style={{ ...HEAD, textAlign: "right" }}>{since ? `Position, vs ${since}` : "Position"}</span>
         </div>
         {shown.map((c) => (
-          <ClusterRow key={c.id} c={c} brand={brand} subject={subject} open={c.id === openId} toggle={href({ open: c.id === openId ? "" : c.id })} since={since} act={act} refill={toast?.done === "stopped" && toast.kind === "prompt" ? toast.id : null} rekey={rekey?.card === c.id ? rekey : null} redraft={redraft === c.id} rekeyed={toast?.done === "rekeyed" && toast.id === c.id} typed={prefill === c.id ? typed : null} openHref={`/app/${encodeURIComponent(slug)}/clusters/${encodeURIComponent(c.id)}?${new URLSearchParams(base)}`} />
+          <ClusterRow key={c.id} c={c} brand={brand} subject={subject} open={c.id === openId} toggle={href({ open: c.id === openId ? "" : c.id })} since={since} act={act} refill={toast?.done === "stopped" && toast.kind === "prompt" ? toast.id : null} rekey={rekey?.card === c.id ? rekey : null} redraft={redraft === c.id} rekeyed={toast?.done === "rekeyed" && toast.id === c.id} typed={prefill === c.id ? typed : null} openHref={appPath(`/${encodeURIComponent(slug)}/clusters/${encodeURIComponent(c.id)}?${new URLSearchParams(base)}`)} />
         ))}
         {shown.length === 0 ? (
           <div style={{ padding: "32px 24px", borderTop: `1px solid ${T.line}`, fontSize: "14px", color: T.soft }}>

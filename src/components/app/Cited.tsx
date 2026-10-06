@@ -14,6 +14,7 @@ import type { PlacementRow } from "@/lib/tracking/placement-figures";
 import { partialRunNote } from "@/lib/tracking/run-note";
 
 import DatePicker from "./DatePicker";
+import { appPath } from "@/lib/app-host";
 
 /**
  * Cited pages (R144, 1 Oct 2026; BRIEF-4 P4): the full page of the
@@ -96,7 +97,7 @@ export default function Cited({
     else q[k] = v;
     return `?${new URLSearchParams(q)}`;
   };
-  const appPath = `/app/${encodeURIComponent(slug)}`;
+  const clientPath = appPath(`/${encodeURIComponent(slug)}`);
   const shown = all ? rows : rows.slice(0, NAMED_TOP);
   const total = rows.reduce((s, p) => s + p.count, 0);
   const span = (p: { first: Day; last: Day }) => (p.first === p.last ? formatDay(p.first) : `${formatDay(p.first)} - ${formatDay(p.last)}`);
@@ -212,7 +213,7 @@ export default function Cited({
                         </Link>
                         {p.yours ? <span style={{ ...TAG, background: T.surface, border: `1px solid ${T.washLine}`, color: T.accent }}>Your site</span> : null}
                         {placed ? (
-                          <Link href={`${appPath}/placements?${new URLSearchParams({ ...base, cluster: placed })}`} className="app-tap" style={{ ...TAG, background: T.chip, border: `1px solid ${T.line}`, color: T.ink, textDecoration: "none" }}>
+                          <Link href={`${clientPath}/placements?${new URLSearchParams({ ...base, cluster: placed })}`} className="app-tap" style={{ ...TAG, background: T.chip, border: `1px solid ${T.line}`, color: T.ink, textDecoration: "none" }}>
                             Placement
                             <span className="sr-only">{` on ${p.page}`}</span>
                           </Link>
@@ -240,7 +241,7 @@ export default function Cited({
                             <li key={q.id} style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: "8px 16px", flexWrap: "wrap", padding: "8px 0", borderTop: `1px solid ${T.hair}` }}>
                               <span style={{ display: "flex", flexDirection: "column", gap: "2px", minWidth: 0, flex: "1 1 320px" }}>
                                 {w ? (
-                                  <Link href={`${appPath}/clusters/${encodeURIComponent(w.clusterId)}?${new URLSearchParams({ ...base, prompt: String(w.index) })}`} style={{ fontSize: "14px", fontWeight: 600, color: T.ink, textDecoration: "none", overflowWrap: "anywhere" }}>
+                                  <Link href={`${clientPath}/clusters/${encodeURIComponent(w.clusterId)}?${new URLSearchParams({ ...base, prompt: String(w.index) })}`} style={{ fontSize: "14px", fontWeight: 600, color: T.ink, textDecoration: "none", overflowWrap: "anywhere" }}>
                                     {text.get(q.id) ?? "A stopped prompt"}
                                   </Link>
                                 ) : (

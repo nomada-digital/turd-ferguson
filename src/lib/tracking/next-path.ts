@@ -12,11 +12,26 @@
  */
 export const NEXT_MAX = 512;
 
+import { appPath } from "../app-host.ts";
+
 export function safeNext(raw: unknown): string | null {
   if (typeof raw !== "string" || !raw || raw.length > NEXT_MAX) return null;
-  if (!raw.startsWith("/app/")) return null;
+  /**
+   * M1 (5 Oct 2026): on the dashboard's own host the same page is
+   * `/tallyroo` rather than `/app/tallyroo`, so both spellings are read and
+   * the rest of the rule is applied to whichever arrived.
+   *
+   * The unprefixed form is only a dashboard path when the dashboard has its
+   * own host. On the marketing host `/pricing` is a marketing page, and
+   * accepting it here would turn `next` into an open redirect around the
+   * site. A bare `/app` or `/` is the root, not a page, so neither is a
+   * target.
+   */
+  const own = appPath("") === "/";
+  const bare = raw.startsWith("/app/") ? raw.slice(4) : own ? raw : null;
+  if (bare === null || !bare.startsWith("/") || bare === "/" || bare === "/app") return null;
   if (raw.includes("//") || raw.includes("\\") || raw.includes(":") || /[\u0000-\u001f\u007f]/.test(raw)) return null;
-  if (/^\/app\/(login|auth)(?:[/?#]|$)/.test(raw)) return null;
+  if (/^\/(login|auth)(?:[/?#]|$)/.test(bare)) return null;
   return raw;
 }
 
@@ -28,5 +43,5 @@ export function loginHref(path: string, search: Record<string, string | string[]
   }
   const qs = q.toString();
   const next = safeNext(qs ? `${path}?${qs}` : path) ?? safeNext(path);
-  return next ? `/app/login?next=${encodeURIComponent(next)}` : "/app/login";
+  return next ? `${appPath("/login")}?next=${encodeURIComponent(next)}` : appPath("/login");
 }

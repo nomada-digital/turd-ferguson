@@ -14,6 +14,7 @@ import { fixtureMode } from "@/lib/tracking/fixture-mode";
 import { trackingRepo } from "@/lib/tracking/repo";
 import { needsSetup, setupOutstanding, setupPath } from "@/lib/tracking/setup-landing";
 import { refuseRole } from "@/lib/tracking/stop";
+import { appPath } from "@/lib/app-host";
 
 export const dynamic = "force-dynamic";
 
@@ -41,7 +42,7 @@ export default async function ClientDashboard({
 }) {
   const repo = trackingRepo();
   const email = await repo.sessionEmail();
-  if (!email) redirect(loginHref(`/app/${(await params).client}`, await searchParams));
+  if (!email) redirect(loginHref(appPath(`/${(await params).client}`), await searchParams));
   const { client: slug } = await params;
   const clients = await repo.clientsFor(email);
   const client = clients.find((c) => c.slug === slug);
@@ -91,7 +92,7 @@ export default async function ClientDashboard({
           compareMode={compare}
           data={data}
           selected={typeof sp.cluster === "string" ? sp.cluster : undefined}
-          clustersPath={`/app/${slug}/clusters`}
+          clustersPath={appPath(`/${slug}/clusters`)}
           reportPath={`/api/app/${encodeURIComponent(slug)}/report`}
           clusterLimit={client.cluster_limit ?? CLUSTER_BASE}
           placements={placements}

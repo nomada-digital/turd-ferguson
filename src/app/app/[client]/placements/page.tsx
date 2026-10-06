@@ -12,6 +12,7 @@ import { pickKind } from "@/lib/tracking/placement-figures";
 import { placementsScreen } from "@/lib/tracking/placements-screen";
 import { rangeQuery } from "@/lib/tracking/overview-data";
 import { trackingRepo } from "@/lib/tracking/repo";
+import { appPath } from "@/lib/app-host";
 
 export const dynamic = "force-dynamic";
 
@@ -24,7 +25,7 @@ export const runtime = "nodejs";
 
 /**
  * One client's placements (T13, R97 part 3, 30 Sep 2026; BRIEF-2 T13 route
- * `/app/[client]/placements?cluster=&from=&to=`). Same membership rule as the
+ * appPath(`/[client]/placements?cluster=&from=&to=`)). Same membership rule as the
  * overview. Open to a client on mentioned or above, and to any client with a
  * placement logged (a row Nomada logged is the client's to see); anyone else
  * gets a 404. What it reads is placements-screen.ts, shared with the CSV.
@@ -38,7 +39,7 @@ export default async function ClientPlacements({
 }) {
   const repo = trackingRepo();
   const email = await repo.sessionEmail();
-  if (!email) redirect(loginHref(`/app/${(await params).client}/placements`, await searchParams));
+  if (!email) redirect(loginHref(appPath(`/${(await params).client}/placements`), await searchParams));
   const { client: slug } = await params;
   const clients = await repo.clientsFor(email);
   const client = clients.find((c) => c.slug === slug);
@@ -51,7 +52,7 @@ export default async function ClientPlacements({
   if (!screen) notFound();
   const { range } = screen;
   const keep: Record<string, string> = screen.stated ? { from: range.from, to: range.to } : {};
-  const href = (c: string) => `/app/${slug}/placements?${new URLSearchParams({ cluster: c, ...keep })}`;
+  const href = (c: string) => appPath(`/${slug}/placements?${new URLSearchParams({ cluster: c, ...keep })}`);
   const csvHref = `/api/app/${encodeURIComponent(slug)}/report?${new URLSearchParams({ kind: "placements", cluster: screen.cluster.id, ...keep })}`;
 
   return (
@@ -73,7 +74,7 @@ export default async function ClientPlacements({
           kind={pickKind(typeof sp.type === "string" ? sp.type : null)}
           sel={typeof sp.sel === "string" && screen.view.rows.some((r) => r.id === sp.sel) ? sp.sel : null}
           query={{ cluster: screen.cluster.id, ...keep }}
-          path={`/app/${slug}/placements`}
+          path={appPath(`/${slug}/placements`)}
           csvHref={csvHref}
         />
       </div>

@@ -12,6 +12,8 @@ import { fixtureCheck } from "@/lib/tracking/fixture-writes";
 import { clientsFor, sessionEmail } from "@/lib/tracking/member";
 import { writableFixture } from "@/lib/tracking/repo";
 import { readKept, refuseRole } from "@/lib/tracking/stop";
+import { dashPath } from "@/lib/tracking/app-redirect";
+import { appPath } from "@/lib/app-host";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -48,7 +50,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ client: string
     const q = new URLSearchParams({ ...(onClusters ? { ...view, open: card, rk: card } : card ? { card } : { ...view, add: "1" }), ...(raw ? { kw: raw } : {}), ...(c ? verdictQuery(c) : {}), ...(sig ? { sig } : {}) });
     // R151 (3 Oct 2026): a refusal lands without the #card fragment - a fragment target stops the browser running autofocus, and the refused field scrolls itself into view when it takes focus.
     const at = c?.ok === false ? "" : `#card-${encodeURIComponent(card)}`;
-    const to = card && !onClusters ? `/app/${encodeURIComponent(slug)}/setup?${q}${at}` : `/app/${encodeURIComponent(slug)}/clusters?${q}`;
+    const to = card && !onClusters ? appPath(`/${encodeURIComponent(slug)}/setup?${q}${at}`) : appPath(`/${encodeURIComponent(slug)}/clusters?${q}`);
     return NextResponse.redirect(new URL(to, req.url), 303);
   };
   if (!raw) return back(null);
@@ -62,7 +64,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ client: string
   }
 
   const email = await sessionEmail();
-  if (!email) return NextResponse.redirect(new URL("/app/login", req.url), 303);
+  if (!email) return NextResponse.redirect(new URL(dashPath(req, "/login"), req.url), 303);
   const client = (await clientsFor(email)).find((c) => c.slug === slug);
   if (!client) return NextResponse.json({ error: "Not found." }, { status: 404 });
   if (refuseRole(client.role)) return NextResponse.json({ error: "Viewers cannot add clusters." }, { status: 403 });

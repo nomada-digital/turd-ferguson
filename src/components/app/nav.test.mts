@@ -103,7 +103,11 @@ function inPageLinks(): { file: string; route: string }[] {
   const out: { file: string; route: string }[] = [];
   for (const f of dirs.flatMap(walk).filter((f) => /\.tsx?$/.test(f))) {
     const text = readFileSync(f, "utf8");
-    for (const m of text.matchAll(/`\/app\/\$\{[^}]+\}((?:\/(?:[a-z-]+|\$\{[^}]+\}))*)/g)) {
+    // M1 (6 Oct 2026): a dashboard link is appPath(`/${slug}/...`) rather
+    // than a `/app/${slug}/...` literal, because the prefix comes off on
+    // app.alwayscited.com. The route this sweep reads is the part after the
+    // slug, which has not moved.
+    for (const m of text.matchAll(/appPath\(`\/\$\{[^}]+\}((?:\/(?:[a-z-]+|\$\{[^}]+\}))*)/g)) {
       const route = m[1].replace(/\$\{[^}]+\}/g, "[]");
       out.push({ file: relative(ROOT, f), route });
     }
@@ -126,7 +130,7 @@ test("(c) every in-page /app/<client>/... link points at a built route", () => {
 test("(c) R132: Overview cluster cards and prompt rows open the one-cluster page", () => {
   const src = readFileSync(join(ROOT, "src", "components", "app", "Overview.tsx"), "utf8");
   const page = readFileSync(join(CLIENT, "page.tsx"), "utf8");
-  assert.match(page, /clustersPath=\{`\/app\/\$\{slug\}\/clusters`\}/, "the Overview is handed the Clusters route");
+  assert.match(page, /clustersPath=\{appPath\(`\/\$\{slug\}\/clusters`\)\}/, "the Overview is handed the Clusters route");
   assert.ok(ROUTES.includes("/clusters/[]"), "the one-cluster route is built");
   // `${clustersPath}/${encodeURIComponent(id)}?...` is /clusters/[]: the chart's Open cluster and R132's detailHref.
   const detail = src.match(/`\$\{clustersPath\}\/\$\{encodeURIComponent\([^)]+\)\}\?/g) ?? [];

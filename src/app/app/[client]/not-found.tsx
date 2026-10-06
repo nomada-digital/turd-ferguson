@@ -7,6 +7,7 @@ import BrandMark from "@/components/BrandMark";
 import { NAV, navHref } from "@/components/app/nav";
 import TierName from "@/components/TierName";
 import { MICRO, T } from "@/config/tokens";
+import { appPath } from "@/lib/app-host";
 
 /**
  * The dashboard's 404 (R173 pass 3, DS35, 2 Oct 2026). A page under
@@ -21,7 +22,7 @@ import { MICRO, T } from "@/config/tokens";
  */
 export default function DashboardNotFound() {
   const { client } = useParams<{ client: string }>();
-  const overview = navHref("Overview", client) ?? "/app";
+  const overview = navHref("Overview", client) ?? appPath("");
   const others = NAV.filter((n) => n !== "Overview").flatMap((item) => {
     const href = navHref(item, client);
     return href ? [{ item, href }] : [];

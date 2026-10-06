@@ -63,8 +63,12 @@ test("every /app/[client] page redirects signed-out visitors through loginHref",
   assert.ok(pages.length >= 8, `found ${pages.length} pages, floor 8`);
   for (const p of pages) {
     const s = readFileSync(p, "utf8");
-    assert.ok(!s.includes('redirect("/app/login")'), `${p} drops the page it was asked for`);
-    assert.match(s, /if \(!email\) redirect\(loginHref\(`\/app\/\$\{\(await params\)\.client\}/, `${p} does not carry next`);
+    assert.ok(!s.includes('redirect(appPath("/login"))'), `${p} drops the page it was asked for`);
+    // M1 (6 Oct 2026): the page the visitor was on is now built through
+    // appPath(), because on app.alwayscited.com it is `/tallyroo/named` and
+    // on the marketing host `/app/tallyroo/named`. The rule is unchanged -
+    // every page that refuses a signed-out visitor carries where they were.
+    assert.match(s, /if \(!email\) redirect\(loginHref\(appPath\(`\/\$\{\(await params\)\.client\}/, `${p} does not carry next`);
   }
 });
 

@@ -9,6 +9,7 @@ import { TOKEN_CHARS, isTokenShape } from "@/lib/tracking/session";
 
 import AutoSubmit from "./AutoSubmit";
 import SendNewLink from "./SendNewLink";
+import { appPath } from "@/lib/app-host";
 
 export const dynamic = "force-dynamic";
 
@@ -54,7 +55,7 @@ export default async function AppAuth({ searchParams }: { searchParams: Promise<
           {failed === "1" ? (
             <p role="alert" style={{ margin: "0 0 24px", color: T.badFg, fontSize: "15px" }}>
               That did not open your dashboard. Try again, or{" "}
-              <a href="/app/login" style={{ color: T.accent, fontWeight: 600 }}>
+              <a href={appPath("/login")} style={{ color: T.accent, fontWeight: 600 }}>
                 ask for a new link
               </a>
               .
@@ -75,7 +76,7 @@ export default async function AppAuth({ searchParams }: { searchParams: Promise<
       ) : (
         // R148 pass 6 (1 Oct 2026): was a 21px text link, the only way on; now a 48px button-shaped link like "Open my dashboard".
         <a
-          href="/app/login"
+          href={appPath("/login")}
           style={{ display: "inline-block", padding: "12px 16px", borderRadius: "10px", background: T.accent, color: "#ffffff", fontWeight: 600, fontSize: "15px", textDecoration: "none" }}
         >
           Ask for a new link

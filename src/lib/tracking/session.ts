@@ -18,7 +18,24 @@ export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 export const LOGIN_PER_EMAIL_PER_HOUR = 5;
 export const LOGIN_PER_IP_PER_HOUR = 20;
 
-export const SESSION_COOKIE = "ac_session";
+/**
+ * The session cookie (M1, 5 Oct 2026).
+ *
+ * `__Host-` is a prefix the browser enforces rather than a name we chose: it
+ * refuses the cookie unless it is Secure, path `/`, and carries no Domain -
+ * which is exactly how `sessionCookie()` below has always set it. The reason
+ * to ask for the guarantee now is the move to `app.alwayscited.com`: a cookie
+ * without the prefix can be written by any sibling host on the registrable
+ * domain, and the dashboard is about to have siblings.
+ *
+ * The old name is read and cleared on sign-out, so a member holding one is
+ * signed out once rather than left with a cookie nothing looks at. Two live
+ * members and four unexpired sessions on 5 Oct 2026.
+ */
+export const SESSION_COOKIE = "__Host-ac_session";
+
+/** What the cookie was called before the host move. Read nowhere; cleared on sign-out. */
+export const LEGACY_SESSION_COOKIE = "ac_session";
 
 /** What the login page always says, member or not - it never discloses membership. */
 export const LOGIN_SENT = "If that address has access, we've sent a link.";

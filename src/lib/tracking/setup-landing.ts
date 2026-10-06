@@ -13,7 +13,9 @@
  */
 export const SETUP_CONFIRMED_EVENT = "setup_confirmed";
 
-export const setupPath = (slug: string) => `/app/${slug}/setup`;
+import { appPath } from "../app-host.ts";
+
+export const setupPath = (slug: string) => appPath(`/${slug}/setup`);
 
 export function setupConfirmed(events: readonly { event: string }[]): boolean {
   return events.some((e) => e.event === SETUP_CONFIRMED_EVENT);
@@ -49,11 +51,11 @@ export function landingAfterAuth(o: {
   /** The member's clients in the order /app lists them; null when the read failed. */
   clients: readonly { slug: string; confirmed: boolean }[] | null;
 }): string {
-  if (o.clients === null) return o.next ?? "/app";
-  if (!o.clients.length) return "/app/login?access=none";
+  if (o.clients === null) return o.next ?? appPath("");
+  if (!o.clients.length) return appPath("/login?access=none");
   const first = o.clients[0]!;
   if (!first.confirmed) return setupPath(first.slug);
-  return o.next ?? `/app/${first.slug}`;
+  return o.next ?? appPath(`/${first.slug}`);
 }
 
 /** The prompts a setup card shows: the scan's five angles, one each (signup.ts PROMPTS_PER_CLUSTER). */

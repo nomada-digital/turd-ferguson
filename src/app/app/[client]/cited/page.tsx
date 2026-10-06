@@ -12,6 +12,7 @@ import { CLUSTER_BASE } from "@/lib/tracking/limits";
 import { rangeFrom, rangeQuery } from "@/lib/tracking/overview-data";
 import { placedTier } from "@/lib/tracking/placement-figures";
 import { trackingRepo } from "@/lib/tracking/repo";
+import { appPath } from "@/lib/app-host";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +27,7 @@ export const runtime = "nodejs";
 const openPage = (raw: string | null) => (raw && raw.length <= 300 && /^[a-z0-9.-]+\.[a-z0-9-]+(\/\S*)?$/.test(raw) ? raw : null);
 
 /**
- * One client's Cited pages (R144, BRIEF-4 P4: `/app/[client]/cited`), for the
+ * One client's Cited pages (R144, BRIEF-4 P4: appPath(`/[client]/cited`)), for the
  * range the URL states. Same membership rule as the overview. `?cluster=`
  * must be one of this client's clusters, `?engine=` one of its tier's
  * engines and `?kind=` yours or others; anything else is All.
@@ -34,7 +35,7 @@ const openPage = (raw: string | null) => (raw && raw.length <= 300 && /^[a-z0-9.
 export default async function ClientCited({ params, searchParams }: { params: Promise<{ client: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const repo = trackingRepo();
   const email = await repo.sessionEmail();
-  if (!email) redirect(loginHref(`/app/${(await params).client}/cited`, await searchParams));
+  if (!email) redirect(loginHref(appPath(`/${(await params).client}/cited`), await searchParams));
   const { client: slug } = await params;
   const clients = await repo.clientsFor(email);
   const client = clients.find((c) => c.slug === slug);

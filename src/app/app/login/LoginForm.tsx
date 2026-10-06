@@ -6,6 +6,7 @@ import { useRef, useState } from "react";
 import { SCAN_LIMITS } from "@/config/contact";
 import { T } from "@/config/tokens";
 import { isPlausibleEmail, normalizeEmail } from "@/lib/email-address";
+import { appPath } from "@/lib/app-host";
 
 /** The route's refusal, word for word, so the browser and the server say the same thing. */
 const BAD_EMAIL = "That email does not look right.";
@@ -53,7 +54,7 @@ export default function LoginForm({ next, refused, again }: { next?: string; ref
       if (body.error === "bad_email") refuse(body.message ?? BAD_EMAIL);
       // R151 (3 Oct 2026): a sent link moves to the page's sent state, as the
       // form does without script, and the address is never in the URL.
-      else if (body.ok) router.replace(`/app/login?${new URLSearchParams(next ? { sent: "1", next } : { sent: "1" })}`);
+      else if (body.ok) router.replace(appPath(`/login?${new URLSearchParams(next ? { sent: "1", next } : { sent: "1" })}`));
       else setMessage(body.message ?? "Something went wrong. Please try again.");
     } catch {
       setMessage("Something went wrong. Please try again.");

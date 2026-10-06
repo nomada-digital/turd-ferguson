@@ -20,6 +20,7 @@ import { trackingRepo } from "@/lib/tracking/repo";
 import { slotRefusal } from "@/lib/tracking/slot";
 import { BULK_ID, BULK_MAX, refuseRole } from "@/lib/tracking/stop";
 import { HIDE_DAYS, hiddenUntil } from "@/lib/tracking/upgrade-prompts";
+import { appPath } from "@/lib/app-host";
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +32,7 @@ export const metadata: Metadata = {
 export const runtime = "nodejs";
 
 /**
- * One client's Clusters page (BRIEF-3 T6, route 8: `/app/[client]/clusters`),
+ * One client's Clusters page (BRIEF-3 T6, route 8: appPath(`/[client]/clusters`)),
  * for the range the URL states. Same membership rule as the overview: a slug
  * the session is not a member of is a 404.
  */
@@ -44,7 +45,7 @@ export default async function ClientClusters({
 }) {
   const repo = trackingRepo();
   const email = await repo.sessionEmail();
-  if (!email) redirect(loginHref(`/app/${(await params).client}/clusters`, await searchParams));
+  if (!email) redirect(loginHref(appPath(`/${(await params).client}/clusters`), await searchParams));
   const { client: slug } = await params;
   const clients = await repo.clientsFor(email);
   const client = clients.find((c) => c.slug === slug);

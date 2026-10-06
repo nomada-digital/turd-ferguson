@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
+import { appPath } from "@/lib/app-host";
 import { trackingRepo } from "@/lib/tracking/repo";
 
 export const dynamic = "force-dynamic";
@@ -16,8 +17,8 @@ export const runtime = "nodejs";
 export default async function AppHome() {
   const repo = trackingRepo();
   const email = await repo.sessionEmail();
-  if (!email) redirect("/app/login");
+  if (!email) redirect(appPath("/login"));
   const clients = await repo.clientsFor(email);
-  if (!clients.length) redirect("/app/login?access=none");
-  redirect(`/app/${clients[0]!.slug}`);
+  if (!clients.length) redirect(appPath("/login?access=none"));
+  redirect(appPath(`/${clients[0]!.slug}`));
 }

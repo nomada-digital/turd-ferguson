@@ -20,6 +20,7 @@ import { placedTier } from "@/lib/tracking/placement-figures";
 import { trackingRepo } from "@/lib/tracking/repo";
 import { confirmLabel, setupCards } from "@/lib/tracking/setup-landing";
 import { refuseRole } from "@/lib/tracking/stop";
+import { appPath } from "@/lib/app-host";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -65,7 +66,7 @@ export default async function ClientSetup({
   const repo = trackingRepo();
   const email = await repo.sessionEmail();
   const sp = await searchParams;
-  if (!email) redirect(loginHref(`/app/${(await params).client}/setup`, sp));
+  if (!email) redirect(loginHref(appPath(`/${(await params).client}/setup`), sp));
   const { client: slug } = await params;
   const clients = await repo.clientsFor(email);
   const client = clients.find((c) => c.slug === slug);
@@ -182,7 +183,7 @@ export default async function ClientSetup({
           {ungrouped ? (
             <>
               {`No clusters yet. Your ${ungrouped} prompt${ungrouped === 1 ? " is" : "s are"} asked every morning, in no cluster. `}
-              <a href={`/app/${encodeURIComponent(slug)}/clusters`} style={{ color: T.accent, fontWeight: 600 }}>
+              <a href={appPath(`/${encodeURIComponent(slug)}/clusters`)} style={{ color: T.accent, fontWeight: 600 }}>
                 Group them on Clusters
               </a>
             </>
@@ -198,7 +199,7 @@ export default async function ClientSetup({
       <h2 style={{ fontSize: "22px", fontWeight: 700, margin: "0 0 12px" }}>Review and confirm</h2>
       {confirmed ? (
         <p style={{ margin: "0 0 40px", fontSize: "15px", lineHeight: 1.7, color: T.soft }}>
-          Setup is confirmed. <a href={`/app/${encodeURIComponent(slug)}`} style={{ color: T.accent, fontWeight: 600 }}>Go to your dashboard</a>
+          Setup is confirmed. <a href={appPath(`/${encodeURIComponent(slug)}`)} style={{ color: T.accent, fontWeight: 600 }}>Go to your dashboard</a>
         </p>
       ) : canWrite ? (
         <form method="post" action={`/api/app/${encodeURIComponent(slug)}/setup`} style={{ marginBottom: "40px" }}>

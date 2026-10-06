@@ -15,6 +15,7 @@ import { noteState } from "@/lib/tracking/note";
 import { rangeFrom, rangeQuery } from "@/lib/tracking/overview-data";
 import { placedTier } from "@/lib/tracking/placement-figures";
 import { trackingRepo } from "@/lib/tracking/repo";
+import { appPath } from "@/lib/app-host";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +27,7 @@ export const metadata: Metadata = {
 export const runtime = "nodejs";
 
 /**
- * One cluster (BRIEF-3 T7, route 8: `/app/[client]/clusters/[cluster]?prompt=0-4`),
+ * One cluster (BRIEF-3 T7, route 8: appPath(`/[client]/clusters/[cluster]?prompt=0-4`)),
  * for the range the URL states. Same membership rule as the overview; a
  * cluster id that is not this client's, or not in range, is a 404 too.
  */
@@ -39,7 +40,7 @@ export default async function ClientCluster({
 }) {
   const repo = trackingRepo();
   const email = await repo.sessionEmail();
-  if (!email) redirect(loginHref(`/app/${(await params).client}/clusters/${(await params).cluster}`, await searchParams));
+  if (!email) redirect(loginHref(appPath(`/${(await params).client}/clusters/${(await params).cluster}`), await searchParams));
   const { client: slug, cluster: id } = await params;
   const clients = await repo.clientsFor(email);
   const client = clients.find((c) => c.slug === slug);
@@ -86,7 +87,7 @@ export default async function ClientCluster({
           noteState={noteState(sp.note)}
           noteAction={`/api/app/${encodeURIComponent(slug)}/note`}
           engine={engineTab(sp.engine, engines)}
-          clustersPath={`/app/${slug}/clusters`}
+          clustersPath={appPath(`/${slug}/clusters`)}
         />
       </div>
     </div>

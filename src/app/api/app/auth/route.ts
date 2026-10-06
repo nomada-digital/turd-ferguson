@@ -6,6 +6,8 @@ import { safeNext } from "@/lib/tracking/next-path";
 import { loadSetupConfirmed } from "@/lib/tracking/setup-data";
 import { landingAfterAuth, needsSetup } from "@/lib/tracking/setup-landing";
 import { SESSION_TTL_MS, hashToken, isTokenShape, newToken, sessionCookie } from "@/lib/tracking/session";
+import { dashPath } from "@/lib/tracking/app-redirect";
+import { appPath } from "@/lib/app-host";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,13 +26,13 @@ export const dynamic = "force-dynamic";
 export async function POST(req: Request) {
   const form = await req.formData().catch(() => null);
   const token = form?.get("token");
-  if (!isTokenShape(token)) return NextResponse.redirect(new URL("/app/login?link=expired", req.url), 303);
+  if (!isTokenShape(token)) return NextResponse.redirect(new URL(dashPath(req, "/login?link=expired"), req.url), 303);
   // R163: back to the link's own page, which reads the token and says spent
   // (with a one-click new link) or, with failed=1, shows the button rather
   // than submitting itself again.
   const next = safeNext(form?.get("next"));
   const back = next ? `&next=${encodeURIComponent(next)}` : "";
-  const failed = NextResponse.redirect(new URL(`/app/auth?token=${token}&failed=1${back}`, req.url), 303);
+  const failed = NextResponse.redirect(new URL(appPath(`/auth?token=${token}&failed=1${back}`), req.url), 303);
 
   const db = supabaseAdmin();
   const { data: claimed, error } = await db

@@ -7,6 +7,7 @@ import BrandMark from "@/components/BrandMark";
 import { NAV, navHref } from "@/components/app/nav";
 import TierName from "@/components/TierName";
 import { CARD, MICRO, T } from "@/config/tokens";
+import { appPath } from "@/lib/app-host";
 
 /**
  * The dashboard's error boundary (R151, 1 Oct 2026). Before it, a read that
@@ -25,7 +26,7 @@ import { CARD, MICRO, T } from "@/config/tokens";
  */
 export default function DashboardError({ error, retry }: { error: Error & { digest?: string }; retry: () => void }) {
   const { client } = useParams<{ client: string }>();
-  const overview = navHref("Overview", client) ?? "/app";
+  const overview = navHref("Overview", client) ?? appPath("");
   const others = NAV.filter((n) => n !== "Overview").flatMap((item) => {
     const href = navHref(item, client);
     return href ? [{ item, href }] : [];

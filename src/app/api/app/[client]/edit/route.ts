@@ -9,6 +9,7 @@ import { clientsFor, sessionEmail } from "@/lib/tracking/member";
 import { writeFixture } from "@/lib/tracking/repo";
 import { slotWhyOf } from "@/lib/tracking/slot";
 import { readStopForm, stopReturn } from "@/lib/tracking/stop";
+import { dashPath } from "@/lib/tracking/app-redirect";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -39,7 +40,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ client: string
   }
 
   const email = await sessionEmail();
-  if (!email) return NextResponse.redirect(new URL("/app/login", req.url), 303);
+  if (!email) return NextResponse.redirect(new URL(dashPath(req, "/login"), req.url), 303);
   const client = (await clientsFor(email)).find((c) => c.slug === slug);
   if (!client) return NextResponse.json({ error: "Not found." }, { status: 404 });
 

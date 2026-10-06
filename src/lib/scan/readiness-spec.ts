@@ -76,6 +76,11 @@ export const NOT_REQUIRED: Record<string, string> = {
   VERCEL_GIT_COMMIT_SHA: "set by the platform",
   VERCEL_GIT_COMMIT_REF: "set by the platform",
   NEXT_PUBLIC_SITE_URL: "falls back to the canonical origin in config/schema.ts, which is the real value",
+  // M1 (6 Oct 2026): the dashboard's own host. Unset is the behaviour the
+  // site has always had - every path under /app, on the marketing host - so
+  // nothing is unready without it, and it is deliberately absent until the
+  // domain is added in Vercel (D1/D2 of the host-move brief).
+  APP_HOST: "optional: unset means the dashboard stays at /app on the marketing host",
 };
 
 /**

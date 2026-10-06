@@ -12,6 +12,7 @@ import { rangeFrom, rangeQuery } from "@/lib/tracking/overview-data";
 import { placedTier } from "@/lib/tracking/placement-figures";
 import { monthFigures, reportMonths } from "@/lib/tracking/report-months";
 import { trackingRepo } from "@/lib/tracking/repo";
+import { appPath } from "@/lib/app-host";
 
 export const dynamic = "force-dynamic";
 
@@ -23,7 +24,7 @@ export const metadata: Metadata = {
 export const runtime = "nodejs";
 
 /**
- * One client's Reports (R145, BRIEF-4 P5: `/app/[client]/reports`). Same
+ * One client's Reports (R145, BRIEF-4 P5: appPath(`/[client]/reports`)). Same
  * membership rule as the overview. The picked range (`from/to`) sets the
  * download links only, so its picker has no compare control (DS26); the monthly cards are read from one load
  * covering every month since tracking started, each cut to its own range.
@@ -31,7 +32,7 @@ export const runtime = "nodejs";
 export default async function ClientReports({ params, searchParams }: { params: Promise<{ client: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const repo = trackingRepo();
   const email = await repo.sessionEmail();
-  if (!email) redirect(loginHref(`/app/${(await params).client}/reports`, await searchParams));
+  if (!email) redirect(loginHref(appPath(`/${(await params).client}/reports`), await searchParams));
   const { client: slug } = await params;
   const clients = await repo.clientsFor(email);
   const client = clients.find((c) => c.slug === slug);

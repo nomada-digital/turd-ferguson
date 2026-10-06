@@ -12,6 +12,8 @@ import { writeFixture } from "@/lib/tracking/repo";
 import { slotWhyOf } from "@/lib/tracking/slot";
 import { readKept } from "@/lib/tracking/stop";
 import { recordUsage } from "@/lib/tracking/usage-record";
+import { dashPath } from "@/lib/tracking/app-redirect";
+import { appPath } from "@/lib/app-host";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,7 +29,7 @@ export const dynamic = "force-dynamic";
  */
 export async function POST(req: Request, ctx: { params: Promise<{ client: string }> }) {
   const { client: slug } = await ctx.params;
-  const page = `/app/${encodeURIComponent(slug)}/clusters`;
+  const page = appPath(`/${encodeURIComponent(slug)}/clusters`);
   // DS15 (2 Oct 2026): the Add panel's action carries the page's range, filter and search; the toast's keys win.
   const view = readKept((k) => new URL(req.url).searchParams.get(k), APP_LIMITS.search);
   const back = (q: Record<string, string>) => NextResponse.redirect(new URL(`${page}?${new URLSearchParams({ ...view, ...q })}`, req.url), 303);
@@ -50,7 +52,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ client: string
   }
 
   const email = await sessionEmail();
-  if (!email) return NextResponse.redirect(new URL("/app/login", req.url), 303);
+  if (!email) return NextResponse.redirect(new URL(dashPath(req, "/login"), req.url), 303);
   const client = (await clientsFor(email)).find((c) => c.slug === slug);
   if (!client) return NextResponse.json({ error: "Not found." }, { status: 404 });
 

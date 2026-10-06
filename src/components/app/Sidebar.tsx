@@ -10,6 +10,7 @@ import { ENGINE_SPECS, type Engine } from "@/lib/scan/engines";
 import { KEYWORDS_PER_CLUSTER, PROMPTS_PER_CLUSTER } from "@/lib/tracking/limits";
 
 import { CLUSTER_NAV, CLUSTER_TABS, NAV, PLACEMENTS_ITEM, TABS, navHref } from "./nav";
+import { appPath } from "@/lib/app-host";
 
 const WORDS = ["no", "one", "two", "three", "four", "five"];
 
@@ -178,7 +179,7 @@ export default function Sidebar({
             </summary>
             <nav aria-label="Switch client" style={{ position: "absolute", right: 0, top: "calc(100% + 6px)", zIndex: 30, minWidth: "220px", maxWidth: "calc(100vw - 32px)", display: "grid", padding: "6px", background: T.surface, border: `1px solid ${T.line}`, borderRadius: "12px", boxSizing: "border-box" }}>
               {others.map((c) => (
-                <a key={c.slug} href={`/app/${c.slug}`} style={{ display: "flex", alignItems: "center", gap: "8px", minHeight: "44px", padding: "0 10px", borderRadius: "8px", fontSize: "14px", fontWeight: 600, color: T.ink, textDecoration: "none", overflowWrap: "anywhere" }}>
+                <a key={c.slug} href={appPath(`/${c.slug}`)} style={{ display: "flex", alignItems: "center", gap: "8px", minHeight: "44px", padding: "0 10px", borderRadius: "8px", fontSize: "14px", fontWeight: 600, color: T.ink, textDecoration: "none", overflowWrap: "anywhere" }}>
                   <Initial name={c.brand ?? c.domain} size={22} />
                   {c.brand ?? c.domain}
                 </a>
@@ -235,7 +236,7 @@ export default function Sidebar({
           {others.length ? (
             <nav aria-label="Switch client" style={{ marginTop: "10px", display: "grid", gap: "4px" }}>
               {others.map((c) => (
-                <a key={c.slug} href={`/app/${c.slug}`} style={{ fontSize: "13px", color: T.accent }}>
+                <a key={c.slug} href={appPath(`/${c.slug}`)} style={{ fontSize: "13px", color: T.accent }}>
                   {c.brand ?? c.domain}
                 </a>
               ))}

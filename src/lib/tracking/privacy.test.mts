@@ -35,6 +35,11 @@ const DOMAINS = new Set([
   // The company's own domain, never a tracked client: the link check's polite
   // user agent carries it as its contact URL (R96, 30 Sep 2026).
   "alwayscited.com",
+  // The dashboard's own host (M1, 6 Oct 2026). Same domain one label along,
+  // and the same reason: it is where the dashboard is served from, never a
+  // client of it. Named in session.ts's comment on the __Host- cookie and in
+  // the two specs that exercise the host comparison.
+  "app.alwayscited.com",
 ]);
 /** Walked files, this one excluded. 29 Sep 2026: 25. */
 const FLOOR = 25;

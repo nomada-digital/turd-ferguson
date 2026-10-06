@@ -13,6 +13,7 @@ import { placedTier } from "@/lib/tracking/placement-figures";
 import { trackingRepo } from "@/lib/tracking/repo";
 import { askRefusal, askToast } from "@/lib/tracking/ask";
 import { inviteRefusal, teamToast } from "@/lib/tracking/team";
+import { appPath } from "@/lib/app-host";
 
 export const dynamic = "force-dynamic";
 
@@ -24,7 +25,7 @@ export const metadata: Metadata = {
 export const runtime = "nodejs";
 
 /**
- * One client's Settings (R142, BRIEF-4 P2: `/app/[client]/settings`). Same
+ * One client's Settings (R142, BRIEF-4 P2: appPath(`/[client]/settings`)). Same
  * membership rule as the overview: a slug the session is not a live member
  * of is a 404.
  */
@@ -32,7 +33,7 @@ export default async function ClientSettings({ params, searchParams }: { params:
   const sp = await searchParams;
   const repo = trackingRepo();
   const email = await repo.sessionEmail();
-  if (!email) redirect(loginHref(`/app/${(await params).client}/settings`, await searchParams));
+  if (!email) redirect(loginHref(appPath(`/${(await params).client}/settings`), await searchParams));
   const { client: slug } = await params;
   const clients = await repo.clientsFor(email);
   const client = clients.find((c) => c.slug === slug);

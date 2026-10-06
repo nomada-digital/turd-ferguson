@@ -8,6 +8,8 @@
  * Plain module, relative imports only, so node --test can load it.
  */
 
+import { appPath } from "../../lib/app-host.ts";
+
 export const SOON = null;
 
 export const NAV = ["Overview", "Clusters", "Who is named", "Cited pages", "Reports", "Settings"] as const;
@@ -42,7 +44,7 @@ export const NAV_TARGET: Record<string, string | typeof SOON | undefined> = {
 /** The href for an item on this client, or null when it is not built. */
 export function navHref(item: string, slug: string): string | null {
   const t = NAV_TARGET[item];
-  return typeof t === "string" ? `/app/${slug}${t}` : null;
+  return typeof t === "string" ? appPath(`/${slug}${t}`) : null;
 }
 
 /**

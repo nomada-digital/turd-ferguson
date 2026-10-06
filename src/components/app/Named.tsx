@@ -13,6 +13,7 @@ import { partialRunNote } from "@/lib/tracking/run-note";
 
 import DatePicker from "./DatePicker";
 import { Chip } from "./Overview";
+import { appPath } from "@/lib/app-host";
 
 /**
  * Who is named (R143, 1 Oct 2026; BRIEF-4 P3): the full page of the
@@ -87,7 +88,7 @@ export default function Named({
     else q[k] = v;
     return `?${new URLSearchParams(q)}`;
   };
-  const clusterPath = (id: string) => `/app/${encodeURIComponent(slug)}/clusters/${encodeURIComponent(id)}`;
+  const clusterPath = (id: string) => appPath(`/${encodeURIComponent(slug)}/clusters/${encodeURIComponent(id)}`);
 
   const shown = all ? rows : rows.slice(0, NAMED_TOP);
   const clustersCounted = picked ? 1 : cards.filter((c) => c.prompts.some((p) => p.now.den > 0)).length;

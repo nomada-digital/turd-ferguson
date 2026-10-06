@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { readClusterRefusal, readPromptRoom, refusePrompts } from "./limits.ts";
+import { appPath } from "../app-host.ts";
 
 /**
  * Stop and Undo on the Clusters page - BRIEF-3 T6 part 2a (30 Sep 2026;
@@ -114,7 +115,7 @@ export function stopReturn(slug: string, f: StopForm, done: StopDone, count?: Bu
   // `ok` and `ticked`, not the /ask toast's `n` and `of`, so the two never read each other's counts.
   // `why` (R151, 3 Oct 2026): a refusal's code, e.g. slot.ts SLOT_WHY's; only on a refusal.
   const q = new URLSearchParams({ ...f.back, done, kind: f.kind, id: f.id, ...(count ? { ok: String(count.n), ticked: String(count.of) } : {}), ...(done === "refused" && why ? { why } : {}) });
-  return `/app/${encodeURIComponent(slug)}/clusters?${q}`;
+  return appPath(`/${encodeURIComponent(slug)}/clusters?${q}`);
 }
 
 // ---- The writers. Each reads the row on this client, asks the rule, then writes. ----

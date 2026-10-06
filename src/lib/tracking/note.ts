@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { APP_LIMITS } from "../../config/contact.ts";
 import type { Day } from "./figures.ts";
 import { refuseRole } from "./stop.ts";
+import { appPath } from "../app-host.ts";
 
 /**
  * "Add a note" on the one-cluster page (T7 part 4b, 30 Sep 2026;
@@ -67,7 +68,7 @@ export function noteReturn(slug: string, sp: URLSearchParams): string | null {
   keep.set("prompt", prompt && /^\d$/.test(prompt) ? prompt : "0");
   const engine = sp.get("engine");
   if (engine && /^[a-z_]{1,20}$/.test(engine)) keep.set("engine", engine);
-  return `/app/${slug}/clusters/${cluster}?${keep}`;
+  return appPath(`/${slug}/clusters/${cluster}?${keep}`);
 }
 
 export type NoteSaved = { ok: true } | { ok: false; message: string };

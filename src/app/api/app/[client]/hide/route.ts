@@ -8,6 +8,8 @@ import { fixtureMode } from "@/lib/tracking/fixture-mode";
 import { clientsFor, sessionEmail } from "@/lib/tracking/member";
 import { readKept } from "@/lib/tracking/stop";
 import { recordUsage } from "@/lib/tracking/usage-record";
+import { dashPath } from "@/lib/tracking/app-redirect";
+import { appPath } from "@/lib/app-host";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -32,14 +34,14 @@ export async function POST(req: Request, ctx: { params: Promise<{ client: string
   // R151 (3 Oct 2026): a write that failed comes back `hid=0`, so the page says it did not hide rather than nothing.
   const to = (hid: boolean | null) => {
     const q = new URLSearchParams({ ...view, ...(cta === "mentioned" ? { filter: "never" } : {}), ...(hid === null ? {} : { hid: hid ? "1" : "0" }) }).toString();
-    return NextResponse.redirect(new URL(`/app/${slug}/clusters${q ? `?${q}` : ""}`, req.url), 303);
+    return NextResponse.redirect(new URL(appPath(`/${slug}/clusters${q ? `?${q}` : ""}`), req.url), 303);
   };
   const back = to(null);
   if (!cta) return back;
   if (fixtureMode()) return to(true);
 
   const email = await sessionEmail();
-  if (!email) return NextResponse.redirect(new URL("/app/login", req.url), 303);
+  if (!email) return NextResponse.redirect(new URL(dashPath(req, "/login"), req.url), 303);
   const client = (await clientsFor(email)).find((c) => c.slug === slug);
   if (!client) return NextResponse.json({ error: "Not found." }, { status: 404 });
 

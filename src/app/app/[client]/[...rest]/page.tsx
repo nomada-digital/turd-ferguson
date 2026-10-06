@@ -3,6 +3,7 @@ import { loginHref } from "@/lib/tracking/next-path";
 import { notFound, redirect } from "next/navigation";
 
 import { trackingRepo } from "@/lib/tracking/repo";
+import { appPath } from "@/lib/app-host";
 
 export const dynamic = "force-dynamic";
 
@@ -29,7 +30,7 @@ export default async function UnknownDashboardPage({
 }): Promise<never> {
   const repo = trackingRepo();
   const email = await repo.sessionEmail();
-  if (!email) redirect(loginHref(`/app/${(await params).client}/${(await params).rest.map(encodeURIComponent).join("/")}`, await searchParams));
+  if (!email) redirect(loginHref(appPath(`/${(await params).client}/${(await params).rest.map(encodeURIComponent).join("/")}`), await searchParams));
   const { client: slug } = await params;
   const clients = await repo.clientsFor(email);
   const client = clients.find((c) => c.slug === slug);

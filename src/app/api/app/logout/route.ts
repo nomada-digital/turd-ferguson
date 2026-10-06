@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { SESSION_COOKIE, hashToken, isTokenShape } from "@/lib/tracking/session";
+import { appPath } from "@/lib/app-host";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -38,7 +39,7 @@ export async function POST(req: Request) {
     if (error) console.warn(`[app] could not end a session: ${error.message}`);
   }
   // DS7 (2 Oct 2026, R172 pass 1): the login page says which sign-out happened.
-  const res = NextResponse.redirect(new URL(`/app/login?out=${everywhere ? "all" : "1"}`, req.url), 303);
+  const res = NextResponse.redirect(new URL(appPath(`/login?out=${everywhere ? "all" : "1"}`), req.url), 303);
   res.cookies.set({ name: SESSION_COOKIE, value: "", path: "/", maxAge: 0, httpOnly: true, secure: true, sameSite: "lax" });
   return res;
 }

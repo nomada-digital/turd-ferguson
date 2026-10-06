@@ -11,6 +11,8 @@ import { loadSetupConfirmed } from "@/lib/tracking/setup-data";
 import { SETUP_CONFIRMED_EVENT, setupPath } from "@/lib/tracking/setup-landing";
 import { mailSetupConfirmed, sendSetupConfirmed } from "@/lib/tracking/setup-mail";
 import { refuseRole } from "@/lib/tracking/stop";
+import { dashPath } from "@/lib/tracking/app-redirect";
+import { appPath } from "@/lib/app-host";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -34,7 +36,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ client: string
   const { client: slug } = await ctx.params;
   const form = await req.formData().catch(() => null);
   const field = (k: string) => (typeof form?.get(k) === "string" ? (form.get(k) as string).slice(0, ADMIN_LIMITS.question) : "");
-  const done = NextResponse.redirect(new URL(`/app/${encodeURIComponent(slug)}?setup=confirmed`, req.url), 303);
+  const done = NextResponse.redirect(new URL(appPath(`/${encodeURIComponent(slug)}?setup=confirmed`), req.url), 303);
   // R151 (3 Oct 2026): #confirm lands the page at step 3, where the refusal is said - from the top it sat a screen or more below the fold.
   const failed = NextResponse.redirect(new URL(`${setupPath(encodeURIComponent(slug))}?confirm=failed#confirm`, req.url), 303);
   if (fixtureMode()) {
@@ -50,7 +52,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ client: string
   }
 
   const email = await sessionEmail();
-  if (!email) return NextResponse.redirect(new URL("/app/login", req.url), 303);
+  if (!email) return NextResponse.redirect(new URL(dashPath(req, "/login"), req.url), 303);
   const client = (await clientsFor(email)).find((c) => c.slug === slug);
   if (!client) return NextResponse.json({ error: "Not found." }, { status: 404 });
   if (refuseRole(client.role)) return NextResponse.json({ error: "Viewers cannot confirm setup." }, { status: 403 });

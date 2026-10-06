@@ -268,17 +268,30 @@ test("the shipped CSP permits every subresource the site loads", (t) => {
 
 test("the admin proxy matches every route that must stay shut", (t) => {
   const proxy = readFileSync(join(ROOT, "src", "proxy.ts"), "utf8");
-  const matcher = /matcher:\s*["'`]([^"'`]+)["'`]/.exec(proxy)?.[1];
-  assert.ok(matcher, "no matcher in src/proxy.ts - the proxy probe has drifted");
+  /**
+   * M1 (6 Oct 2026): the matcher is an array, and its first entry is a
+   * catch-all with a negative lookahead rather than `/admin/:path*`. The
+   * proxy took on host routing for app.alwayscited.com, and a rewrite applies
+   * to paths that carry no prefix of their own, so there is no pattern short
+   * of "everything" that reaches them.
+   *
+   * The rule this test holds is unchanged: every route that must stay shut is
+   * matched by the proxy, so Basic auth runs before it renders. What moved is
+   * how a matcher is read - each entry is turned into the regular expression
+   * Next builds from it, and an admin route has to match at least one.
+   */
+  // The patterns themselves contain brackets, so the block is taken from
+  // `matcher:` to the end of the config object rather than to the first `]`.
+  const block = proxy.slice(proxy.indexOf("matcher:"));
+  const entries = [...block.slice(0, block.indexOf("};")).matchAll(/["'`]([^"'`]+)["'`]/g)].map((m) => m[1]!);
+  assert.ok(entries.length > 0, "no matcher in src/proxy.ts - the proxy probe has drifted");
 
-  // `/admin/:path*` -> every route under /admin. Derived from the route set
-  // rather than from the one page that exists today, so a second admin page
-  // joins the check by existing.
   const adminRoutes = privateRoutes().filter((r) => r.startsWith("/admin"));
   assert.ok(adminRoutes.length > 0, "no /admin route found - the source probe has drifted");
 
-  const prefix = matcher!.replace(/\/:path\*$/, "");
-  const unguarded = adminRoutes.filter((r) => !r.startsWith(prefix));
+  const toRe = (src: string) => new RegExp(`^${src.replace(/\/:path\*$/, "(?:/.*)?")}$`);
+  const matcher = entries.join(" , ");
+  const unguarded = adminRoutes.filter((r) => !entries.some((e) => toRe(e).test(r)));
 
   t.diagnostic(`matcher ${matcher} guards ${adminRoutes.length} admin route(s): ${adminRoutes.join(" ")}`);
   assert.deepEqual(

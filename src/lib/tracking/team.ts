@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { APP_LIMITS } from "../../config/contact.ts";
 import { isPlausibleEmail, normalizeEmail } from "../email-address.ts";
+import { appOrigin, appPath } from "../app-host.ts";
 
 /**
  * Team on Settings - R142 part 2 (1 Oct 2026; BRIEF-4 P2 "2. Team"). Owners
@@ -19,6 +20,9 @@ import { isPlausibleEmail, normalizeEmail } from "../email-address.ts";
  *
  * Pure rules first so the tests run each one; the writers are the network half.
  */
+
+/** Where an invited member signs in, printed in the invite email (M1, 5 Oct 2026). */
+const DASHBOARD_SIGN_IN = `${appOrigin("https://alwayscited.com").replace(/^https?:\/\//, "")}${appPath("/login")}`;
 
 export const MEMBERS_PER_ACCOUNT = 10;
 export const INVITES_PER_OWNER_PER_DAY = 20;
@@ -118,7 +122,7 @@ export function teamReturn(slug: string, done: TeamDone, email: string | null, k
   // An invite refusal carries no fragment: its form opens with the field autofocused, which scrolls it into view,
   // and a fragment target stops the browser running autofocus (as the setup 303s found, 21c7c6a).
   const at = done === "refused" && why && INVITE_WHYS.includes(why) ? "" : "#set-team";
-  return `/app/${encodeURIComponent(slug)}/settings?${q}${at}`;
+  return appPath(`/${encodeURIComponent(slug)}/settings?${q}${at}`);
 }
 
 /** The invite form's own refusal line: a refused invite whose code is one of INVITE_WHYS, else null. */
@@ -155,7 +159,7 @@ export function inviteMail(p: { inviter: string; domain: string; role: InviteRol
   const board = p.agency ? "dashboard" : "alwayscited dashboard";
   return {
     subject: `You've been added to the ${p.domain} dashboard`,
-    text: `${p.inviter} added you to the ${board} for ${p.domain} as ${p.role === "editor" ? "an editor" : "a viewer"}. Sign in with this email address at alwayscited.com/app/login - we'll send you a link.\n`,
+    text: `${p.inviter} added you to the ${board} for ${p.domain} as ${p.role === "editor" ? "an editor" : "a viewer"}. Sign in with this email address at ${DASHBOARD_SIGN_IN} - we'll send you a link.\n`,
   };
 }
 
