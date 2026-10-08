@@ -662,7 +662,7 @@ export default function Overview({
           {cs ? (
             <p className="app-show-sm" style={{ margin: 0, fontSize: "14px", lineHeight: 1.5, color: D.cardHead }}>
               {`${fig.now.num.toLocaleString("en-GB")} of ${fig.now.den.toLocaleString("en-GB")} answers across ${across}.`}
-              {byCluster ? (byCluster.lflBefore && lflDelta !== null ? ` Like-for-like ${pct(byCluster.lfl)}, ${direction(lflDelta)} ${pct(byCluster.lflBefore)}.` : "") : o.lfl && lflDelta !== null ? ` Like-for-like ${pct(o.lfl.now)}, ${direction(lflDelta)} ${pct(o.lfl.before)}.` : ""}
+              {byCluster ? (byCluster.lflBefore && lflDelta !== null ? ` Like-for-like ${pct(byCluster.lfl)}, ${direction(lflDelta)} ${pct(byCluster.lflBefore)}${inBefore}.` : "") : o.lfl && lflDelta !== null ? ` Like-for-like ${pct(o.lfl.now)}, ${direction(lflDelta)} ${pct(o.lfl.before)}${inBefore}.` : ""}
             </p>
           ) : null}
           {o.compare ? (
