@@ -8,6 +8,7 @@ import { QUESTIONS } from "@/config/scan-shape";
 
 import { brandedQuestions, withoutBrand } from "./brand-name";
 import type { Market } from "./domain";
+import { batchBlocks, runBatches } from "./prose-batches";
 import { countingFetch, withRetry } from "./retry-policy";
 import { sourceKindRequest, sourceKindSystem } from "./source-kind-prompt";
 import { normaliseCandidate } from "./target-keyword";
@@ -592,23 +593,8 @@ const BrandList = z.object({
   ),
 });
 
-/**
- * Answers per request, by length of prose.
- *
- * This used to be one call for every answer an engine gave, joined into a
- * single string and cut at 120,000 characters. Both halves of that were the
- * shape the source classifier was already fixed for: the input grew with the
- * scan rather than with the batch, and the cut fell at the end of the joined
- * string, so what it dropped was whole later answers - the last questions
- * asked simply had no brands extracted from them and nothing said so.
- *
- * The output ceiling was the worse half. It was a flat 8,000 tokens against
- * an input that scaled with the scan, and unlike the classifier this call is
- * NOT wrapped in "never fatal": a truncated response fails the schema parse,
- * which threw out of Promise.all, which failed the whole run - after every
- * engine read on it had already been paid for.
- */
-const PROSE_BATCH_CHARS = 60_000;
+// Answers per request, and why a request is a batch of them rather than one
+// joined string: prose-batches.ts PROSE_BATCH_CHARS, with the history.
 
 /**
  * Pull the competitor set out of the Overview prose. Publications, directories
@@ -644,52 +630,22 @@ export async function extractBrands(
   context: { topic: string; brand: string } = { topic: "", brand: "" },
   options: { signal?: AbortSignal; billed?: { calls: number } } = {},
 ): Promise<{ brands: { brand: string; mentions: number }[]; calls: number; failedBatches: number; failedBlocks: number[]; error?: string }> {
-  // One answer is clamped to a whole batch rather than to some smaller share
-  // of one, so nothing is cut tighter here than the old 120,000-character cut
-  // would have cut it. 60,000 characters is some 15,000 words from a single
-  // engine answer; the clamp is a bound on the pathological case, not a size
-  // any answer in this pipeline is expected to reach.
-  const usable = blocks
-    .map((b, at) => ({ at, text: b.trim() }))
-    .filter((b) => b.text)
-    .map((b) => (b.text.length > PROSE_BATCH_CHARS ? { at: b.at, text: b.text.slice(0, PROSE_BATCH_CHARS) } : b));
-  if (!usable.length) return { brands: [], calls: 0, failedBatches: 0, failedBlocks: [] };
+  // The batching and which answers a failed batch leaves unread are
+  // prose-batches.ts, where node --test runs them (8 Oct 2026, review).
+  const batches = batchBlocks(blocks);
+  if (!batches.length) return { brands: [], calls: 0, failedBatches: 0, failedBlocks: [] };
 
-  const batches: { at: number; text: string }[][] = [];
-  let current: { at: number; text: string }[] = [];
-  let size = 0;
-  for (const block of usable) {
-    if (current.length && size + block.text.length > PROSE_BATCH_CHARS) {
-      batches.push(current);
-      current = [];
-      size = 0;
-    }
-    current.push(block);
-    size += block.text.length;
-  }
-  if (current.length) batches.push(current);
-
-  const brands: { brand: string; mentions: number }[] = [];
   // Attempts, not batches. A batch that 529s twice and lands on the third is
   // three requests on the bill and was one on this counter.
   const billed = options.billed ?? { calls: 0 };
   const before = billed.calls;
-  let failedBatches = 0;
-  const failedBlocks: number[] = [];
-  let error: string | undefined;
-  for (const batch of batches) {
-    try {
-      brands.push(...(await extractBrandBatch(batch.map((b) => b.text), context, billed, options.signal)));
-    } catch (err) {
-      // One bad batch must not cost the scan its leaderboard, and must not
-      // cost it the engine reads already paid for. Counted and returned so
-      // the caller can say a leaderboard is partial rather than assume it.
-      failedBatches += 1;
-      failedBlocks.push(...batch.map((b) => b.at));
-      error ??= options.signal?.aborted ? "out of time" : describeAnthropicError(err).slice(0, 80);
-      console.warn("[scan] a prose batch failed to extract:", err instanceof Error ? err.message : err);
-    }
-  }
+  // Counted and returned so the caller can say a leaderboard is partial
+  // rather than assume it.
+  const { items: brands, failedBatches, failedBlocks, error } = await runBatches(
+    batches,
+    (texts) => extractBrandBatch(texts, context, billed, options.signal),
+    (err) => (options.signal?.aborted ? "out of time" : describeAnthropicError(err).slice(0, 80)),
+  );
   return { brands, calls: billed.calls - before, failedBatches, failedBlocks, ...(error ? { error } : {}) };
 }
 
