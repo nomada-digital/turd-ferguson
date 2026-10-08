@@ -76,3 +76,75 @@ export async function selectAll<T>(
     from += rows.length;
   }
 }
+
+/**
+ * How many pages `selectAllCounted` has in flight at once. Six keeps one
+ * dashboard read to a handful of PostgREST requests at a time, with the page's
+ * other reads beside it, while a full year of one client (73 pages) is about
+ * a dozen round trips rather than 73.
+ */
+export const PARALLEL_PAGES = 6;
+
+/**
+ * Every row of a paged select, with the pages after the first read side by
+ * side instead of one after another (8 Oct 2026, audit perf-3 and perf-1).
+ *
+ * The dashboard's answers are days x prompts x engines: 11,200 rows for a
+ * full-size alwaystracked client on the default 28 days and the 28 before, so
+ * twelve pages, and no page was asked for until the one before it had come
+ * back. Every page is a round trip from the function to the database, so the
+ * read's wall time grew with the client and with the range, and Reports - all
+ * of a client's history - grew every day.
+ *
+ * The first page also asks for an exact count, which PostgREST answers from
+ * the same statement. Every remaining offset is then known, and they go out
+ * `parallel` at a time. Offsets advance by what the first page actually held,
+ * not by PAGE, so a server whose `db-max-rows` is below PAGE is still read
+ * whole, as `selectAll` reads it; and the count stands in for `selectAll`'s
+ * extra request for the empty page that proves the end.
+ *
+ * A later page holding a different number of rows than the count promised
+ * means the rows moved during the read - the morning run writing answers
+ * between two requests. Offsets no longer line up then, so the whole read is
+ * done again with `selectAll` rather than returned with a row twice or a row
+ * missing. So is a server that sends no count.
+ */
+export async function selectAllCounted<T>(
+  page: (
+    from: number,
+    to: number,
+    count: boolean,
+  ) => PromiseLike<{ data: T[] | null; error: { message: string } | null; count?: number | null }>,
+  parallel: number = PARALLEL_PAGES,
+): Promise<T[]> {
+  const again = () => selectAll<T>((from, to) => page(from, to, false));
+  const first = await page(0, PAGE - 1, true);
+  if (first.error) throw new Error(first.error.message);
+  const head = first.data ?? [];
+  const total = first.count;
+  if (typeof total !== "number") return again();
+  if (head.length >= total) return head;
+  // Rows the count promised and the page did not hold: no page size to step by.
+  if (!head.length) return again();
+
+  const step = head.length;
+  const offsets: number[] = [];
+  for (let at = step; at < total; at += step) offsets.push(at);
+  const pages: T[][] = new Array(offsets.length);
+  let next = 0;
+  let moved = false;
+  const worker = async () => {
+    while (next < offsets.length) {
+      const i = next++;
+      const at = offsets[i];
+      const { data, error } = await page(at, at + step - 1, false);
+      if (error) throw new Error(error.message);
+      const rows = data ?? [];
+      if (rows.length !== Math.min(step, total - at)) moved = true;
+      pages[i] = rows;
+    }
+  };
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(parallel, offsets.length)) }, worker));
+  if (moved) return again();
+  return head.concat(...pages);
+}

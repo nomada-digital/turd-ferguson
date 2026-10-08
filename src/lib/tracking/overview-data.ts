@@ -1,6 +1,7 @@
 import "server-only";
 
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { selectAllCounted } from "@/lib/supabase/page";
 
 import { trackingDay } from "./decide.ts";
 import type { LatestAnswers, LatestRow } from "./latest-answers.ts";
@@ -52,14 +53,17 @@ export function rangeQuery(params: Record<string, string | string[] | undefined>
   return s ? `?${s}` : "";
 }
 
-async function paged<R>(query: (lo: number, hi: number) => PromiseLike<{ data: R[] | null; error: { message: string } | null }>, what: string): Promise<R[]> {
-  const out: R[] = [];
-  const size = 1000;
-  for (let lo = 0; ; lo += size) {
-    const { data, error } = await query(lo, lo + size - 1);
-    if (error) throw new Error(`could not read ${what}: ${error.message}`);
-    out.push(...(data ?? []));
-    if (!data || data.length < size) return out;
+/**
+ * A paged read (8 Oct 2026, audit perf-3): the first page with its count, then
+ * the rest side by side (supabase/page.ts `selectAllCounted`), where every
+ * page used to wait for the one before. `count` is true on the first page
+ * only; pass it to `.select(columns, { count })`.
+ */
+async function paged<R>(query: (lo: number, hi: number, count: "exact" | undefined) => PromiseLike<{ data: R[] | null; error: { message: string } | null; count?: number | null }>, what: string): Promise<R[]> {
+  try {
+    return await selectAllCounted<R>((lo, hi, count) => query(lo, hi, count ? "exact" : undefined));
+  } catch (err) {
+    throw new Error(`could not read ${what}: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
@@ -139,14 +143,14 @@ export async function loadOverview(clientId: string, range: Range, compare: Comp
   const earliest = comparisonRange(range, compare)?.from ?? range.from;
 
   // Started together, awaited in turn: each paged read checks its own error.
-  const clustersP = paged((lo, hi) => db.from("tracked_clusters").select("id, name, keyword_id, tier, started_on, stopped_on").eq("client_domain_id", clientId).order("started_on").range(lo, hi), "the clusters");
-  const questionsP = paged((lo, hi) => db.from("tracked_questions").select("id, text, added_on, stopped_on, cluster_id, angle").eq("client_domain_id", clientId).order("added_on").range(lo, hi), "the questions");
-  const keywordsP = paged((lo, hi) => db.from("tracked_keywords").select("id, keyword, added_on, stopped_on, search_volume, intent").eq("client_domain_id", clientId).order("added_on").range(lo, hi), "the keywords");
+  const clustersP = paged((lo, hi, count) => db.from("tracked_clusters").select("id, name, keyword_id, tier, started_on, stopped_on", { count }).eq("client_domain_id", clientId).order("started_on").range(lo, hi), "the clusters");
+  const questionsP = paged((lo, hi, count) => db.from("tracked_questions").select("id, text, added_on, stopped_on, cluster_id, angle", { count }).eq("client_domain_id", clientId).order("added_on").range(lo, hi), "the questions");
+  const keywordsP = paged((lo, hi, count) => db.from("tracked_keywords").select("id, keyword, added_on, stopped_on, search_volume, intent", { count }).eq("client_domain_id", clientId).order("added_on").range(lo, hi), "the keywords");
   const answersP = paged(
-    (lo, hi) =>
+    (lo, hi, count) =>
       db
         .from("tracking_answers")
-        .select("run_date, question_id, engine, answered, named, brands, citations")
+        .select("run_date, question_id, engine, answered, named, brands, citations", { count })
         .eq("client_domain_id", clientId)
         .gte("run_date", earliest)
         .lte("run_date", range.to)
@@ -155,8 +159,8 @@ export async function loadOverview(clientId: string, range: Range, compare: Comp
     "the answers",
   );
   const serpP = paged(
-    (lo, hi) =>
-      db.from("tracking_serp").select("run_date, keyword_id, position").eq("client_domain_id", clientId).gte("run_date", earliest).lte("run_date", range.to).order("id").range(lo, hi),
+    (lo, hi, count) =>
+      db.from("tracking_serp").select("run_date, keyword_id, position", { count }).eq("client_domain_id", clientId).gte("run_date", earliest).lte("run_date", range.to).order("id").range(lo, hi),
     "the keyword positions",
   );
   // A throw below must not leave these rejecting unobserved; each await still throws.
