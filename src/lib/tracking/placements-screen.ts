@@ -44,12 +44,15 @@ export async function placementsScreen(
   const floor = addDays(today, -SINCE_MAX_DAYS);
   const started: Day = client.started_on && client.started_on > floor ? client.started_on : floor;
   const range = stated ? rangeFrom(sp, today).range : { from: started > today ? today : started, to: today };
-  const [data, rows] = await Promise.all([repo.loadOverview(client.id, range, "none"), repo.placements(client.id)]);
+  const [structure, rows] = await Promise.all([repo.structure(client.id), repo.placements(client.id)]);
   if (!placedTier(tier) && !rows.some((p) => p.status !== "removed")) return null;
 
-  const clusters = (data.clusters ?? []).filter((c) => c.stopped_on === null || c.stopped_on > range.from);
+  const clusters = (structure.clusters ?? []).filter((c) => c.stopped_on === null || c.stopped_on > range.from);
   const cluster = clusters.find((c) => c.id === pickCluster(clusters, rows, typeof sp.cluster === "string" ? sp.cluster : null));
   if (!cluster) return null;
+  // perf-1/perf-4 (8 Oct 2026): the picked cluster's prompts only, with their citations and no brands - all the
+  // chart and the table count (read-shape.test.mts). The structure is passed on, so it is not read twice.
+  const data = await repo.loadOverview(client.id, range, "none", { answers: "cites", cluster: cluster.id, structure });
   const chart = clusterChart({ clusters, questions: data.questions, keywords: data.keywords, answers: data.answers, serp: data.serp, range, before: null, today, engines }, cluster.id);
   if (!chart) return null;
   const questionIds = data.questions.filter((q) => q.cluster_id === cluster.id && (q.stopped_on === null || q.stopped_on > range.from)).map((q) => q.id);

@@ -10,6 +10,7 @@ import { T } from "@/config/tokens";
 import { CLUSTER_BASE } from "@/lib/tracking/limits";
 import { rangeFrom, rangeQuery } from "@/lib/tracking/overview-data";
 import { placedTier } from "@/lib/tracking/placement-figures";
+import { monthSlice, reportSpan } from "@/lib/tracking/read-shape";
 import { monthFigures, reportMonths } from "@/lib/tracking/report-months";
 import { trackingRepo } from "@/lib/tracking/repo";
 import { appPath } from "@/lib/app-host";
@@ -27,7 +28,7 @@ export const runtime = "nodejs";
  * One client's Reports (R145, BRIEF-4 P5: appPath(`/[client]/reports`)). Same
  * membership rule as the overview. The picked range (`from/to`) sets the
  * download links only, so its picker has no compare control (DS26); the monthly cards are read from one load
- * covering every month since tracking started, each cut to its own range.
+ * covering every month since tracking started, each cut to its own range and the comparison before it.
  */
 export default async function ClientReports({ params, searchParams }: { params: Promise<{ client: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const repo = trackingRepo();
@@ -43,9 +44,10 @@ export default async function ClientReports({ params, searchParams }: { params: 
   const sp = await searchParams;
   const { range, compare } = rangeFrom(sp, today);
   const months = reportMonths(client.started_on, today);
-  const whole = { from: months[months.length - 1]!.range.from, to: today };
-  // "prev" on the whole span reaches back past the oldest month's own comparison, so every card's like-for-like has its rows.
-  const [data, upgrade, rows] = await Promise.all([repo.loadOverview(client.id, whole, "prev"), repo.upgradeContext(client.id, email, today), repo.placements(client.id)]);
+  // perf-1 (8 Oct 2026): from the oldest month's own comparison to today, verdicts only - every card's like-for-like
+  // has its rows, and nothing a card does not count is read (read-shape.ts reportSpan; "prev" on the whole span read
+  // as far again before the first month as the history is long).
+  const [data, upgrade, rows] = await Promise.all([repo.loadOverview(client.id, reportSpan(months, today), "none", { answers: "verdicts" }), repo.upgradeContext(client.id, email, today), repo.placements(client.id)]);
   const placed = placedTier(tier);
 
   return (
@@ -59,7 +61,7 @@ export default async function ClientReports({ params, searchParams }: { params: 
           startedOn={client.started_on}
           reportPath={`/api/app/${encodeURIComponent(slug)}/report`}
           placed={placed || rows.some((p) => p.status !== "removed")}
-          months={months.map((m) => ({ ...m, figures: monthFigures(data, m.range, { startedOn: client.started_on, today, engines }) }))}
+          months={months.map((m) => ({ ...m, figures: monthFigures(monthSlice(data, m.range), m.range, { startedOn: client.started_on, today, engines }) }))}
         />
       </div>
     </div>

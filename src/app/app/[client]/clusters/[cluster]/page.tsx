@@ -51,7 +51,8 @@ export default async function ClientCluster({
   const today = repo.today();
   const sp = await searchParams;
   const { range, compare } = rangeFrom(sp, today);
-  const data = await repo.loadOverview(client.id, range, compare);
+  // perf-9 (8 Oct 2026): this cluster's prompts' answers only; every cluster is still read, for "N of M".
+  const data = await repo.loadOverview(client.id, range, compare, { cluster: id });
   const input = { clusters: data.clusters ?? [], questions: data.questions, keywords: data.keywords, answers: data.answers, serp: data.serp, range, before: comparisonRange(range, compare), today, engines };
   const detail = clusterDetail(input, id);
   if (!detail) notFound();

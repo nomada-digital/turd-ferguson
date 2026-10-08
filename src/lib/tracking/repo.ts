@@ -18,7 +18,8 @@ import { type SettingsData, loadSettings } from "./settings-data.ts";
 import { orderKeyword } from "./order-keyword.ts";
 import { loadOrderKeyword, loadSetupConfirmed } from "./setup-data.ts";
 import { type UpgradeContext, loadUpgradeContext } from "./upgrade-context.ts";
-import { type ClusterNote, type Compare, type OverviewData, loadClusterNotes, loadLatestAnswers, loadOverview } from "./overview-data.ts";
+import { type ClusterNote, type Compare, type OverviewData, loadClusterNotes, loadLatestAnswers, loadOverview, loadStructure } from "./overview-data.ts";
+import { type ReadOpts, type Structure, shapeRead } from "./read-shape.ts";
 
 /**
  * The dashboard's data layer (R93, 29 Sep 2026; BRIEF-2 T9): one interface,
@@ -32,8 +33,10 @@ export interface TrackingRepo {
   sessionEmail(): Promise<string | null>;
   /** Every client this email may see, oldest first, with the member's role. */
   clientsFor(email: string): Promise<(MemberClient & { role: string })[]>;
-  /** Everything the overview reads for one client and range. */
-  loadOverview(clientId: string, range: Range, compare: Compare): Promise<OverviewData>;
+  /** Everything the overview reads for one client and range, or the part of it `opts` names (read-shape.ts). */
+  loadOverview(clientId: string, range: Range, compare: Compare, opts?: ReadOpts): Promise<OverviewData>;
+  /** The clusters, prompts and keywords, with no answer read (8 Oct 2026, audit perf-4). */
+  structure(clientId: string): Promise<Structure>;
   /** One prompt's answers, with their words, at its latest check on or before `to` (T7 part 3b). */
   latestAnswers(clientId: string, questionId: string, to: Day): Promise<LatestAnswers>;
   /** Notes on these prompts, any date, newest first (T7 part 4a). */
@@ -54,7 +57,7 @@ export interface TrackingRepo {
   orderKeyword(clientId: string): Promise<string | null>;
 }
 
-const supabaseRepo: TrackingRepo = { sessionEmail, clientsFor, linkState: loadLinkState, setupConfirmed: loadSetupConfirmed, orderKeyword: loadOrderKeyword, loadOverview, latestAnswers: loadLatestAnswers, clusterNotes: loadClusterNotes, upgradeContext: loadUpgradeContext, placements: loadPlacements, settings: loadSettings, today: () => trackingDay() };
+const supabaseRepo: TrackingRepo = { sessionEmail, clientsFor, linkState: loadLinkState, setupConfirmed: loadSetupConfirmed, orderKeyword: loadOrderKeyword, loadOverview, structure: loadStructure, latestAnswers: loadLatestAnswers, clusterNotes: loadClusterNotes, upgradeContext: loadUpgradeContext, placements: loadPlacements, settings: loadSettings, today: () => trackingDay() };
 
 /**
  * The fixture as served, and as R168's writes leave it. On globalThis, because
@@ -106,10 +109,15 @@ const fixtureRepo: TrackingRepo = {
     const f = fixture();
     return fixtureLive(f, email) ? [{ ...f.client, role: f.member.role }] : [];
   },
-  async loadOverview(clientId) {
+  async loadOverview(clientId, _range, _compare, opts) {
     fixtureUnreadable();
-    // The fixture holds both periods whole; the figures cut the range.
-    return clientId === fixture().client.id ? fixture().data : { clusters: [], questions: [], keywords: [], answers: [], serp: [], lastRun: null, notes: [] };
+    // The fixture holds both periods whole; the figures cut the range. The shape is the Supabase read's (read-shape.ts).
+    return clientId === fixture().client.id ? shapeRead(fixture().data, opts) : { clusters: [], questions: [], keywords: [], answers: [], serp: [], lastRun: null, notes: [] };
+  },
+  async structure(clientId) {
+    fixtureUnreadable();
+    const d = fixture().data;
+    return clientId === fixture().client.id ? { clusters: d.clusters, questions: d.questions, keywords: d.keywords } : { clusters: [], questions: [], keywords: [] };
   },
   async latestAnswers(clientId, questionId, to) {
     const f = fixture();

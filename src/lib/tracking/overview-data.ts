@@ -6,6 +6,7 @@ import { selectAllCounted } from "@/lib/supabase/page";
 import { trackingDay } from "./decide.ts";
 import type { LatestAnswers, LatestRow } from "./latest-answers.ts";
 import type { Angle } from "./limits.ts";
+import { ANSWER_SELECT, type ReadOpts, type Structure, clusterQuestionIds } from "./read-shape.ts";
 import { type AnswerRow, type CitationRow, type Day, type Range, type SerpRow, addDays, comparisonRange } from "./figures.ts";
 
 /**
@@ -138,50 +139,73 @@ export async function loadClusterNotes(clientId: string, questionIds: string[]):
 
 export type ClusterNote = { note_date: Day; text: string; question_id: string };
 
-export async function loadOverview(clientId: string, range: Range, compare: Compare): Promise<OverviewData> {
+/**
+ * The clusters, prompts and keywords alone (8 Oct 2026, audit perf-4): what
+ * Settings and Setup draw, and what Placements needs to pick its cluster,
+ * without a single answer read beside them.
+ */
+export async function loadStructure(clientId: string): Promise<Structure> {
   const db = supabaseAdmin();
-  const earliest = comparisonRange(range, compare)?.from ?? range.from;
-
   // Started together, awaited in turn: each paged read checks its own error.
   const clustersP = paged((lo, hi, count) => db.from("tracked_clusters").select("id, name, keyword_id, tier, started_on, stopped_on", { count }).eq("client_domain_id", clientId).order("started_on").range(lo, hi), "the clusters");
   const questionsP = paged((lo, hi, count) => db.from("tracked_questions").select("id, text, added_on, stopped_on, cluster_id, angle", { count }).eq("client_domain_id", clientId).order("added_on").range(lo, hi), "the questions");
   const keywordsP = paged((lo, hi, count) => db.from("tracked_keywords").select("id, keyword, added_on, stopped_on, search_volume, intent", { count }).eq("client_domain_id", clientId).order("added_on").range(lo, hi), "the keywords");
-  const answersP = paged(
-    (lo, hi, count) =>
-      db
-        .from("tracking_answers")
-        .select("run_date, question_id, engine, answered, named, brands, citations", { count })
-        .eq("client_domain_id", clientId)
-        .gte("run_date", earliest)
-        .lte("run_date", range.to)
-        .order("id")
-        .range(lo, hi),
-    "the answers",
-  );
+  for (const p of [clustersP, questionsP, keywordsP]) p.catch(() => {});
+  return {
+    clusters: (await clustersP) as OverviewData["clusters"],
+    questions: (await questionsP) as OverviewData["questions"],
+    keywords: (await keywordsP) as OverviewData["keywords"],
+  };
+}
+
+/**
+ * One client's range, shaped by `opts` (read-shape.ts, 8 Oct 2026): which
+ * answer columns, only one cluster's prompts, or a structure already read.
+ * Unshaped, it is every answer with its brands and citations, as before.
+ */
+export async function loadOverview(clientId: string, range: Range, compare: Compare, opts: ReadOpts = {}): Promise<OverviewData> {
+  const db = supabaseAdmin();
+  const earliest = comparisonRange(range, compare)?.from ?? range.from;
+  const cols = opts.answers ?? "full";
+  const columns = cols === "none" ? null : ANSWER_SELECT[cols];
+
+  // Started together, awaited in turn: each paged read checks its own error.
+  const structureP = opts.structure ? Promise.resolve(opts.structure) : loadStructure(clientId);
+  // The column list is chosen at run time, so the rows type as unknown; they are mapped field by field below.
+  const answersRead = (select: string, ids: string[] | null): Promise<unknown[]> =>
+    ids && !ids.length
+      ? Promise.resolve([])
+      : paged<unknown>((lo, hi, count) => {
+          let q = db.from("tracking_answers").select(select, { count }).eq("client_domain_id", clientId).gte("run_date", earliest).lte("run_date", range.to);
+          if (ids) q = q.in("question_id", ids);
+          return q.order("id").range(lo, hi);
+        }, "the answers");
+  // A one-cluster read waits on the prompts for its ids: one round trip, for a tenth of the rows on a 10-cluster client.
+  const cluster = opts.cluster;
+  const answersP = columns === null ? Promise.resolve([]) : cluster === undefined ? answersRead(columns, null) : structureP.then((s) => answersRead(columns, clusterQuestionIds(s.questions, cluster)));
   const serpP = paged(
     (lo, hi, count) =>
       db.from("tracking_serp").select("run_date, keyword_id, position", { count }).eq("client_domain_id", clientId).gte("run_date", earliest).lte("run_date", range.to).order("id").range(lo, hi),
     "the keyword positions",
   );
   // A throw below must not leave these rejecting unobserved; each await still throws.
-  for (const p of [clustersP, questionsP, keywordsP, answersP, serpP]) p.catch(() => {});
+  for (const p of [structureP, answersP, serpP]) p.catch(() => {});
   const [{ data: runRows, error: runErr }, { data: noteRows, error: noteErr }] = await Promise.all([
     db.from("tracking_runs").select("run_date, status, finished_at").eq("client_domain_id", clientId).in("status", ["complete", "partial"]).order("run_date", { ascending: false }).limit(1),
     db.from("tracking_notes").select("note_date, text").eq("client_domain_id", clientId).gte("note_date", range.from).lte("note_date", range.to).order("note_date"),
   ]);
   if (runErr) throw new Error(`could not read the runs: ${runErr.message}`);
   if (noteErr) throw new Error(`could not read the notes: ${noteErr.message}`);
-  const clusters = await clustersP;
-  const questions = await questionsP;
-  const keywords = await keywordsP;
-  const answers = await answersP;
+  const { clusters, questions, keywords } = await structureP;
+  const answers = (await answersP) as Record<string, unknown>[];
   const serp = await serpP;
 
   return {
-    clusters: clusters as OverviewData["clusters"],
-    questions: questions as OverviewData["questions"],
-    keywords: keywords as OverviewData["keywords"],
-    answers: (answers as Record<string, unknown>[]).map((a) => ({
+    clusters,
+    questions,
+    keywords,
+    // A column the shape left out reads as an empty list (read-shape.ts).
+    answers: answers.map((a) => ({
       run_date: a.run_date as Day,
       question_id: a.question_id as string,
       engine: a.engine as string,
