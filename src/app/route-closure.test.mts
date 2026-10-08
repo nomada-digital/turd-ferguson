@@ -268,30 +268,46 @@ test("the shipped CSP permits every subresource the site loads", (t) => {
 
 test("the admin proxy matches every route that must stay shut", (t) => {
   const proxy = readFileSync(join(ROOT, "src", "proxy.ts"), "utf8");
+  // The rule: every route that must stay shut is matched by the proxy, so
+  // Basic auth runs before it renders.
   /**
-   * M1 (6 Oct 2026): the matcher is an array, and its first entry is a
-   * catch-all with a negative lookahead rather than `/admin/:path*`. The
-   * proxy took on host routing for app.alwayscited.com, and a rewrite applies
-   * to paths that carry no prefix of their own, so there is no pattern short
-   * of "everything" that reaches them.
-   *
-   * The rule this test holds is unchanged: every route that must stay shut is
-   * matched by the proxy, so Basic auth runs before it renders. What moved is
-   * how a matcher is read - each entry is turned into the regular expression
-   * Next builds from it, and an admin route has to match at least one.
+   * 8 Oct 2026 (M1 host routing, shipped): no matcher at all. A config export
+   * is gone, so this version registers the proxy with `/:path*` - `^.*$` in
+   * the built functions-config-manifest.json, the matcher Next actually runs.
+   * The rule is unchanged; what moved is where the matcher is read: off the
+   * build when there is one, and on an unbuilt tree from the rule that no
+   * config export means every path. A config export coming back is read the
+   * old way.
    */
-  // The patterns themselves contain brackets, so the block is taken from
-  // `matcher:` to the end of the config object rather than to the first `]`.
-  const block = proxy.slice(proxy.indexOf("matcher:"));
-  const entries = [...block.slice(0, block.indexOf("};")).matchAll(/["'`]([^"'`]+)["'`]/g)].map((m) => m[1]!);
-  assert.ok(entries.length > 0, "no matcher in src/proxy.ts - the proxy probe has drifted");
-
   const adminRoutes = privateRoutes().filter((r) => r.startsWith("/admin"));
   assert.ok(adminRoutes.length > 0, "no /admin route found - the source probe has drifted");
 
-  const toRe = (src: string) => new RegExp(`^${src.replace(/\/:path\*$/, "(?:/.*)?")}$`);
-  const matcher = entries.join(" , ");
-  const unguarded = adminRoutes.filter((r) => !entries.some((e) => toRe(e).test(r)));
+  let matchers: RegExp[];
+  let matcher: string;
+  const manifest = join(ROOT, ".next", "server", "functions-config-manifest.json");
+  if (/export const config\b/.test(proxy)) {
+    // The patterns themselves contain brackets, so the block is taken from
+    // `matcher:` to the end of the config object rather than to the first `]`.
+    const block = proxy.slice(proxy.indexOf("matcher:"));
+    const entries = [...block.slice(0, block.indexOf("};")).matchAll(/["'`]([^"'`]+)["'`]/g)].map((m) => m[1]!);
+    assert.ok(entries.length > 0, "no matcher in src/proxy.ts - the proxy probe has drifted");
+    matchers = entries.map((src) => new RegExp(`^${src.replace(/\/:path\*$/, "(?:/.*)?")}$`));
+    matcher = entries.join(" , ");
+  } else if (existsSync(manifest)) {
+    const fn = (JSON.parse(readFileSync(manifest, "utf8")) as { functions: Record<string, { matchers?: { regexp: string }[] }> }).functions["/_middleware"];
+    assert.ok(fn?.matchers?.length, "the build registered no proxy - /admin's Basic auth is not running");
+    matchers = fn.matchers.map((m) => new RegExp(m.regexp));
+    matcher = fn.matchers.map((m) => m.regexp).join(" , ");
+  } else {
+    matchers = [/^.*$/];
+    matcher = "/:path* (no config export, unbuilt tree)";
+  }
+  // Inside the proxy, the early exit hands a path straight back unauthenticated,
+  // so it must never cover /admin; and /admin must still reach the auth branch.
+  const skipBody = proxy.slice(proxy.indexOf("export function skip"));
+  assert.doesNotMatch(skipBody.slice(0, skipBody.indexOf("\n}")), /admin/, "skip() must not hand /admin back before Basic auth");
+  assert.match(proxy, /if \(ADMIN\(pathname\)\)\s*\{[\s\S]{0,200}return admin\(request\);/, "the proxy no longer sends /admin to Basic auth");
+  const unguarded = adminRoutes.filter((r) => !matchers.some((re) => re.test(r)));
 
   t.diagnostic(`matcher ${matcher} guards ${adminRoutes.length} admin route(s): ${adminRoutes.join(" ")}`);
   assert.deepEqual(

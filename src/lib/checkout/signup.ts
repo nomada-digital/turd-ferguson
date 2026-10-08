@@ -2,6 +2,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { siteUrl } from "@/lib/scan/verify-email";
+import { appUrl } from "@/lib/app-host";
 import { sendOrderEmail } from "@/lib/checkout/order-mail";
 import { clustersToMake, orderEmailText, orderRow, packsOn, signupResume, subscriptionScanToken, trialConverted, type CompletedOrder } from "@/lib/checkout/webhook";
 import { readSubscription } from "@/lib/checkout/stripe";
@@ -199,7 +200,7 @@ async function clientFromOrder(db: SupabaseClient, o: CompletedOrder): Promise<{
     .from("dashboard_login_tokens")
     .insert({ token_hash: hashToken(token), email: o.email, ip_hash: null, expires_at: new Date(Date.now() + LOGIN_TTL_MS).toISOString(), used_at: null });
   // The welcome replaces the bare link only once its flag is on (R159; off until Danny approves it).
-  const link = `${siteUrl()}/app/auth?token=${token}`;
+  const link = appUrl(`/auth?token=${token}`, siteUrl());
   const welcomeOn = !tErr && (await lifecycleOn(db, "welcome"));
   const sent =
     !tErr &&

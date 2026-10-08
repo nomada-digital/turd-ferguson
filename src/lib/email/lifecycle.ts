@@ -1,6 +1,7 @@
 import { COMPANY_LINE, CONTACT_EMAIL } from "../../config/contact.ts";
 import { NEXT_STEPS } from "../../config/onboarding.ts";
 import { T } from "../../config/tokens.ts";
+import { appUrl } from "../app-host.ts";
 import { escapeHtml, shell, type Palette } from "../scan/email-render.ts";
 import { TIER_PLAIN, type TierKey } from "../tier-text.ts";
 
@@ -163,14 +164,14 @@ export function planEnded(d: { tier: TierKey; domain: string }): Rendered {
 
 /** Fixture data for the preview page and the tests. Made-up domain; never a client. */
 export function previews(): Record<LifecycleEmail, Rendered> {
-  const link = `${ORIGIN}/app/auth?token=preview-only`;
+  const link = appUrl("/auth?token=preview-only", ORIGIN);
   const domain = "tallyroo.com";
   return {
     welcome: welcome({ tier: "mentioned", clusters: 3, domain, link }),
     setup_reminder: setupReminder({ tier: "mentioned", domain, link }),
-    setup_confirmed: setupConfirmed({ tier: "mentioned", clusters: ["invoicing software", "expense tracking", "payroll for small business"], link: `${ORIGIN}/app` }),
-    first_reading: firstReading({ tier: "tracked", domain, named: 7, answers: 20, page1: 3, keywords: 10, link: `${ORIGIN}/app` }),
-    invite: invite({ tier: "tracked", domain, link: `${ORIGIN}/app/login`, inviter: "sam@tallyroo.com", role: "viewer" }),
+    setup_confirmed: setupConfirmed({ tier: "mentioned", clusters: ["invoicing software", "expense tracking", "payroll for small business"], link: appUrl("/", ORIGIN) }),
+    first_reading: firstReading({ tier: "tracked", domain, named: 7, answers: 20, page1: 3, keywords: 10, link: appUrl("/", ORIGIN) }),
+    invite: invite({ tier: "tracked", domain, link: appUrl("/login", ORIGIN), inviter: "sam@tallyroo.com", role: "viewer" }),
     plan_ended: planEnded({ tier: "cited", domain }),
   };
 }

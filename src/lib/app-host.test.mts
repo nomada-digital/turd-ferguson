@@ -117,6 +117,20 @@ const MAY_WRITE_THE_PREFIX = new Set([
   "src/app/robots.ts",
 ]);
 
+/**
+ * A quoted path that starts with the prefix, and - 8 Oct 2026 - the same
+ * prefix after a template expression: `${siteUrl()}/app/auth` in signup.ts and
+ * `${ORIGIN}/app/login` in lifecycle.ts were missed by the first pattern, which
+ * only looked for the prefix straight after a quote.
+ */
+const HAND_WRITTEN = [/["'`]\/app(\/|["'`])/, /\}\/app(\/|[`?#])/];
+
+test("the sweep sees a hand-written prefix in either spelling", () => {
+  const probes = ['const a = "/app/x";', "const b = `${siteUrl()}/app/auth?token=${token}`;", "link: `${ORIGIN}/app`", "link: `${ORIGIN}/app/login`"];
+  for (const p of probes) assert.ok(HAND_WRITTEN.some((re) => re.test(p)), p);
+  for (const p of ['appUrl("/auth", ORIGIN)', "`${base}/application`", 'const c = "/api/app/login";']) assert.ok(!HAND_WRITTEN.some((re) => re.test(p)), p);
+});
+
 /** A line of code, not a sentence about one: comments and doc blocks are not paths. */
 function codeLines(text: string): string[] {
   return text
@@ -133,7 +147,7 @@ test("no file writes a dashboard path by hand", () => {
     const rel = file.slice(process.cwd().length + 1);
     if (MAY_WRITE_THE_PREFIX.has(rel)) continue;
     for (const line of codeLines(readFileSync(file, "utf8"))) {
-      if (/["'`]\/app(\/|["'`])/.test(line)) offenders.push(`${rel}: ${line.trim().slice(0, 120)}`);
+      if (HAND_WRITTEN.some((re) => re.test(line))) offenders.push(`${rel}: ${line.trim().slice(0, 120)}`);
     }
   }
   assert.deepEqual(offenders, [], `use appPath() from src/lib/app-host.ts:\n${offenders.join("\n")}`);

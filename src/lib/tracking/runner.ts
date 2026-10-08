@@ -28,6 +28,7 @@ import {
 import { firstReading } from "@/lib/email/lifecycle";
 import { lifecycleOn, sendLifecycle } from "@/lib/email/lifecycle-mail";
 import { siteUrl } from "@/lib/scan/verify-email";
+import { appUrl } from "@/lib/app-host";
 import { TIER_PLAIN } from "@/lib/tier-text";
 import { upsellMode } from "./ask.ts";
 import { dispatchRun } from "./dispatch.ts";
@@ -495,7 +496,7 @@ async function mailFirstReading(
     const { data: owners, error: oErr } = await db.from("dashboard_members").select("email").eq("account_id", c.account_id).eq("role", "owner").is("removed_at", null);
     if (oErr) throw new Error(oErr.message);
     const tier = ((c.tier as string) in TIER_PLAIN ? c.tier : "tracked") as TierKey;
-    const mail = firstReading({ tier, domain, named: f.named.num, answers: f.named.den, page1: f.page1.num, keywords: f.page1.den, link: `${siteUrl()}/app` });
+    const mail = firstReading({ tier, domain, named: f.named.num, answers: f.named.den, page1: f.page1.num, keywords: f.page1.den, link: appUrl("/", siteUrl()) });
     for (const m of owners ?? []) {
       if (!(await sendLifecycle({ memberEmail: m.email as string, mail }))) console.warn(`[track] ${runId} first_reading not sent`);
     }

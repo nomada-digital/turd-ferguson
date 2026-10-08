@@ -1,5 +1,7 @@
 import type { MetadataRoute } from "next";
 
+import { ROBOTS_AGENTS } from "@/config/robots-agents";
+
 /**
  * What a crawler may read.
  *
@@ -46,16 +48,8 @@ import type { MetadataRoute } from "next";
  */
 const CLOSED = ["/scan/", "/coverage-check/", "/api/", "/admin/", "/app", "/checkout"];
 
-const AGENTS = [
-  "*",
-  "Googlebot",
-  "Bingbot",
-  "GPTBot",
-  "ClaudeBot",
-  "Google-Extended",
-  "PerplexityBot",
-  "anthropic-ai",
-];
+// The named crawlers, shared with the dashboard host's robots.txt in proxy.ts (8 Oct 2026).
+const AGENTS = ROBOTS_AGENTS;
 
 export default function robots(): MetadataRoute.Robots {
   return {

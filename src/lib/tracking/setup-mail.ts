@@ -7,6 +7,7 @@ import { headerSafe } from "@/lib/email-header";
 import { setupConfirmed } from "@/lib/email/lifecycle";
 import { lifecycleOn, sendLifecycle } from "@/lib/email/lifecycle-mail";
 import { siteUrl } from "@/lib/scan/verify-email";
+import { appUrl } from "@/lib/app-host";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { TIER_PLAIN } from "@/lib/tier-text";
 import { upsellMode } from "./ask.ts";
@@ -83,7 +84,7 @@ export async function mailSetupConfirmed(clientId: string, member: string): Prom
     const { data: clusters, error: clErr } = await db.from("tracked_clusters").select("name").eq("client_domain_id", clientId).is("stopped_on", null).order("created_at", { ascending: true });
     if (clErr) throw new Error(clErr.message);
     const tier = ((c.tier as string) in TIER_PLAIN ? c.tier : "tracked") as TierKey;
-    const mail = setupConfirmed({ tier, clusters: (clusters ?? []).map((k) => k.name as string), link: `${siteUrl()}/app` });
+    const mail = setupConfirmed({ tier, clusters: (clusters ?? []).map((k) => k.name as string), link: appUrl("/", siteUrl()) });
     if (!(await sendLifecycle({ memberEmail: member, mail }))) console.warn("[app] setup_confirmed not sent");
   } catch (err) {
     console.warn(`[app] setup_confirmed skipped: ${err instanceof Error ? err.message : String(err)}`);
