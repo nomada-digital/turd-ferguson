@@ -61,3 +61,14 @@ test("8 Oct 2026: the screens that draw brand shares say when answers are left o
   assert.match(src("Overview"), /const missing = lostReads\(data\.lastRun\)/);
   assert.ok(!src("Overview").includes('data.lastRun?.status === "partial" ? ` ${MISSING_READS}`'), "a brand-only partial is not lost reads");
 });
+
+test("8 Oct 2026 (review of reliability-1 / data-6): the one-cluster answer tab and the Clusters prompts ask lostReads too", () => {
+  // A brand-only partial said "No answer came back from Google AI Overviews" of a stored silence, and
+  // hid the Clusters page's upgrade prompts, which are judged on named rates and keyword positions.
+  const src = (f: string) => readFileSync(new URL(`../../components/app/${f}.tsx`, import.meta.url), "utf8");
+  assert.match(src("OneCluster"), /unsure=\{!data\.lastRun \|\| data\.lastRun\.run_date !== latest\.day \|\| lostReads\(data\.lastRun\)\}/);
+  assert.match(src("Clusters"), /const state = shown\.length === 0 \? "empty" : lostReads\(data\.lastRun\) \? "partial" : "ok";/);
+  for (const f of ["Overview", "Clusters", "OneCluster", "Named", "Cited"]) {
+    assert.ok(!/lastRun\??\.status === "(partial|complete)"/.test(src(f)), `${f} reads a partial run through run-note.ts, not its status`);
+  }
+});

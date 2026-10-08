@@ -14,7 +14,7 @@ import { type Day, type Range, type Rate, basis as basisLine, brandGaps, compari
 import { type AnswerTab, type LatestAnswers, answerTabs, brandRuns } from "@/lib/tracking/latest-answers";
 import { NOTE_SAID, type NoteState } from "@/lib/tracking/note";
 import type { ClusterNote, Compare, OverviewData } from "@/lib/tracking/overview-data";
-import { partialRunNote } from "@/lib/tracking/run-note";
+import { lostReads, partialRunNote } from "@/lib/tracking/run-note";
 
 import ClusterChart from "./ClusterChart";
 import Fig from "./Fig";
@@ -408,7 +408,7 @@ export default function OneCluster({
               })}
             </nav>
           </div>
-          <Answer tab={tab} brand={brand} day={latest.day} today={today} unsure={!(data.lastRun?.status === "complete" && data.lastRun.run_date === latest.day)} />
+          <Answer tab={tab} brand={brand} day={latest.day} today={today} unsure={!data.lastRun || data.lastRun.run_date !== latest.day || lostReads(data.lastRun)} />
           <p style={{ margin: 0, fontSize: "13px", color: T.soft }}>{`What each engine said at ${latest.day === today ? "today's" : `the ${formatDay(latest.day)}`} check, with link addresses taken out of the text.`}</p>
         </section>
       ) : null}
@@ -484,6 +484,8 @@ export default function OneCluster({
 // R151 (1 Oct 2026): unless the day's run is the last one shown and it completed, an unanswered
 // read may be a failed one (a partial run's, or a failed run's, whose rows are still stored), not
 // the engine's silence - so "gave no answer" would say something the engine may not have done.
+// 8 Oct 2026 (audit reliability-1 / data-6): a run partial only for a brand gap lost no read, so
+// it counts as completed here - it asks lostReads, as the Overview's partial line does.
 function Answer({ tab, brand, day, today, unsure }: { tab: AnswerTab; brand: string; day: Day; today: Day; unsure: boolean }) {
   const label = ENGINE_SPECS[tab.engine as Engine].label;
   const when = `${day === today ? "Today" : formatDay(day, true)}${tab.time ? `, ${tab.time}` : ""}`;
