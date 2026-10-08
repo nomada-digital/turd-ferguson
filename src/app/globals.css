@@ -169,18 +169,10 @@ a:focus-visible > .brand-mark--spin {
 }
 .tier-name__accent { color: var(--brand-purple); }
 
-/* Screen-reader only */
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0,0,0,0);
-  white-space: nowrap;
-  border-width: 0;
-}
+/* Screen-reader only: Tailwind's own .sr-only (8 Oct 2026, audit a11y-1).
+   A hand-written copy here hid with `clip`, which Tailwind 4's
+   focus:not-sr-only never resets (it resets clip-path), so every skip link on
+   the site stayed clipped when focused. */
 
 /* ─── Scan checker ─── */
 /* The blur, and only the blur. It sits on the placement table alone: the
