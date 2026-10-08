@@ -100,14 +100,24 @@ export const PARALLEL_PAGES = 6;
  * the same statement. Every remaining offset is then known, and they go out
  * `parallel` at a time. Offsets advance by what the first page actually held,
  * not by PAGE, so a server whose `db-max-rows` is below PAGE is still read
- * whole, as `selectAll` reads it; and the count stands in for `selectAll`'s
- * extra request for the empty page that proves the end.
+ * whole, as `selectAll` reads it. The request that proves the end still goes
+ * out, as below, but beside the pages rather than after them.
  *
- * A later page holding a different number of rows than the count promised
- * means the rows moved during the read - the morning run writing answers
- * between two requests. Offsets no longer line up then, so the whole read is
- * done again with `selectAll` rather than returned with a row twice or a row
- * missing. So is a server that sends no count.
+ * Rows that move during the read - the morning run writing answers between
+ * two requests - shift every later offset by one, so the read is done again
+ * with `selectAll` when it sees that. It sees it in two ways: a page holding a
+ * different number of rows than the count promised, or any row at all at
+ * offset `total`, which one more request asks for, issued last in the batch.
+ * The second is needed (review, 8 Oct 2026): answer ids are random uuids, so a
+ * new row lands anywhere in id order and pushes every later row along by one.
+ * Every page then stays full, and when `total` is a multiple of the page size
+ * the last one is full too, so a size check alone returned a row twice and
+ * dropped another. A server that sends no count is also read with `selectAll`.
+ *
+ * What this does not catch: a write that lands after the end probe has read
+ * but before a page still in flight beside it does - a window about one
+ * request wide - and a write during the sequential re-read, which can read a
+ * row twice as `selectAll`, and the old one-after-another read, always could.
  */
 export async function selectAllCounted<T>(
   page: (
@@ -130,6 +140,8 @@ export async function selectAllCounted<T>(
   const step = head.length;
   const offsets: number[] = [];
   for (let at = step; at < total; at += step) offsets.push(at);
+  // The end probe: one row at `total`, last in the list so it is asked for after every page is.
+  offsets.push(total);
   const pages: T[][] = new Array(offsets.length);
   let next = 0;
   let moved = false;
@@ -137,11 +149,12 @@ export async function selectAllCounted<T>(
     while (next < offsets.length) {
       const i = next++;
       const at = offsets[i];
-      const { data, error } = await page(at, at + step - 1, false);
+      const end = at >= total;
+      const { data, error } = await page(at, end ? at : at + step - 1, false);
       if (error) throw new Error(error.message);
       const rows = data ?? [];
-      if (rows.length !== Math.min(step, total - at)) moved = true;
-      pages[i] = rows;
+      if (rows.length !== (end ? 0 : Math.min(step, total - at))) moved = true;
+      pages[i] = end ? [] : rows;
     }
   };
   await Promise.all(Array.from({ length: Math.max(1, Math.min(parallel, offsets.length)) }, worker));
