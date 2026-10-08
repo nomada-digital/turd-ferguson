@@ -44,11 +44,14 @@ export const metadata: Metadata = {
  * **It did not survive 8 Oct 2026 (LB7).** "A pure tracking tool is cheaper
  * than us and probably better instrumented" sat on the page whose entry price
  * is the alwaystracked plan - the site sending its own tracking buyer
- * elsewhere, with an undated claim about other companies' tools. It is cut,
- * and the card left beside it is labelled "When we are the better buy" so it
- * still reads alone; the card that replaces it is Danny's to approve. "White
- * label for agencies: Yes" waits on `dashboardBranding` (LB1): no dashboard
- * carries an agency's brand yet.
+ * elsewhere, with an undated claim about other companies' tools. It is cut.
+ * The card left beside it lost its label too: "When we are" only read as the
+ * second half of the pair, and a longer label would be new selling words, which
+ * are Danny's (on review, later that day). The card that replaces the cut one,
+ * and the framing of this one - which still turns away the buyer who wants
+ * measurement, on the page whose entry price is the alwaystracked plan - are
+ * his LB7 decision. "White label for agencies: Yes" waits on
+ * `dashboardBranding` (LB1): no dashboard carries an agency's brand yet.
  */
 
 type Column = { key: string; label: React.ReactNode; emphasis?: boolean };
@@ -129,8 +132,7 @@ export default function ComparePage() {
       </div>
 
       <div className="ac-row" style={{ ...CARD, border: `1px solid ${T.accent}`, padding: "24px" }}>
-        <div style={{ ...MICRO, color: T.accent }}>When we are the better buy</div>
-        <p style={{ margin: "10px 0 0", fontSize: "14px", lineHeight: 1.6, color: T.ink }}>
+        <p style={{ margin: 0, fontSize: "14px", lineHeight: 1.6, color: T.ink }}>
           When you need the gap closed rather than measured, and you do not have relationships with the
           sites the engines read. That is the whole difference, and it is a supply problem rather than a software one.
         </p>
