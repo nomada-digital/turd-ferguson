@@ -14,8 +14,11 @@ import { TRIAL, TRIAL_LINE, TRIAL_TERMS, noTrialLine, trialApplies, trialCharge,
  * shipped value - which is off until Danny says yes.
  */
 
-test("the trial ships switched off", () => {
-  assert.equal(TRIAL.enabled, false, "turning it on is its own one-line commit after Danny says yes");
+// The fact moved on 8 Oct 2026: built dark, then switched on the same day
+// at Danny's request. Turning it off again is the one line in trial.ts, and
+// every rule below runs both states either way.
+test("the trial is on, for 14 days", () => {
+  assert.equal(TRIAL.enabled, true);
   assert.equal(TRIAL.days, 14);
 });
 

@@ -27,7 +27,10 @@ test("each tier's action is declared once, in pricing.ts", () => {
     const at = pricing.indexOf(`key: "${key}"`);
     assert.ok(at > 0, `${key} is no longer a tier`);
     const block = pricing.slice(at, pricing.indexOf("\n  },", at));
-    assert.ok(block.includes(`action: "${label}",`), `${key}'s action is not "${label}"`);
+    // 8 Oct 2026: alwaystracked's button names the free trial while it is on
+    // (config/trial.ts TRIAL_CTA), and falls back to its own label when it is off.
+    const declared = key === "tracked" ? `action: TRIAL.enabled ? TRIAL_CTA : "${label}",` : `action: "${label}",`;
+    assert.ok(block.includes(declared), `${key}'s action is not ${declared}`);
   }
 });
 

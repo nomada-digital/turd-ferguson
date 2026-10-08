@@ -4,7 +4,7 @@ import EngineLogo from "@/components/EngineLogo";
 import TierName from "@/components/TierName";
 import { D, TRACKED_WASH } from "@/components/home/dark";
 import { TIERS, TRACKED_BASIS, TRACKED_CLUSTERS, TRACKED_KEYWORDS, TRACKED_PRICE, TRACKED_PROMPTS, checkoutUrlFor } from "@/config/pricing";
-import { trialLine } from "@/config/trial";
+import { TRIAL_CTA, trialLine } from "@/config/trial";
 import { count } from "@/lib/plural";
 import { SCAN_LIMITS } from "@/config/contact";
 import { track } from "@/lib/analytics";
@@ -999,6 +999,7 @@ function TrackedSection(p: { token: string; r: RunScanResponse; cluster: ReturnT
       {buy ? (
         <div data-figure="tracked-checkout" style={{ background: T.surface, color: T.ink, borderRadius: "18px", padding: "24px", minWidth: 0, display: "flex", flexDirection: "column", gap: "14px" }}>
           <div style={{ fontSize: "17px", fontWeight: 700 }}>Track this cluster from tomorrow</div>
+          {trialLine("tracked") ? <div style={{ alignSelf: "flex-start", padding: "4px 10px", borderRadius: "999px", background: T.wash, border: "1px solid " + T.washLine, fontSize: "13px", fontWeight: 600, color: T.accent }}>14-day free trial</div> : null}
           <div style={{ display: "flex", flexDirection: "column", gap: "4px", padding: "14px 16px", borderRadius: "12px", background: "#fcfbff", border: "1px solid " + T.washLine }}>
             <span style={{ fontSize: "12px", color: T.soft }}>Your first cluster, set up from this scan</span>
             <span style={{ fontSize: "15px", fontWeight: 700, overflowWrap: "anywhere" }}>{p.cluster === "chosen" ? p.r.cluster_keyword?.keyword : "Needs a keyword"}</span>
@@ -1012,9 +1013,9 @@ function TrackedSection(p: { token: string; r: RunScanResponse; cluster: ReturnT
             href={offer.href}
             style={{ display: "flex", alignItems: "center", justifyContent: "center", background: T.accent, color: T.surface, fontSize: "15px", fontWeight: 600, borderRadius: "12px", minHeight: "48px", textDecoration: "none" }}
           >
-            Track this cluster
+            {trialLine("tracked") ? TRIAL_CTA : "Track this cluster"}
           </a>
-          <div style={{ fontSize: "12px", lineHeight: 1.5, color: T.soft }}>Monthly, 30 days&apos; notice to cancel. The dashboard login arrives by email.</div>
+          <div style={{ fontSize: "12px", lineHeight: 1.5, color: T.soft }}>{trialLine("tracked") ? `${trialLine("tracked")} The dashboard login arrives by email.` : <>Monthly, 30 days&apos; notice to cancel. The dashboard login arrives by email.</>}</div>
         </div>
       ) : (
         <div style={{ background: T.surface, color: T.ink, borderRadius: "18px", padding: "24px", minWidth: 0 }}>

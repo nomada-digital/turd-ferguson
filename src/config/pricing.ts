@@ -21,6 +21,7 @@ import { TIER_PLAIN, type TierKey } from "@/components/TierName";
 // The site's one list joiner. A second copy of "a, b and c" written here is
 // the two-copies-of-one-function species this repo has already paid for once.
 import { listOf } from "@/config/scan-shape";
+import { TRIAL, TRIAL_CTA } from "@/config/trial";
 // The sector tiers' "from" is computed, never typed (pricing spec section 3).
 import { MAX_CLUSTERS, fromLabel, fromPrice } from "@/config/sector-pricing";
 import type { Engine } from "@/lib/scan/engines";
@@ -190,7 +191,8 @@ export const TIERS: Tier[] = [
       "White-label reports",
     ],
     cta: { label: "See what is included", href: "/alwaystracked" },
-    action: "Start tracking",
+    // The trial names itself on the button while it is on (8 Oct 2026, config/trial.ts).
+    action: TRIAL.enabled ? TRIAL_CTA : "Start tracking",
   },
   {
     id: "mentioned",

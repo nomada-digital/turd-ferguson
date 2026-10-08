@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { MarketToggle, useSeededMarket } from "@/components/SectorPrice";
 import { CHECKOUT_LIMITS } from "@/config/contact";
 import { TRACKED_PRICE, contactUrlFor } from "@/config/pricing";
-import { trialLine } from "@/config/trial";
+import { TRIAL_CTA, trialLine } from "@/config/trial";
 import { MARKETS, MAX_CLUSTERS, SECTORS, formatPrice, quoteFor, type Market } from "@/config/sector-pricing";
 import { withSelection, type Selection } from "@/config/sector-selection";
 import { CARD, MICRO, T } from "@/config/tokens";
@@ -284,7 +284,7 @@ export default function CheckoutOrder({ tier, tierPlain, plan, tierPage, include
             </label>
           </div>
           <p style={{ margin: "16px 0 0", fontSize: "13.5px", lineHeight: 1.6, color: T.soft }}>
-            Billed monthly. 30 days&apos; notice to cancel{perCluster ? ", because placements may still be in progress" : ""}.
+            {trialLine(tier) ? "Free for 14 days, then billed monthly. After the first charge, 30 days' notice to cancel." : <>Billed monthly. 30 days&apos; notice to cancel{perCluster ? ", because placements may still be in progress" : ""}.</>}
             {perCluster ? " A refund if the keyword turns out not to be workable." : ""}
           </p>
           <button type="submit" aria-disabled={busy || undefined} style={{ ...button, width: "100%", marginTop: "16px", background: T.accent, color: T.surface, border: `1px solid ${T.accent}`, cursor: busy ? "progress" : "pointer" }}>
@@ -294,7 +294,7 @@ export default function CheckoutOrder({ tier, tierPlain, plan, tierPage, include
                 Opening payment...
               </>
             ) : (
-              "Continue to payment"
+              trialLine(tier) ? TRIAL_CTA : "Continue to payment"
             )}
           </button>
           <p style={{ margin: "10px 0 0", textAlign: "center", fontSize: "13px", lineHeight: 1.6, color: T.soft }}>Got a promo code? Add it on the next page.</p>

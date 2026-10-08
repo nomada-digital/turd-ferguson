@@ -4,15 +4,19 @@ import type { TierKey } from "../lib/tier-text.ts";
  * The alwaystracked free trial (Danny, 8 Oct 2026): 14 days, card required,
  * the first charge on day 15.
  *
- * Built dark. A code constant rather than an app_settings row, because every
- * surface that shows the price is a static page and a settings read there
- * would make it dynamic. Turning it on is a one-line commit after Danny says
- * yes - see the list at the top of the Part 3 report before flipping it.
+ * Built dark, then switched on 8 Oct 2026 at Danny's request ("add messaging
+ * to indicate a 14-day free trial for alwaystracked"). A code constant rather
+ * than an app_settings row, because every surface that shows the price is a
+ * static page and a settings read there would make it dynamic. Turning it
+ * off again is this one line.
  *
  * Every reader takes `enabled` as a parameter defaulting to this, so the tests
  * run both states while the build runs the shipped one.
  */
-export const TRIAL = { enabled: false, days: 14 } as const;
+export const TRIAL = { enabled: true, days: 14 } as const;
+
+/** The alwaystracked button label while the trial is on - the offer, in the verb. */
+export const TRIAL_CTA = "Start 14-day free trial";
 
 /** The line every alwaystracked price surface gains while the trial is on. */
 export const TRIAL_LINE = "14 days free, card required. Cancel before day 15 and you pay nothing.";
