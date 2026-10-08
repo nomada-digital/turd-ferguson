@@ -11,6 +11,7 @@ import { CLUSTER_BASE } from "@/lib/tracking/limits";
 import { rangeFrom, rangeQuery } from "@/lib/tracking/overview-data";
 import { placedTier } from "@/lib/tracking/placement-figures";
 import { fixtureMode } from "@/lib/tracking/fixture-mode";
+import { writeRole } from "@/lib/tracking/member";
 import { trackingRepo } from "@/lib/tracking/repo";
 import { needsSetup, setupOutstanding, setupPath } from "@/lib/tracking/setup-landing";
 import { refuseRole } from "@/lib/tracking/stop";
@@ -58,7 +59,7 @@ export default async function ClientDashboard({
   const outstanding = setupOutstanding(client, confirmed, fixtureMode());
   // R173 pass 2 (pass 1's P3): the confirm route's 303 lands here; it is said only when the confirm reads back.
   const justConfirmed = sp.setup === "confirmed" && confirmed === true;
-  const canWrite = refuseRole(client.role) === null;
+  const canWrite = refuseRole(writeRole(client)) === null;
   // R97 part 5: "Show placements" on the same rule as the placements screen - a placed tier, or any placement logged.
   const placements = placed || rows.some((p) => p.status !== "removed") ? rows : undefined;
 

@@ -75,3 +75,14 @@ export async function clientsFor(email: string): Promise<(MemberClient & { role:
     role: roleOf.get(r.account_id as string) ?? "viewer",
   }));
 }
+
+/**
+ * The role a write is judged with (8 Oct 2026, review of 2379757). An ended
+ * client's history stays readable, but nothing new is tracked for it - the
+ * runner skips it - so adding or editing clusters, prompts and keywords would
+ * promise a check that never comes. It is read-only to everyone, which the
+ * routes' existing viewer refusals and the pages' canWrite already enforce.
+ */
+export function writeRole(c: { role: string; status?: string }): string {
+  return c.status === "ended" ? "viewer" : c.role;
+}

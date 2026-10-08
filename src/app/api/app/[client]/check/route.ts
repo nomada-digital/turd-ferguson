@@ -9,7 +9,7 @@ import { checkClusterKeyword } from "@/lib/tracking/check-keyword";
 import { ADMIN_LIMITS, trackingDay } from "@/lib/tracking/decide";
 import { fixtureMode } from "@/lib/tracking/fixture-mode";
 import { fixtureCheck } from "@/lib/tracking/fixture-writes";
-import { clientsFor, sessionEmail } from "@/lib/tracking/member";
+import { clientsFor, sessionEmail, writeRole } from "@/lib/tracking/member";
 import { writableFixture } from "@/lib/tracking/repo";
 import { readKept, refuseRole } from "@/lib/tracking/stop";
 import { dashPath, dashUrl } from "@/lib/tracking/app-redirect";
@@ -67,7 +67,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ client: string
   if (!email) return NextResponse.redirect(dashUrl(req, dashPath(req, "/login")), 303);
   const client = (await clientsFor(email)).find((c) => c.slug === slug);
   if (!client) return NextResponse.json({ error: "Not found." }, { status: 404 });
-  if (refuseRole(client.role)) return NextResponse.json({ error: "Viewers cannot add clusters." }, { status: 403 });
+  if (refuseRole(writeRole(client))) return NextResponse.json({ error: "Viewers cannot add clusters." }, { status: 403 });
 
   const db = supabaseAdmin();
   const { data: kws, error } = await db.from("tracked_keywords").select("keyword").eq("client_domain_id", client.id).is("stopped_on", null);

@@ -5,7 +5,7 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import { fixtureMode } from "@/lib/tracking/fixture-mode";
 import { fixtureGroup } from "@/lib/tracking/fixture-writes";
 import { moveIntoCluster } from "@/lib/tracking/limits";
-import { clientsFor, sessionEmail } from "@/lib/tracking/member";
+import { clientsFor, sessionEmail, writeRole } from "@/lib/tracking/member";
 import { writeFixture } from "@/lib/tracking/repo";
 import { slotWhyOf } from "@/lib/tracking/slot";
 import { BULK_ID, type StopDone, readBulkIds, readStopForm, stopReturn } from "@/lib/tracking/stop";
@@ -61,7 +61,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ client: string
   if (!client) return NextResponse.json({ error: "Not found." }, { status: 404 });
 
   for (const id of ids) {
-    const r = await moveIntoCluster(supabaseAdmin(), { clientId: client.id, clusterId, id, role: client.role });
+    const r = await moveIntoCluster(supabaseAdmin(), { clientId: client.id, clusterId, id, role: writeRole(client) });
     if (r.ok) n++;
     else {
       console.warn(`[app] move refused: ${r.message}`);

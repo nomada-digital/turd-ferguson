@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 
 import { appPath } from "@/lib/app-host";
 import { trackingRepo } from "@/lib/tracking/repo";
+import { landingIndex } from "@/lib/tracking/setup-landing";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +21,7 @@ export default async function AppHome() {
   if (!email) redirect(appPath("/login"));
   const clients = await repo.clientsFor(email);
   if (!clients.length) redirect(appPath("/login?access=none"));
-  // An ended client is still listed (its history stays), but is never where a member lands (audit ia-12).
-  const landing = clients.find((c) => c.status !== "ended") ?? clients[0]!;
+  // An ended client is still listed (its history stays), but is never where a member lands (audit ia-12; landingIndex).
+  const landing = clients[landingIndex(clients)]!;
   redirect(appPath(`/${landing.slug}`));
 }

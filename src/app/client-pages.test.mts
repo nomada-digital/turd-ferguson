@@ -147,12 +147,13 @@ const KEYS: Record<string, Record<string, string>> = {
 /** Role reads on a page, and what each may decide. A page reading a role anywhere else fails. */
 const ROLE_READS: Record<string, string[]> = {
   // DS10 (2 Oct 2026): the setup-outstanding line tells a viewer an owner or editor confirms.
-  "": ["const canWrite = refuseRole(client.role) === null;"],
-  "/clusters": ["canWrite={refuseRole(client.role) === null}"],
-  "/clusters/[cluster]": ['canWrite={client.role === "owner" || client.role === "editor"}'],
+  // 8 Oct 2026 (review of 2379757): writes are judged by writeRole(client), which makes an ended client read-only.
+  "": ["const canWrite = refuseRole(writeRole(client)) === null;"],
+  "/clusters": ["canWrite={refuseRole(writeRole(client)) === null}"],
+  "/clusters/[cluster]": ['canWrite={writeRole(client) === "owner" || writeRole(client) === "editor"}'],
   "/settings": ['owner={client.role === "owner"}'],
   // R166 part 3b: viewers see the cards but not Confirm; the route refuses them too.
-  "/setup": ["const canWrite = refuseRole(client.role) === null;"],
+  "/setup": ["const canWrite = refuseRole(writeRole(client)) === null;"],
 };
 
 /**
@@ -221,7 +222,7 @@ for (const [route, src] of PAGES) {
   });
 
   test(`${name}: (f) role reads are only the registered ones`, () => {
-    const reads = [...src.matchAll(/[^\n]*client\.role\b[^\n]*/g)]
+    const reads = [...src.matchAll(/[^\n]*(?:client\.role\b|writeRole\(client\))[^\n]*/g)]
       .map((m) => m[0])
       .filter((l) => !l.includes("role={client.role}")); // the Sidebar's own badge
     const allowed = ROLE_READS[route] ?? [];

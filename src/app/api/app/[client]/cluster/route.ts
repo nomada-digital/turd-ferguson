@@ -6,7 +6,7 @@ import { verifyCheck } from "@/lib/tracking/add-cluster";
 import { ADMIN_LIMITS, trackingDay } from "@/lib/tracking/decide";
 import { fixtureMode } from "@/lib/tracking/fixture-mode";
 import { fixtureAddCluster } from "@/lib/tracking/fixture-writes";
-import { clientsFor, sessionEmail } from "@/lib/tracking/member";
+import { clientsFor, sessionEmail, writeRole } from "@/lib/tracking/member";
 import { addCluster } from "@/lib/tracking/new-cluster";
 import { writeFixture } from "@/lib/tracking/repo";
 import { slotWhyOf } from "@/lib/tracking/slot";
@@ -70,7 +70,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ client: string
     prompts,
     today: day,
     by: email,
-    role: client.role,
+    role: writeRole(client),
   });
   if (!r.ok) {
     console.warn(`[app] add cluster refused: ${r.message}`);

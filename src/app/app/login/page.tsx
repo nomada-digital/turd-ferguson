@@ -74,7 +74,7 @@ export default async function AppLogin({ searchParams }: { searchParams: Promise
       <LoginForm next={safeNext(q.next) ?? undefined} refused={q.email === "bad"} again={sent} />
       {/* 8 Oct 2026 (audit ia-13): login answered a non-member with nothing but a mailto. Same for members and not, so it reveals no one. */}
       <p style={{ margin: "20px 0 0", fontSize: "14px", lineHeight: 1.6, color: T.soft }}>
-        No dashboard yet? <TierName tier="tracked" />{TRIAL.enabled ? ` starts with ${TRIAL.days} days free.` : " tracks your AI visibility daily."}{" "}
+        {TRIAL.enabled ? <>No dashboard yet? Start a {TRIAL.days}-day free trial of <TierName tier="tracked" />, card required.</> : <>No dashboard yet? See what <TierName tier="tracked" /> tracks.</>}{" "}
         <a href={siteHref("/alwaystracked")} style={{ color: T.accent, fontWeight: 600 }}>See the plan</a>
       </p>
     </section>

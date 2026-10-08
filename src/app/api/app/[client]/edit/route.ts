@@ -5,7 +5,7 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import { editPrompts, readEdits } from "@/lib/tracking/edit";
 import { fixtureMode } from "@/lib/tracking/fixture-mode";
 import { fixtureEditPrompts } from "@/lib/tracking/fixture-writes";
-import { clientsFor, sessionEmail } from "@/lib/tracking/member";
+import { clientsFor, sessionEmail, writeRole } from "@/lib/tracking/member";
 import { writeFixture } from "@/lib/tracking/repo";
 import { slotWhyOf } from "@/lib/tracking/slot";
 import { readStopForm, stopReturn } from "@/lib/tracking/stop";
@@ -44,7 +44,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ client: string
   const client = (await clientsFor(email)).find((c) => c.slug === slug);
   if (!client) return NextResponse.json({ error: "Not found." }, { status: 404 });
 
-  const r = await editPrompts(supabaseAdmin(), { clientId: client.id, clusterId: f.id, edits, role: client.role });
+  const r = await editPrompts(supabaseAdmin(), { clientId: client.id, clusterId: f.id, edits, role: writeRole(client) });
   if (!r.ok) {
     console.warn(`[app] cluster edit refused: ${r.message}`);
     return back("refused", r.message);

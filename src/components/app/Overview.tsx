@@ -267,8 +267,8 @@ export default function Overview({
   const missing = data.lastRun?.status === "partial" ? ` ${MISSING_READS}` : "";
   const checked = data.lastRun?.finished_at
     ? data.lastRun.run_date === today
-      ? `Checked today at ${londonTime(data.lastRun.finished_at)}.${missing} ${ended ? "Tracking has ended, so this was the last check." : "Next check tomorrow at 06:00."}`
-      : `Last checked ${formatDay(data.lastRun.run_date)} at ${londonTime(data.lastRun.finished_at)}.${missing} ${ended ? "Tracking has ended, so no more checks run." : range.to === today ? "Nothing from today's check yet, so today is blank." : "Next check at 06:00."}`
+      ? `Checked today at ${londonTime(data.lastRun.finished_at)}.${missing} ${ended ? "Tracking has ended, so this was the last check." : liveQuestions ? "Next check tomorrow at 06:00." : "No more checks until a cluster has prompts."}`
+      : `Last checked ${formatDay(data.lastRun.run_date)} at ${londonTime(data.lastRun.finished_at)}.${missing} ${ended ? "Tracking has ended, so no more checks run." : !liveQuestions ? "No more checks until a cluster has prompts." : range.to === today ? "Nothing from today's check yet, so today is blank." : "Next check at 06:00."}`
     : firstCheckLine;
   // Mobile.dc.html: "Checked today at 06:10", nothing after it. DS8 (2 Oct 2026, R172 pass 1): a
   // partial run is not on the board, and "some reads missing" alone left the phone guessing what
@@ -284,11 +284,18 @@ export default function Overview({
         <section aria-label="Headline" className="on-dark" style={{ padding: "36px 40px", borderRadius: "18px", background: `${CLOSE_WASH}, ${D.ground}`, color: T.surface }}>
           <h2 style={{ margin: 0, fontSize: "28px", lineHeight: 1.2, fontWeight: 700, letterSpacing: "-0.03em" }}>{line}</h2>
           <p style={{ margin: "12px 0 0", fontSize: "16px", lineHeight: 1.55, color: D.cardHead, maxWidth: "520px" }}>
-            {liveQuestions ? `${liveQuestions} prompts are set up on ${WORDS[engines.length] ?? engines.length} engines. ` : ""}
-            The figures fill in from the first daily check, and history starts that day.
+            {ended ? (
+              // An ended client opens here once its last reading is out of the default range (review of 2379757).
+              <>No more checks run.{data.lastRun ? ` The last was on ${formatDay(data.lastRun.run_date, true)}; pick a range that includes it to see what was read.` : ""}</>
+            ) : (
+              <>
+                {liveQuestions ? `${liveQuestions} prompts are set up on ${WORDS[engines.length] ?? engines.length} engines. ` : ""}
+                The figures fill in from the first daily check, and history starts that day.
+              </>
+            )}
           </p>
           {/* R148 pass 10 (1 Oct 2026): a new buyer's first view had no next step; the prompts it names are one click away. */}
-          {clustersPath && liveQuestions ? (
+          {clustersPath && liveQuestions && !ended ? (
             <Link href={clustersPath} style={{ display: "inline-flex", alignItems: "center", height: "48px", marginTop: "20px", padding: "0 18px", boxSizing: "border-box", borderRadius: "12px", background: T.surface, color: T.ink, fontSize: "14px", fontWeight: 600, textDecoration: "none" }}>
               See your prompts
             </Link>

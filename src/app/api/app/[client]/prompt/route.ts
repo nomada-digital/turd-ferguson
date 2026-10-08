@@ -5,7 +5,7 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import { trackingDay } from "@/lib/tracking/decide";
 import { fixtureMode } from "@/lib/tracking/fixture-mode";
 import { fixtureFillSlot } from "@/lib/tracking/fixture-writes";
-import { clientsFor, sessionEmail } from "@/lib/tracking/member";
+import { clientsFor, sessionEmail, writeRole } from "@/lib/tracking/member";
 import { writeFixture } from "@/lib/tracking/repo";
 import { fillSlot, slotWhyOf } from "@/lib/tracking/slot";
 import { type StopDone, readStopForm, stopReturn } from "@/lib/tracking/stop";
@@ -44,7 +44,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ client: string
   const client = (await clientsFor(email)).find((c) => c.slug === slug);
   if (!client) return NextResponse.json({ error: "Not found." }, { status: 404 });
 
-  const r = await fillSlot(supabaseAdmin(), { clientId: client.id, clusterId: f.id, angle: sp.get("angle"), text, today: trackingDay(), by: email, role: client.role });
+  const r = await fillSlot(supabaseAdmin(), { clientId: client.id, clusterId: f.id, angle: sp.get("angle"), text, today: trackingDay(), by: email, role: writeRole(client) });
   if (!r.ok) {
     console.warn(`[app] free slot refused: ${r.message}`);
     return back("refused", f.id, r.message);

@@ -27,6 +27,13 @@ const HEAD = { margin: 0, padding: "18px 24px", fontSize: "16px", fontWeight: 70
 // Each row carries the rule above it, so the head needs none of its own.
 const ROW = { display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: "8px 24px", flexWrap: "wrap", padding: "14px 24px", borderTop: `1px solid ${T.line}`, fontSize: "14px" } as const;
 
+/** The next daily run: the track cron is `0 5 * * *` UTC (vercel.json). */
+const nextRunUtc = (now: number) => {
+  const d = new Date(now);
+  const at = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 5);
+  return at > now ? at : at + 86_400_000;
+};
+
 /** A London calendar day from a timestamp, as the rest of /app writes days. */
 const dayOf = (iso: string) => formatDay(new Date(iso).toLocaleDateString("en-CA", { timeZone: "Europe/London" }), true);
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
@@ -101,6 +108,8 @@ export default function Settings({
   const owners = members.filter((m) => m.role === "owner").length;
   const names = [brand?.trim() || domain, ...aliases.filter((a) => a !== brand)];
   const trial = ended ? null : trialStatus({ trialEndsAt, cancelled: Boolean(trialCancelledAt), market, price: TRACKED_PRICE });
+  // A cancelled trial whose end comes before the next run (05:00 UTC daily, vercel.json) has no next check (review of 2379757).
+  const trialStopsFirst = Boolean(trialCancelledAt && trialEndsAt && Date.parse(trialEndsAt) <= nextRunUtc(Date.now()));
   return (
     <div className="app-col" style={{ display: "flex", flexDirection: "column", gap: "20px", minWidth: 0, maxWidth: "880px" }}>
       <header style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
@@ -131,7 +140,7 @@ export default function Settings({
         <Row label="Clusters in use">{`${clustersInUse} of ${clusterLimit}`}</Row>
         {/* DS56 (2 Oct 2026, R173 pass 6): signup sets started_on to the first check, tomorrow, so "since" read a day still to come. */}
         <Row label={startedOn && startedOn > today ? "Tracking from" : "Tracking since"}>{startedOn ? formatDay(startedOn, true) : "Not started yet"}</Row>
-        <Row label="Next check">{ended ? "None - tracking has ended" : livePrompts ? "Tomorrow at 06:00" : "Once a cluster has prompts"}</Row>
+        <Row label="Next check">{ended ? "None - tracking has ended" : trialStopsFirst ? `None - the trial ends ${trialMoment(trialEndsAt!, market)}` : livePrompts ? "Tomorrow at 06:00" : "Once a cluster has prompts"}</Row>
         <div style={{ ...ROW, flexDirection: "column", alignItems: "flex-start", gap: "10px" }}>
           <span style={{ color: T.soft }}>Names we match</span>
           <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexWrap: "wrap", gap: "8px" }}>
@@ -275,7 +284,9 @@ export default function Settings({
         <section aria-labelledby="set-billing" style={SECTION}>
           <h2 id="set-billing" style={HEAD}>Billing</h2>
           <p style={{ margin: 0, borderTop: `1px solid ${T.line}`, padding: "14px 24px", fontSize: "14px", lineHeight: 1.5, color: T.soft }}>
-            Only an owner can change billing or cancel the trial - ask one of them.
+            {trialCancelledAt && trialEndsAt
+              ? `An owner cancelled the trial. Tracking stops ${trialMoment(trialEndsAt, market)} and nothing is charged.`
+              : "Only an owner can cancel the trial or ask us about billing - ask one of them."}
           </p>
         </section>
       ) : null}

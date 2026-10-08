@@ -80,3 +80,14 @@ test("R166 step 6: the admin setup state names the first confirm, else why there
   assert.equal(setupState({ started_on: "2026-09-20" }, []), "set up by hand (before the setup page)");
   assert.equal(setupState({ started_on: null }, []), "set up by hand (before the setup page)");
 });
+
+test("8 Oct 2026: an ended first client is not where a member lands, by /app or by email", async () => {
+  const { landingIndex } = await import("./setup-landing.ts");
+  assert.equal(landingIndex([{ status: "ended" }, { status: "active" }]), 1);
+  assert.equal(landingIndex([{ status: "active" }, { status: "ended" }]), 0);
+  assert.equal(landingIndex([{}, { status: "active" }]), 0, "no status is not ended");
+  assert.equal(landingIndex([{ status: "ended" }]), 0, "all ended: still somewhere to land");
+  const clients = [{ slug: "old", confirmed: true, status: "ended" }, { slug: "new", confirmed: false, status: "active" }];
+  assert.equal(landingAfterAuth({ next: null, clients }), "/app/new/setup");
+  assert.equal(landingAfterAuth({ next: null, clients: [clients[0]!, { ...clients[1]!, confirmed: true }] }), "/app/new");
+});

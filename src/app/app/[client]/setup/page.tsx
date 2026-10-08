@@ -17,6 +17,7 @@ import { prefillCard } from "@/lib/tracking/order-keyword";
 import { loginHref } from "@/lib/tracking/next-path";
 import { rangeFrom } from "@/lib/tracking/overview-data";
 import { placedTier } from "@/lib/tracking/placement-figures";
+import { writeRole } from "@/lib/tracking/member";
 import { trackingRepo } from "@/lib/tracking/repo";
 import { confirmLabel, setupCards } from "@/lib/tracking/setup-landing";
 import { refuseRole } from "@/lib/tracking/stop";
@@ -79,7 +80,7 @@ export default async function ClientSetup({
   const ungrouped = ungroupedShown(data.questions, today).length;
   // R180: the keyword typed at checkout, with no scan behind the order, prefills the first keywordless card's field.
   const prefill = prefillCard(cards, typed);
-  const canWrite = refuseRole(client.role) === null;
+  const canWrite = refuseRole(writeRole(client)) === null;
   const failed = sp.confirm === "failed";
   // Part 5: the check's 303 names its card; a card that is not one of these shows nothing.
   const one = (k: string) => (typeof sp[k] === "string" ? (sp[k] as string) : null);

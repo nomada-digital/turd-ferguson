@@ -4,7 +4,7 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import { clientsFor } from "@/lib/tracking/member";
 import { safeNext } from "@/lib/tracking/next-path";
 import { loadSetupConfirmed } from "@/lib/tracking/setup-data";
-import { landingAfterAuth, needsSetup } from "@/lib/tracking/setup-landing";
+import { landingAfterAuth, landingIndex, needsSetup } from "@/lib/tracking/setup-landing";
 import { SESSION_TTL_MS, hashToken, isTokenShape, newToken, sessionCookie } from "@/lib/tracking/session";
 import { dashPath, dashUrl } from "@/lib/tracking/app-redirect";
 import { appPath } from "@/lib/app-host";
@@ -75,9 +75,11 @@ export async function POST(req: Request) {
   // (needsSetup) lands on its setup until confirmed. A failed setup read
   // counts as confirmed, so a set-up client is never sent round again.
   const listed = await clientsFor(email).catch(() => null);
-  const first = listed?.[0];
+  // The client the member lands on is the first that has not ended (landingIndex), and the setup check runs on that one.
+  const at = listed ? landingIndex(listed) : 0;
+  const first = listed?.[at];
   const unconfirmed = first && needsSetup(first) ? (await loadSetupConfirmed(first.id)) === false : false;
-  const clients = listed ? listed.map((c, i) => ({ slug: c.slug, confirmed: !(i === 0 && unconfirmed) })) : null;
+  const clients = listed ? listed.map((c, i) => ({ slug: c.slug, status: c.status, confirmed: !(i === at && unconfirmed) })) : null;
   const to = landingAfterAuth({ next, clients });
   const res = NextResponse.redirect(dashUrl(req, to), 303);
   res.cookies.set(sessionCookie(session));

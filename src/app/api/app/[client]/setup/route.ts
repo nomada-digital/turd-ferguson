@@ -5,7 +5,7 @@ import { verifyCheck } from "@/lib/tracking/add-cluster";
 import { ADMIN_LIMITS, trackingDay } from "@/lib/tracking/decide";
 import { fixtureMode } from "@/lib/tracking/fixture-mode";
 import { fixtureWrites } from "@/lib/tracking/fixture-writes";
-import { clientsFor, sessionEmail } from "@/lib/tracking/member";
+import { clientsFor, sessionEmail, writeRole } from "@/lib/tracking/member";
 import { confirmFixtureSetup, trackingRepo } from "@/lib/tracking/repo";
 import { loadSetupConfirmed } from "@/lib/tracking/setup-data";
 import { SETUP_CONFIRMED_EVENT, setupPath } from "@/lib/tracking/setup-landing";
@@ -55,7 +55,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ client: string
   if (!email) return NextResponse.redirect(dashUrl(req, dashPath(req, "/login")), 303);
   const client = (await clientsFor(email)).find((c) => c.slug === slug);
   if (!client) return NextResponse.json({ error: "Not found." }, { status: 404 });
-  if (refuseRole(client.role)) return NextResponse.json({ error: "Viewers cannot confirm setup." }, { status: 403 });
+  if (refuseRole(writeRole(client))) return NextResponse.json({ error: "Viewers cannot confirm setup." }, { status: 403 });
 
   const already = await loadSetupConfirmed(client.id);
   if (already === null) return failed;

@@ -14,6 +14,7 @@ import { engineTab } from "@/lib/tracking/latest-answers";
 import { noteState } from "@/lib/tracking/note";
 import { rangeFrom, rangeQuery } from "@/lib/tracking/overview-data";
 import { placedTier } from "@/lib/tracking/placement-figures";
+import { writeRole } from "@/lib/tracking/member";
 import { trackingRepo } from "@/lib/tracking/repo";
 import { appPath } from "@/lib/app-host";
 
@@ -83,7 +84,7 @@ export default async function ClientCluster({
           prompt={prompt}
           latest={latest}
           notes={notes}
-          canWrite={client.role === "owner" || client.role === "editor"}
+          canWrite={writeRole(client) === "owner" || writeRole(client) === "editor"}
           noteState={noteState(sp.note)}
           noteAction={`/api/app/${encodeURIComponent(slug)}/note`}
           engine={engineTab(sp.engine, engines)}

@@ -16,6 +16,7 @@ import { formatDay } from "@/lib/tracking/figures";
 import { CLUSTER_BASE } from "@/lib/tracking/limits";
 import { rangeFrom, rangeQuery } from "@/lib/tracking/overview-data";
 import { placedTier } from "@/lib/tracking/placement-figures";
+import { writeRole } from "@/lib/tracking/member";
 import { trackingRepo } from "@/lib/tracking/repo";
 import { slotRefusal } from "@/lib/tracking/slot";
 import { BULK_ID, BULK_MAX, refuseRole } from "@/lib/tracking/stop";
@@ -106,7 +107,7 @@ export default async function ClientClusters({
           filter={f === "named" || f === "never" ? f : "all"}
           q={clusterSearch(one("q"))}
           slug={slug}
-          canWrite={refuseRole(client.role) === null}
+          canWrite={refuseRole(writeRole(client)) === null}
           toast={toast}
           adding={adding}
           rekey={rekey}

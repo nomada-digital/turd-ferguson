@@ -46,14 +46,25 @@ export function setupOutstanding(c: { started_on: string | null }, confirmed: bo
   return confirmed === false && (fixture || needsSetup(c));
 }
 
+/**
+ * Which of a member's clients they land on (8 Oct 2026, review of 2379757):
+ * the first, in the order /app lists them, that has not ended. An ended
+ * client stays listed - its history is still theirs - but is never where a
+ * member arrives. One rule for /app and for the email sign-in.
+ */
+export function landingIndex(clients: readonly { status?: string }[]): number {
+  const i = clients.findIndex((c) => c.status !== "ended");
+  return i === -1 ? 0 : i;
+}
+
 export function landingAfterAuth(o: {
   next: string | null;
   /** The member's clients in the order /app lists them; null when the read failed. */
-  clients: readonly { slug: string; confirmed: boolean }[] | null;
+  clients: readonly { slug: string; confirmed: boolean; status?: string }[] | null;
 }): string {
   if (o.clients === null) return o.next ?? appPath("");
   if (!o.clients.length) return appPath("/login?access=none");
-  const first = o.clients[0]!;
+  const first = o.clients[landingIndex(o.clients)]!;
   if (!first.confirmed) return setupPath(first.slug);
   return o.next ?? appPath(`/${first.slug}`);
 }

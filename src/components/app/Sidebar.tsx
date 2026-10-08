@@ -152,10 +152,12 @@ export default function Sidebar({
   // An ended client is not sent to checkout: a new order cannot yet bring the
   // old client back (review of 2379757), so the owner asks us, where billing is.
   const billing = { href: appPath(`/${client.slug}/settings`) + "#set-billing", label: "Billing" };
+  // Agency and off modes bill through the account contact, never us (review of 2379757).
+  const endedText = `Tracking has ended for ${client.brand ?? client.domain}. Everything read so far stays here`;
   const banner: { tone: "trial" | "ended"; text: string; link: { href: string; label: string } | null } | null = ended
-    ? role === "owner"
-      ? { tone: "ended", text: `Tracking has ended for ${client.brand ?? client.domain}. Everything read so far stays here.`, link: { href: billing.href, label: "Ask us to restart it" } }
-      : { tone: "ended", text: `Tracking has ended for ${client.brand ?? client.domain}. Everything read so far stays here - an owner can ask us to restart it.`, link: null }
+    ? role === "owner" && upsell
+      ? { tone: "ended", text: `${endedText}.`, link: { href: billing.href, label: "Ask us to restart it" } }
+      : { tone: "ended", text: `${endedText} - ${upsell ? "an owner can ask us to restart it" : "your account contact can restart it"}.`, link: null }
     : trial && client.trial_ends_at && !client.trial_cancelled_at
       ? { tone: "trial", text: `Free trial: ${daysLeft === 1 ? "1 day" : `${daysLeft} days`} left, ends ${trialMoment(client.trial_ends_at, client.market)}.`, link: billing }
       : trial
@@ -187,10 +189,11 @@ export default function Sidebar({
         Skip to content
       </a>
       {banner ? (
-        <div role="status" className="app-banner" style={{ flex: "1 1 100%", display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "center", gap: "4px 12px", padding: "10px 16px", fontSize: "14px", lineHeight: 1.4, textAlign: "center", boxSizing: "border-box", background: banner.tone === "trial" ? T.wash : T.chip, borderBottom: `1px solid ${banner.tone === "trial" ? T.washLine : T.line}`, color: T.ink }}>
+        // Page furniture, not an announcement: a labelled region rather than role=status, which re-read itself on every soft navigation (review of 2379757).
+        <aside aria-label="Your plan" className="app-banner" style={{ flex: "1 1 100%", display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "center", gap: "4px 12px", padding: "10px 16px", fontSize: "14px", lineHeight: 1.4, textAlign: "center", boxSizing: "border-box", background: banner.tone === "trial" ? T.wash : T.chip, borderBottom: `1px solid ${banner.tone === "trial" ? T.washLine : T.line}`, color: T.ink }}>
           <span>{banner.text}</span>
           {banner.link ? <a href={banner.link.href} style={{ display: "inline-flex", alignItems: "center", minHeight: "44px", fontWeight: 600, color: T.accent, textDecoration: "underline", textUnderlineOffset: "2px" }}>{banner.link.label}</a> : null}
-        </div>
+        </aside>
       ) : null}
       <header className="app-topbar" style={{ alignItems: "center", justifyContent: "space-between", height: "60px", padding: "0 16px", background: T.surface, borderBottom: `1px solid ${T.line}`, flex: "1 1 100%", minWidth: 0, boxSizing: "border-box" }}>
         <Lockup size={16} />
@@ -313,9 +316,9 @@ export default function Sidebar({
             <TierName tier={tier} />
             {clusters && clusterLimit ? `, ${clusterLimit} clusters` : null}
           </div>
-          <p style={{ margin: 0, fontSize: "13px", lineHeight: 1.5, color: T.soft }}>
+          {ended ? null : <p style={{ margin: 0, fontSize: "13px", lineHeight: 1.5, color: T.soft }}>
             {clusters && clusterLimit ? `${clusterLimit * PROMPTS_PER_CLUSTER} prompts and ${clusterLimit * KEYWORDS_PER_CLUSTER} Google keywords, checked every day on ${WORDS[engines.length] ?? engines.length} engines.` : `${TRACKED_BASIS}.`}
-          </p>
+          </p>}
           {trial ? <p style={{ margin: 0, fontSize: "13px", lineHeight: 1.5, fontWeight: 600, color: T.ink }}>{trial}</p> : null}
           {ended ? <p style={{ margin: 0, fontSize: "13px", lineHeight: 1.5, fontWeight: 600, color: T.ink }}>Tracking has ended. No more checks run.</p> : null}
           <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>

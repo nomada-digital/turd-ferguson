@@ -6,7 +6,7 @@ import { verifyCheck } from "@/lib/tracking/add-cluster";
 import { ADMIN_LIMITS, trackingDay } from "@/lib/tracking/decide";
 import { fixtureMode } from "@/lib/tracking/fixture-mode";
 import { fixtureRekey } from "@/lib/tracking/fixture-writes";
-import { clientsFor, sessionEmail } from "@/lib/tracking/member";
+import { clientsFor, sessionEmail, writeRole } from "@/lib/tracking/member";
 import { changeKeyword } from "@/lib/tracking/rekey";
 import { writeFixture } from "@/lib/tracking/repo";
 import { type StopDone, readStopForm, stopReturn } from "@/lib/tracking/stop";
@@ -62,7 +62,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ client: string
     console.warn("[app] keyword change refused: the keyword check did not verify");
     return back("refused");
   }
-  const r = await changeKeyword(supabaseAdmin(), { clientId: client.id, clusterId: f.id, keyword, volume, intent, today: day, role: client.role, by: email });
+  const r = await changeKeyword(supabaseAdmin(), { clientId: client.id, clusterId: f.id, keyword, volume, intent, today: day, role: writeRole(client), by: email });
   if (!r.ok) {
     console.warn(`[app] keyword change refused: ${r.message}`);
     return back("refused");
