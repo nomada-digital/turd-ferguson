@@ -11,7 +11,7 @@ import { ENGINE_SPECS, type Engine } from "@/lib/scan/engines";
 import { KEYWORDS_PER_CLUSTER, PROMPTS_PER_CLUSTER } from "@/lib/tracking/limits";
 
 import { CLUSTER_NAV, CLUSTER_TABS, NAV, PLACEMENTS_ITEM, TABS, navHref } from "./nav";
-import { appPath, siteHref } from "@/lib/app-host";
+import { appPath } from "@/lib/app-host";
 
 const WORDS = ["no", "one", "two", "three", "four", "five"];
 
@@ -149,12 +149,17 @@ export default function Sidebar({
    * free trial has left, and that tracking has ended.
    */
   const daysLeft = client.trial_ends_at ? Math.ceil((Date.parse(client.trial_ends_at) - Date.now()) / 86_400_000) : null;
-  const banner: { tone: "trial" | "ended"; text: string; link: { href: string; label: string } } | null = ended
-    ? { tone: "ended", text: `Tracking has ended for ${client.brand ?? client.domain}. Everything read so far stays here.`, link: { href: siteHref(`/checkout?tier=alwaystracked&website=${encodeURIComponent(client.domain)}`), label: "Start tracking again" } }
+  // An ended client is not sent to checkout: a new order cannot yet bring the
+  // old client back (review of 2379757), so the owner asks us, where billing is.
+  const billing = { href: appPath(`/${client.slug}/settings`) + "#set-billing", label: "Billing" };
+  const banner: { tone: "trial" | "ended"; text: string; link: { href: string; label: string } | null } | null = ended
+    ? role === "owner"
+      ? { tone: "ended", text: `Tracking has ended for ${client.brand ?? client.domain}. Everything read so far stays here.`, link: { href: billing.href, label: "Ask us to restart it" } }
+      : { tone: "ended", text: `Tracking has ended for ${client.brand ?? client.domain}. Everything read so far stays here - an owner can ask us to restart it.`, link: null }
     : trial && client.trial_ends_at && !client.trial_cancelled_at
-      ? { tone: "trial", text: `Free trial: ${daysLeft === 1 ? "1 day" : `${daysLeft} days`} left, ends ${trialMoment(client.trial_ends_at, client.market)}.`, link: { href: appPath(`/${client.slug}/settings`) + "#set-billing", label: "Billing" } }
+      ? { tone: "trial", text: `Free trial: ${daysLeft === 1 ? "1 day" : `${daysLeft} days`} left, ends ${trialMoment(client.trial_ends_at, client.market)}.`, link: billing }
       : trial
-        ? { tone: "trial", text: trial, link: { href: appPath(`/${client.slug}/settings`) + "#set-billing", label: "Billing" } }
+        ? { tone: "trial", text: trial, link: billing }
         : null;
   // R130 (30 Sep 2026): a built screen is a link; an unbuilt one is drawn
   // disabled with "Coming soon" - no href, not focusable, aria-disabled.
@@ -184,7 +189,7 @@ export default function Sidebar({
       {banner ? (
         <div role="status" className="app-banner" style={{ flex: "1 1 100%", display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "center", gap: "4px 12px", padding: "10px 16px", fontSize: "14px", lineHeight: 1.4, textAlign: "center", boxSizing: "border-box", background: banner.tone === "trial" ? T.wash : T.chip, borderBottom: `1px solid ${banner.tone === "trial" ? T.washLine : T.line}`, color: T.ink }}>
           <span>{banner.text}</span>
-          <a href={banner.link.href} style={{ display: "inline-flex", alignItems: "center", minHeight: "44px", fontWeight: 600, color: T.accent, textDecoration: "underline", textUnderlineOffset: "2px" }}>{banner.link.label}</a>
+          {banner.link ? <a href={banner.link.href} style={{ display: "inline-flex", alignItems: "center", minHeight: "44px", fontWeight: 600, color: T.accent, textDecoration: "underline", textUnderlineOffset: "2px" }}>{banner.link.label}</a> : null}
         </div>
       ) : null}
       <header className="app-topbar" style={{ alignItems: "center", justifyContent: "space-between", height: "60px", padding: "0 16px", background: T.surface, borderBottom: `1px solid ${T.line}`, flex: "1 1 100%", minWidth: 0, boxSizing: "border-box" }}>
