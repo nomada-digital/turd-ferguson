@@ -324,7 +324,12 @@ export default function OneCluster({
         // 1440) still pushed the "N of 28" column 108px out of the card with no cue, so above the phone
         // the squares narrow to fit (8-22px, .app-strip-cell) and the phone keeps 22px and the swipe.
         // ScrollCue shows the line, and keeps the tab stop, whenever the grid still overflows.
-        <section id="strip-scroll" aria-labelledby="strip-h" tabIndex={0} style={{ ...CARD, padding: "24px", display: "flex", flexDirection: "column", gap: "14px", overflowX: "auto" }}>
+        // Audit mobile-3 (8 Oct 2026): the whole card was the scroller, so it opened on the oldest
+        // days (3 of 28 at 320) and a swipe to Today took the heading, the prompt, the legend and
+        // the engine names with it, leaving "8 of 28" with nothing to say whose. Now only the grid
+        // scrolls; the engine mark and the count stay put at each side (.app-strip-lab, .app-strip-n)
+        // and the grid opens on its latest day (.app-strip-scroll, with JS or without).
+        <section aria-labelledby="strip-h" style={{ ...CARD, padding: "24px", display: "flex", flexDirection: "column", gap: "14px", minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "24px", flexWrap: "wrap" }}>
             <div style={{ display: "flex", flexDirection: "column", gap: "4px", minWidth: 0 }}>
               <h2 id="strip-h" style={H2}>
@@ -345,11 +350,12 @@ export default function OneCluster({
               </span>
             </span>
           </div>
+          <div id="strip-scroll" className="app-strip-scroll" role="group" aria-labelledby="strip-h" tabIndex={0} style={{ display: "flex", flexDirection: "column", gap: "14px", overflowX: "auto", minWidth: 0 }}>
           {strip.map((r) => (
             <div key={r.engine} className="app-strip-row" style={{ display: "grid", gridTemplateColumns: "170px minmax(0, 1fr) 92px", alignItems: "center", gap: "16px", ...stripDays }}>
-              <span style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "14px", fontWeight: 600 }}>
+              <span className="app-strip-lab" style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "14px", fontWeight: 600 }}>
                 <EngineLogo engine={r.engine as Engine} size={20} />
-                {ENGINE_SPECS[r.engine as Engine].label}
+                <span className="app-strip-name">{ENGINE_SPECS[r.engine as Engine].label}</span>
               </span>
               <span style={{ display: "flex", gap: "4px" }}>
                 {r.cells.map((x, k) => (
@@ -361,21 +367,23 @@ export default function OneCluster({
                   />
                 ))}
               </span>
-              <span style={{ fontSize: "14px", fontWeight: 700, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{r.answered ? `${r.named} of ${r.answered}` : "-"}</span>
+              <span className="app-strip-n" style={{ fontSize: "14px", fontWeight: 700, textAlign: "right", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{r.answered ? `${r.named} of ${r.answered}` : "-"}</span>
             </div>
           ))}
           <div aria-hidden="true" className="app-strip-row" style={{ display: "grid", gridTemplateColumns: "170px minmax(0, 1fr) 92px", gap: "16px", ...stripDays }}>
-            <span />
+            <span className="app-strip-lab" />
             <span style={{ display: "flex", gap: "4px" }}>
               {days.map((d, i) => (
-                <span key={d} className="app-strip-cell" style={{ flex: "1 1 0", maxWidth: "22px", fontSize: "12px", color: T.soft, textAlign: "center", whiteSpace: "nowrap" }}>
+                // The last label ends at its square, so "Today" runs left rather than under the count.
+                <span key={d} className="app-strip-cell" style={{ flex: "1 1 0", maxWidth: "22px", display: "flex", justifyContent: i === days.length - 1 && i > 0 ? "flex-end" : "flex-start", fontSize: "12px", color: T.soft, whiteSpace: "nowrap" }}>
                   {i === days.length - 1 && d === today ? "Today" : i % 7 === 0 || i === days.length - 1 ? formatDay(d) : ""}
                 </span>
               ))}
             </span>
-            <span />
+            <span className="app-strip-n" />
           </div>
-          <ScrollCue target="strip-scroll">{`Swipe for the later days, to ${days.length ? formatDay(days[days.length - 1]!) : "today"}${strip.some((r) => r.answered) ? ", and each engine's count" : ""}.`}</ScrollCue>
+          </div>
+          <ScrollCue target="strip-scroll">{`Swipe for the earlier days, back to ${days.length ? formatDay(days[0]!) : "the start of the range"}.`}</ScrollCue>
         </section>
       ) : null}
 

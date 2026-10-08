@@ -11,8 +11,12 @@ import { T } from "@/config/tokens";
  * id `target` actually overflows - a 1024 window cut the Placements chart and a
  * 900 one the day grid with nothing to say so - and the scroller is a tab stop
  * only then, so a chart that fits is not a stop with nothing to do.
+ *
+ * 8 Oct 2026 (audit mobile-1): `color` for a cue on the Overview's dark
+ * headline card, and `phone={false}` for a scroller that fits a phone by
+ * design (the cluster heat map), where the JS-off guess would be wrong.
  */
-export default function ScrollCue({ target, children }: { target: string; children: ReactNode }) {
+export default function ScrollCue({ target, children, color = T.soft, phone = true }: { target: string; children: ReactNode; color?: string; phone?: boolean }) {
   const [over, setOver] = useState<boolean | null>(null);
 
   useEffect(() => {
@@ -31,7 +35,7 @@ export default function ScrollCue({ target, children }: { target: string; childr
   }, [target]);
 
   return (
-    <p className={over === null ? "app-show-sm" : undefined} style={{ margin: 0, fontSize: "13px", color: T.soft, ...(over === null ? {} : { display: over ? "block" : "none" }) }}>
+    <p className={over === null && phone ? "app-show-sm" : undefined} style={{ margin: 0, fontSize: "13px", color, ...(over === null ? (phone ? {} : { display: "none" }) : { display: over ? "block" : "none" }) }}>
       {children}
     </p>
   );
