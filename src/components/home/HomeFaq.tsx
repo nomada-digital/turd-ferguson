@@ -87,7 +87,9 @@ export const FAQS: Faq[] = [
   {
     q: "What if I already pay for a tracking tool?",
     hint: "Keep it if your team knows it",
-    a: "Most agencies that talk to us already pay for something. Our figures will not match theirs exactly - different prompt sets, different engines, different days - and where two tools disagree we report it rather than smooth it. What we add is the placements, which no tracking tool does.",
+    // ", which no tracking tool does" came off 8 Oct 2026 (LB7): an undated
+    // claim about every competitor, which AGENTS.md bars without a dated source.
+    a: "Most agencies that talk to us already pay for something. Our figures will not match theirs exactly - different prompt sets, different engines, different days - and where two tools disagree we report it rather than smooth it. What we add is the placements.",
   },
 ];
 

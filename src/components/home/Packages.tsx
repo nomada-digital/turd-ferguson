@@ -18,12 +18,14 @@ import { D, PACKAGES_WASH } from "./dark";
  * white-label card; "every tier is white-label" is now the table's last row
  * and the line under it.
  *
- * 8 Oct 2026, LB1: both of those wait on `dashboardBranding` - no tier's
+ * 8 Oct 2026, LB1/LB7: both of those wait on `dashboardBranding` - no tier's
  * dashboard carries the agency's brand yet, so "Your dashboards and your
  * branding" and "are white-label" are withheld until it does. "Placement
  * opportunities, scored for difficulty" is narrowed to the free scan, the only
  * place a difficulty is scored (the dashboard's Cited page shows none, by its
- * brief).
+ * brief), and "Rank tracking on the money keywords" is ticked for alwaystracked
+ * and alwaysmentioned: the daily run reads every cluster keyword's Google
+ * position for every tier (tracking/runner.ts).
  *
  * Every price and basis is read off the tier in src/config/pricing.ts, so the
  * homepage cannot quote a number the package pages disagree with. Where the
@@ -86,7 +88,7 @@ const ROWS: Row[] = [
   { what: "Citation reporting on every placement", cells: { tracked: 0, mentioned: 1, cited: 1, everywhere: 1 } },
   { what: "Placements chosen to move the Google position too", cells: { tracked: 0, mentioned: 0, cited: 1, everywhere: 1 } },
   { what: "Link insertions and schema work", cells: { tracked: 0, mentioned: 0, cited: 1, everywhere: 1 } },
-  { what: "Rank tracking on the money keywords", cells: { tracked: 0, mentioned: 0, cited: 1, everywhere: 1 } },
+  { what: "Rank tracking on the money keywords", cells: { tracked: 1, mentioned: 1, cited: 1, everywhere: 1 } },
   // Pricing spec 27 Sep, section 8: the top tier is brand PR, sold to brands
   // direct rather than white-labelled (open decision 5's default).
   { what: "Brand PR for earned media", cells: { tracked: 0, mentioned: 0, cited: 0, everywhere: 1 } },

@@ -41,8 +41,14 @@ export const metadata: Metadata = {
  * The best argument on the board survives untouched: the card saying when a
  * tracking tool is the better purchase. That needs nobody else's facts.
  *
- * "White label for agencies: Yes" waits on `dashboardBranding` (LB1, 8 Oct
- * 2026): no dashboard carries an agency's brand yet.
+ * **It did not survive 8 Oct 2026 (LB7).** "A pure tracking tool is cheaper
+ * than us and probably better instrumented" sat on the page whose entry price
+ * is the alwaystracked plan - the site sending its own tracking buyer
+ * elsewhere, with an undated claim about other companies' tools. It is cut,
+ * and the card left beside it is labelled "When we are the better buy" so it
+ * still reads alone; the card that replaces it is Danny's to approve. "White
+ * label for agencies: Yes" waits on `dashboardBranding` (LB1): no dashboard
+ * carries an agency's brand yet.
  */
 
 type Column = { key: string; label: React.ReactNode; emphasis?: boolean };
@@ -122,47 +128,38 @@ export default function ComparePage() {
         ))}
       </div>
 
-      <div className="two-up">
-        <div className="ac-row" style={{ ...CARD, padding: "24px" }}>
-          <div style={MICRO}>When a tracking tool is the better buy</div>
-          <p style={{ margin: "10px 0 0", fontSize: "14px", lineHeight: 1.6, color: T.soft }}>
-            If you have your own outreach team and only need measurement, a pure tracking tool is cheaper than us and
-            probably better instrumented. We would rather say that here than three weeks into an engagement.
-          </p>
-        </div>
-        <div className="ac-row" style={{ ...CARD, border: `1px solid ${T.accent}`, padding: "24px" }}>
-          <div style={{ ...MICRO, color: T.accent }}>When we are</div>
-          <p style={{ margin: "10px 0 0", fontSize: "14px", lineHeight: 1.6, color: T.ink }}>
-            When you need the gap closed rather than measured, and you do not have relationships with the
-            sites the engines read. That is the whole difference, and it is a supply problem rather than a software one.
-          </p>
-          {/* R151 (1 Oct 2026): the page ended here with nothing to do next -
-              no link or control in main at all. One primary action, as on
-              /pr-agencies, and a quiet way to the prices. */}
-          <div style={{ marginTop: "18px", display: "flex", alignItems: "center", gap: "18px", flexWrap: "wrap" }}>
-            <Link
-              href="/#scan"
-              className="btn-primary"
-              style={{
-                // No inline colour: .btn-primary sets white on its gradient, and
-                // contrast.test.mts measures that pair there, not against this card.
-                fontSize: "15px",
-                fontWeight: 600,
-                padding: "12px 20px",
-                borderRadius: "10px",
-                textDecoration: "none",
-                minHeight: "44px",
-                boxSizing: "border-box",
-                display: "flex",
-                alignItems: "center",
-              }}
-            >
-              Run a free scan
-            </Link>
-            <Link href="/packages" style={{ fontSize: "14px", fontWeight: 600, textDecoration: "none", color: T.accent, minHeight: "44px", display: "flex", alignItems: "center" }}>
-              See the packages
-            </Link>
-          </div>
+      <div className="ac-row" style={{ ...CARD, border: `1px solid ${T.accent}`, padding: "24px" }}>
+        <div style={{ ...MICRO, color: T.accent }}>When we are the better buy</div>
+        <p style={{ margin: "10px 0 0", fontSize: "14px", lineHeight: 1.6, color: T.ink }}>
+          When you need the gap closed rather than measured, and you do not have relationships with the
+          sites the engines read. That is the whole difference, and it is a supply problem rather than a software one.
+        </p>
+        {/* R151 (1 Oct 2026): the page ended here with nothing to do next -
+            no link or control in main at all. One primary action, as on
+            /pr-agencies, and a quiet way to the prices. */}
+        <div style={{ marginTop: "18px", display: "flex", alignItems: "center", gap: "18px", flexWrap: "wrap" }}>
+          <Link
+            href="/#scan"
+            className="btn-primary"
+            style={{
+              // No inline colour: .btn-primary sets white on its gradient, and
+              // contrast.test.mts measures that pair there, not against this card.
+              fontSize: "15px",
+              fontWeight: 600,
+              padding: "12px 20px",
+              borderRadius: "10px",
+              textDecoration: "none",
+              minHeight: "44px",
+              boxSizing: "border-box",
+              display: "flex",
+              alignItems: "center",
+            }}
+          >
+            Run a free scan
+          </Link>
+          <Link href="/packages" style={{ fontSize: "14px", fontWeight: 600, textDecoration: "none", color: T.accent, minHeight: "44px", display: "flex", alignItems: "center" }}>
+            See the packages
+          </Link>
         </div>
       </div>
     </div>
