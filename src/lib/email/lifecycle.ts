@@ -189,7 +189,9 @@ export function welcome(d: { tier: TierKey; clusters: number; clusterLimit: numb
  * (8 Oct 2026, audit activation-16): shouldTrack checks every live prompt
  * whether or not setup was confirmed, so a scan buyer's prompts are already
  * read each morning and "nothing is checked until they are set up" was false.
- * `withPrompts` is the live clusters that have a live prompt.
+ * `withPrompts` is the live clusters that have a live prompt. Never sent once
+ * every cluster has prompts (setupStillEmpty in lifecycle-schedule.ts), so
+ * "0 of your 10 clusters" is never written.
  */
 export function setupReminder(d: { tier: TierKey; domain: string; link: string; withPrompts: number; clusterLimit: number }): Rendered {
   const empty = Math.max(0, d.clusterLimit - d.withPrompts);
@@ -369,7 +371,11 @@ export function previewSets(price: { us: number; uk: number }): Record<Lifecycle
   // A trial that ends at 3:30pm in New York, and one at 2:30pm in London.
   const us = trialTerms({ endsAt: "2026-10-22T19:30:00Z", market: "US", price, billing });
   const uk = trialTerms({ endsAt: "2026-10-22T13:30:00Z", market: "UK", price, billing });
+  // The three recaps recapLines words (8 Oct 2026, review of 7e133a7: trial_ending drew only the
+  // first, so two of its three bodies were never put in front of Danny): checks read, prompts live
+  // but no check finished yet, and nothing set up.
   const recap: TrialRecap = { named: 7, answers: 60, since: "9 Oct", topOther: { name: "Xero", answers: 31 }, clustersInUse: 2, clusterLimit: 10, livePrompts: 10 };
+  const waiting: TrialRecap = { named: 0, answers: 0, since: null, topOther: null, clustersInUse: 1, clusterLimit: 10, livePrompts: 5 };
   const unread: TrialRecap = { named: 0, answers: 0, since: null, topOther: null, clustersInUse: 1, clusterLimit: 10, livePrompts: 0 };
   return {
     welcome: [
@@ -389,10 +395,13 @@ export function previewSets(price: { us: number; uk: number }): Record<Lifecycle
     trial_midpoint: [
       { label: "a week in, US", mail: trialMidpoint({ domain, link: dash, recap, trial: us }) },
       { label: "a week in with nothing set up, UK", mail: trialMidpoint({ domain, link: dash, recap: unread, trial: uk }) },
+      { label: "a week in with prompts but no check finished yet, US", mail: trialMidpoint({ domain, link: dash, recap: waiting, trial: us }) },
     ],
     trial_ending: [
       { label: "three days before the end, US", mail: trialEnding({ domain, link: dash, recap, trial: us }) },
       { label: "three days before the end, UK", mail: trialEnding({ domain, link: dash, recap, trial: uk }) },
+      { label: "three days before the end with prompts but no check finished yet, US", mail: trialEnding({ domain, link: dash, recap: waiting, trial: us }) },
+      { label: "three days before the end with nothing set up, UK", mail: trialEnding({ domain, link: dash, recap: unread, trial: uk }) },
     ],
     invite: [{ label: "a viewer", mail: invite({ tier: "tracked", domain, link: appUrl("/login", ORIGIN), inviter: "sam@tallyroo.com", role: "viewer" }) }],
     plan_ended: [

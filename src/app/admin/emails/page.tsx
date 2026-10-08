@@ -28,8 +28,10 @@ const WIDTHS = [
  *
  * 8 Oct 2026 (audit activation-1, activation-16, copy-4): one flag can cover
  * more than one case - the paid and trial plan_ended, a tracked and a
- * placements welcome, both market zones of a trial email - so every case its
- * flag would send is drawn under it, each labelled.
+ * placements welcome, both market zones of a trial email and each of the
+ * three bodies its recap can take - so every case its flag would send is
+ * drawn under it, each labelled. lifecycle.test.mts holds the recap half:
+ * trial_ending first drew only one of its three (review of 7e133a7).
  */
 export default function EmailsAdmin() {
   const all = previewSets(TRACKED_PRICE);

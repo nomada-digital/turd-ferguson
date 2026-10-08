@@ -4,17 +4,17 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { siteUrl } from "@/lib/scan/verify-email";
 import { appUrl } from "@/lib/app-host";
 import { sendOrderEmail } from "@/lib/checkout/order-mail";
-import { clustersToMake, orderEmailText, orderRow, packsOn, signupResume, subscriptionScanToken, trialConverted, trialStillRunning, type CompletedOrder } from "@/lib/checkout/webhook";
+import { clustersToMake, orderEmailText, orderRow, packsOn, signupResume, subscriptionScanToken, trialConverted, trialEndsAtAfter, trialStillRunning, type CompletedOrder } from "@/lib/checkout/webhook";
 import { readSubscription } from "@/lib/checkout/stripe";
 import { TRACKED_PRICE } from "@/config/pricing";
 import { trialCharge, trialMoment } from "@/config/trial";
 import { dayAfter, slugFor, trackingDay } from "@/lib/tracking/decide";
 import { angleFor, CLUSTER_BASE, clusterLimitFor, insertCluster, insertKeyword, insertPrompts, namesBrandIn, PROMPTS_PER_CLUSTER } from "@/lib/tracking/limits";
-import { upsellMode } from "@/lib/tracking/ask";
 import { billingUrl, planEnded, trialTerms, welcome } from "@/lib/email/lifecycle";
 import { lifecycleOn, sendLifecycle } from "@/lib/email/lifecycle-mail";
-import { endedInTrial } from "@/lib/email/lifecycle-schedule";
-import { mailTrialEnding } from "@/lib/email/lifecycle-sweep";
+import { lifecycleIo } from "@/lib/email/lifecycle-cron";
+import { planEndedInTrial } from "@/lib/email/lifecycle-schedule";
+import { mailTrialEnding, planEndedOwners } from "@/lib/email/lifecycle-sweep";
 import type { TierKey } from "@/lib/tier-text";
 import { sendLoginLink } from "@/lib/tracking/login-mail";
 import { LOGIN_TTL_MS, hashToken, newToken } from "@/lib/tracking/session";
@@ -326,20 +326,27 @@ async function clientOfSubscription(db: SupabaseClient, sub: Record<string, unkn
   return (o?.[0]?.client_domain_id as string | undefined) ?? null;
 }
 
-/** Packs become cluster_limit (limits.ts: 10 + 5 per pack). No client for the subscription: nothing to do. */
+/**
+ * Packs become cluster_limit (limits.ts: 10 + 5 per pack), and trial_ends_at
+ * follows Stripe's trial_end when the trial moves or ends (trialEndsAtAfter,
+ * 8 Oct 2026, review of 7e133a7: a trial ended early kept reading as running,
+ * and the cron's trial emails would have told a paying client nothing is
+ * charged). No client for the subscription: nothing to do. A failed write is
+ * false, so Stripe retries.
+ */
 export async function onSubscriptionUpdated(db: SupabaseClient, sub: Record<string, unknown>, previous: Record<string, unknown> = {}): Promise<boolean> {
   const clientId = await clientOfSubscription(db, sub);
   if (clientId === false) return false;
-  // A trial that became paying changes nothing here; it is worth a line in the log.
   if (trialConverted(sub, previous)) console.info(`[stripe] trial converted to paid: ${String(sub.id)} client ${clientId ?? "none"}`);
   if (!clientId) return true;
-  const { error } = await db.from("client_domains").update({ cluster_limit: clusterLimitFor(packsOn(sub)) }).eq("id", clientId);
-  if (error) console.error(`[stripe] cluster_limit not set: ${error.message}`);
+  const trialEndsAt = trialEndsAtAfter(sub, previous);
+  const { error } = await db
+    .from("client_domains")
+    .update({ cluster_limit: clusterLimitFor(packsOn(sub)), ...(trialEndsAt === undefined ? {} : { trial_ends_at: trialEndsAt }) })
+    .eq("id", clientId);
+  if (error) console.error(`[stripe] cluster_limit${trialEndsAt === undefined ? "" : " and trial_ends_at"} not set: ${error.message}`);
   return !error;
 }
-
-/** A Stripe timestamp (seconds) in ms, or null. */
-const secs = (v: unknown) => (typeof v === "number" ? v * 1000 : null);
 
 /**
  * Cancelled: the client ends. Nothing is deleted. plan_ended goes to its live
@@ -349,7 +356,10 @@ const secs = (v: unknown) => (typeof v === "number" ? v * 1000 : null);
  * 8 Oct 2026 (audit copy-4): a subscription that ended inside its trial gets
  * the trial's version - not charged, no receipt, no second trial - and, as
  * the email now sends the owner to Billing to ask us to restart, it goes only
- * where Billing has Ask us: upsell mode nomada, as the ended banner decides.
+ * where Billing has Ask us: upsell mode nomada, as the ended banner decides
+ * (planEndedOwners, lifecycle-sweep.ts). Which version is planEndedInTrial's:
+ * Stripe's trial_end on this payload first, so a trial_ends_at that signup
+ * failed to write cannot hand an uncharged trial the receipt line.
  */
 export async function onSubscriptionDeleted(db: SupabaseClient, sub: Record<string, unknown>): Promise<boolean> {
   const clientId = await clientOfSubscription(db, sub);
@@ -368,23 +378,13 @@ export async function onSubscriptionDeleted(db: SupabaseClient, sub: Record<stri
   const row = ended?.[0];
   if (row && (await lifecycleOn(db, "plan_ended"))) {
     const owners = await planEndedOwners(db, row.account_id as string);
-    const trial = endedInTrial({ trialEndsAt: (row.trial_ends_at as string | null) ?? null, endedAt: secs(sub.ended_at) ?? secs(sub.canceled_at), now: Date.now() });
+    const trial = planEndedInTrial({ trialEndsAt: (row.trial_ends_at as string | null) ?? null, sub, now: Date.now() });
     const mail = planEnded({ tier: (TIERS.includes(row.tier as string) ? row.tier : "tracked") as TierKey, domain: row.domain as string, billing: billingUrl(row.slug as string, siteUrl()), trial });
     for (const m of owners) {
       if (!(await sendLifecycle({ memberEmail: m.email as string, mail }))) console.warn(`[stripe] plan_ended not sent for ${clientId}`);
     }
   }
   return true;
-}
-
-/** plan_ended's recipients: the live owners, and none outside upsell mode nomada or when a read failed. */
-async function planEndedOwners(db: SupabaseClient, accountId: string): Promise<{ email: unknown }[]> {
-  const { data: account, error: aErr } = await db.from("accounts").select("upsell_mode").eq("id", accountId).maybeSingle();
-  if (aErr) console.error(`[stripe] plan_ended not sent, account not read: ${aErr.message}`);
-  if (aErr || upsellMode(account?.upsell_mode) !== "nomada") return [];
-  const { data: owners, error: oErr } = await db.from("dashboard_members").select("email").eq("account_id", accountId).eq("role", "owner").is("removed_at", null);
-  if (oErr) console.error(`[stripe] plan_ended not sent, owners not read: ${oErr.message}`);
-  return owners ?? [];
 }
 
 /**
@@ -398,5 +398,5 @@ export async function onTrialWillEnd(db: SupabaseClient, sub: Record<string, unk
   const clientId = await clientOfSubscription(db, sub);
   if (clientId === false) return false;
   if (!clientId) return true;
-  return mailTrialEnding(db, clientId);
+  return mailTrialEnding(db, lifecycleIo(), clientId);
 }

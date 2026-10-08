@@ -3,7 +3,7 @@ import fs from "node:fs";
 import { test } from "node:test";
 
 import type { AnswerRow } from "../tracking/figures.ts";
-import { ENDING_BEFORE_MS, SETUP_MAIL_EVENTS, TRIAL_MAIL_EVENT, endedInTrial, setupReminderDue, trialEndingOnStripe, trialMailDue, trialRecap, unsentEvent } from "./lifecycle-schedule.ts";
+import { ENDING_BEFORE_MS, SETUP_MAIL_EVENTS, TRIAL_MAIL_EVENT, endedInTrial, planEndedInTrial, setupReminderDue, setupStillEmpty, trialEndingOnStripe, trialMailDue, trialRecap, unsentEvent } from "./lifecycle-schedule.ts";
 
 /**
  * When the daily cron sends a trial or setup email (8 Oct 2026, audit
@@ -78,6 +78,14 @@ test("setup reminders: 24 and 72 hours after signup, while unconfirmed, in the f
   assert.equal(at(7 * 24 + 1), null, "a client older than a week - the ones set up by hand before this - is never mailed");
 });
 
+/** Review of 7e133a7 (8 Oct 2026): "0 of your 10 clusters are still empty" under "Your clusters aren't set up yet". */
+test("a setup reminder goes only while a cluster is still empty", () => {
+  assert.equal(setupStillEmpty({ withPrompts: 0, clusterLimit: 10 }), true);
+  assert.equal(setupStillEmpty({ withPrompts: 9, clusterLimit: 10 }), true);
+  assert.equal(setupStillEmpty({ withPrompts: 10, clusterLimit: 10 }), false, "every cluster filled from the Clusters page, setup never confirmed");
+  assert.equal(setupStillEmpty({ withPrompts: 11, clusterLimit: 10 }), false, "a pack dropped below what is in use");
+});
+
 test("the recap is the Overview's figures, from the first finished check", () => {
   const row = (run_date: string, named: boolean, brands: string[], answered = true): AnswerRow => ({ run_date, question_id: "q1", engine: "chatgpt", answered, named, brands });
   const rows = [row("2026-10-09", true, ["Xero"]), row("2026-10-10", false, ["Xero", "QuickBooks"]), row("2026-10-10", false, ["QuickBooks"]), row("2026-10-11", false, ["Xero"], false), row("2026-10-08", true, [])];
@@ -96,6 +104,27 @@ test("a subscription that ended by its trial's end was never charged", () => {
   assert.equal(endedInTrial({ trialEndsAt: ends, endedAt: t + 30 * DAY, now: t + 30 * DAY }), false, "a paying plan cancelled later");
   assert.equal(endedInTrial({ trialEndsAt: null, endedAt: t, now: t }), false, "no trial");
   assert.equal(endedInTrial({ trialEndsAt: ends, endedAt: null, now: t + 30 * DAY }), false, "no ended_at: now stands in");
+});
+
+/**
+ * Review of 7e133a7 (8 Oct 2026): plan_ended chose the trial copy from
+ * client_domains.trial_ends_at alone. Signup writes that after the client is
+ * made and only logs a failed write, so an uncharged trial with the column
+ * missing got "Stripe sends the final receipt". Stripe's own trial_end on the
+ * deleted subscription decides first.
+ */
+test("plan_ended's trial copy is Stripe's trial_end first, the column only when the payload has none", () => {
+  const end = Date.parse("2026-10-22T19:30:00Z") / 1000;
+  const now = end * 1000;
+  const cancelledInTrial = { status: "canceled", trial_end: end, ended_at: end, canceled_at: end - 5 * 86_400 };
+  assert.equal(planEndedInTrial({ trialEndsAt: null, sub: cancelledInTrial, now }), true, "the column never written: Stripe's trial_end still says trial");
+  assert.equal(planEndedInTrial({ trialEndsAt: "2026-10-22T19:30:00Z", sub: cancelledInTrial, now }), true);
+  const paidThenCancelled = { status: "canceled", trial_end: end, ended_at: end + 40 * 86_400 };
+  assert.equal(planEndedInTrial({ trialEndsAt: null, sub: paidThenCancelled, now: now + 40 * DAY }), false, "a trial that converted and was cancelled weeks later was charged");
+  const neverATrial = { status: "canceled", trial_end: null, ended_at: end };
+  assert.equal(planEndedInTrial({ trialEndsAt: null, sub: neverATrial, now }), false);
+  assert.equal(planEndedInTrial({ trialEndsAt: "2026-10-22T19:30:00Z", sub: { ended_at: end - 86_400 }, now }), true, "no trial_end on the payload: the column stands in");
+  assert.equal(planEndedInTrial({ trialEndsAt: null, sub: { trial_end: end }, now: now + 2 * DAY }), false, "no ended_at or canceled_at: now stands in, and now is past the trial");
 });
 
 test("the migration's unique index names exactly the events the sweep claims", () => {

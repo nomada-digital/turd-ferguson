@@ -178,8 +178,17 @@ const RECORDED: Record<string, string> = {
   "src/app/api/app/[client]/member/route.ts :: account_id":
     "the member route's team lookup; the 303 carries only the toast word and the email the owner typed.",
   // 1 Oct 2026, R159 part 3: plan_ended finds the ended client's live owners.
-  "src/lib/checkout/signup.ts :: account_id, domain, tier":
+  // 8 Oct 2026 (audit copy-4, package E): slug and trial_ends_at joined, for
+  // plan_ended's Billing link and its trial version; the id is still used only
+  // to find the owners, server-side.
+  "src/lib/checkout/signup.ts :: account_id, domain, tier, slug, trial_ends_at":
     "the Stripe webhook's subscription-deleted handler finds the ended client's owners to mail; the webhook answers Stripe with a status only, and no visitor makes the request.",
+  // 8 Oct 2026 (audit activation-1, package E): the trial and setup emails.
+  // Server-only callers, no visitor request: the CRON_SECRET-gated cron and
+  // the signed Stripe webhook's trial_will_end. The id finds the account's
+  // upsell mode and live owners and is never in what either answers.
+  "src/lib/email/lifecycle-sweep.ts :: CLIENT_COLUMNS":
+    "the daily cron's lifecycle sweep and Stripe's trial_will_end read a client's account to skip agency mode and mail its live owners; the cron answers with sent and unsent labels of email name and client id, the webhook with a status only.",
   // 1 Oct 2026, R159 part 5: first_reading finds the client's account mode and owners.
   "src/lib/tracking/runner.ts :: account_id, tier":
     "the tracking runner, after a run, for first_reading's agency check and owners; started only by the cron's signed dispatch, it returns a status only.",
@@ -224,13 +233,18 @@ const MENTIONED: Record<string, string> = {
   "src/lib/checkout/signup.ts":
     "C4 (30 Sep 2026): writes the column on client_domains and dashboard_members when a " +
     "paid checkout from a scan becomes a client. Writes, behind the Stripe signature; " +
-    "the webhook answers with no row.",
+    "the webhook answers with no row. Also reads it back when a subscription ends, to mail " +
+    "plan_ended (R159, 1 Oct 2026; widened 8 Oct 2026 - its RECORDED entry above).",
   "src/lib/tracking/runner.ts":
     "R159 part 5 (1 Oct 2026): reads the client's account_id after a run to find its upsell mode and " +
     "live owners for first_reading. Started only by the cron's signed dispatch; the run returns a status, never the id.",
   "src/lib/tracking/setup-mail.ts":
     "R166 / R159 (2 Oct 2026): reads the confirmed client's account_id to skip setup_confirmed in agency mode. " +
     "Returns nothing; the setup route answers with a 303, never the id.",
+  "src/lib/email/lifecycle-sweep.ts":
+    "Audit activation-1 (8 Oct 2026, package E): reads a client's account_id to skip agency mode and to find its " +
+    "live owners for trial_midpoint, trial_ending, setup_reminder and plan_ended. Run only by the CRON_SECRET-gated " +
+    "cron and the signed Stripe webhook; SweepResult carries email names and client ids, never the account id.",
 };
 
 test("nothing in this tree selects *", () => {

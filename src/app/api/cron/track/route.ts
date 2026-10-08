@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { constantTimeEqual } from "@/lib/constant-time";
-import { sweepLifecycleMailSafely } from "@/lib/email/lifecycle-sweep";
+import { sweepLifecycleMailSafely } from "@/lib/email/lifecycle-cron";
 import { dispatchTrackingRuns } from "@/lib/tracking/runner";
 
 export const runtime = "nodejs";
@@ -27,7 +27,8 @@ export const maxDuration = 60;
  * After the dispatch, whatever it did, the lifecycle emails that go by the
  * calendar (8 Oct 2026, audit activation-1): trial_midpoint, trial_ending and
  * setup_reminder, each behind its own flag (off until Danny approves it) and
- * once per client (lib/email/lifecycle-sweep.ts). Never fatal to the answer.
+ * once per client (lib/email/lifecycle-sweep.ts, wired to Resend in
+ * lifecycle-cron.ts). Never fatal to the answer.
  */
 export async function GET(req: Request) {
   const secret = process.env.CRON_SECRET;

@@ -110,9 +110,13 @@ test("activation-1, copy-4: trial_started, trial_midpoint and trial_ending name 
   assert.equal(UK_END, "22 Oct 2026, 14:30 UK time");
   for (const name of ["trial_started", "trial_midpoint", "trial_ending"] as const) {
     const cases = sets[name];
-    assert.equal(cases.length, 2, `${name}: a US and a UK case`);
-    for (const [i, { label, mail }] of cases.entries()) {
-      const [end, charge] = i === 0 ? [US_END, trialCharge("US", PRICE)] : [UK_END, trialCharge("UK", PRICE)];
+    // Exactly a US and a UK case each until 8 Oct 2026 (review of 7e133a7), when the
+    // trial_midpoint and trial_ending previews grew a case per recap body. The zone is
+    // now read off each label, and both zones must still be drawn for every email.
+    const zone = (label: string) => /, (US|UK)$/.exec(label)?.[1];
+    assert.deepEqual([...new Set(cases.map((c) => zone(c.label)))].sort(), ["UK", "US"], `${name}: a US and a UK case, each labelled with its zone`);
+    for (const { label, mail } of cases) {
+      const [end, charge] = zone(label) === "US" ? [US_END, trialCharge("US", PRICE)] : [UK_END, trialCharge("UK", PRICE)];
       const where = `${name} (${label})`;
       assert.ok(mail.text.includes(end), `${where}: names ${end}`);
       assert.ok(mail.text.includes(charge), `${where}: names ${charge}`);
@@ -126,6 +130,31 @@ test("activation-1, copy-4: trial_started, trial_midpoint and trial_ending name 
   assert.match(sets.trial_midpoint[0]!.mail.text, /named in 7 of 60 AI answers\. The other brand named most often: Xero, in 31 answers\./);
   assert.match(sets.trial_midpoint[0]!.mail.text, /You are using 2 of your 10 clusters\./);
   assert.match(sets.trial_midpoint[1]!.mail.text, /Nothing has been checked yet: no cluster has prompts\./);
+});
+
+/**
+ * Review of 7e133a7 (8 Oct 2026): /admin/emails says it draws every case a
+ * flag would send, and trial_ending drew one of the three bodies its recap
+ * can take, trial_midpoint two. Danny would have approved trial_ending
+ * without seeing "No check has finished yet" or "Nothing has been checked
+ * yet". Each preview must match exactly one body, so a reworded body fails
+ * here until it is named. What this cannot see: a fourth branch added to
+ * recapLines that no preview reaches.
+ */
+test("every recap body of trial_midpoint and trial_ending is drawn for approval", () => {
+  const BODIES = {
+    "checks read": /Since the first check on [^,]+, tallyroo\.com was named in \d+ of /,
+    "prompts live, no check finished": /No check has finished yet\. You are using \d+ of your \d+ clusters\./,
+    "nothing set up": /Nothing has been checked yet: no cluster has prompts\./,
+  };
+  for (const name of ["trial_midpoint", "trial_ending"] as const) {
+    for (const [body, re] of Object.entries(BODIES)) {
+      assert.ok(sets[name].some((p) => re.test(p.mail.text)), `${name}: the "${body}" body is not among its previews`);
+    }
+    for (const p of sets[name]) {
+      assert.equal(Object.values(BODIES).filter((re) => re.test(p.mail.text)).length, 1, `${name} (${p.label}): exactly one recap body`);
+    }
+  }
 });
 
 test("copy-4: plan_ended for a trial that ended uncharged - no receipt, not charged, no second trial; the paid one sends the owner to ask us", () => {
@@ -216,7 +245,16 @@ test("the lifecycle sweep: flags first, claim before send, live owners, no agenc
   assert.match(body, /if \(!on\.trial_midpoint && !on\.trial_ending && !on\.setup_reminder\) return out;/);
   assert.match(body, /if \(!due \|\| !on\[due\]\) continue;/, "a trial email goes only with its own flag on");
   const deliver = sweep.slice(sweep.indexOf("async function deliver("), sweep.indexOf("export async function sweepLifecycleMail("));
-  assert.ok(deliver.indexOf('.insert({ client_domain_id: c.id') < deliver.indexOf("sendLifecycle("), "the claim is written before the send");
+  // The send was sendLifecycle( until 8 Oct 2026 (review of 7e133a7): the sweep now takes its
+  // sender as io.send so lifecycle-sweep.test.mts can run it, and lifecycle-cron.ts hands it
+  // sendLifecycle - asserted below, with the sweep importing no sender of its own.
+  const claimAt = deliver.indexOf(".insert({ client_domain_id: c.id");
+  assert.ok(claimAt >= 0 && claimAt < deliver.indexOf("io.send("), "the claim is written before the send");
+  assert.doesNotMatch(sweep, /^import [^;]*(?:"resend"|lifecycle-mail|"server-only")/m, "the sweep sends only through the io it is handed");
+  const cronIo = fs.readFileSync(new URL("./lifecycle-cron.ts", import.meta.url), "utf8");
+  assert.match(cronIo, /return \{ send: sendLifecycle, origin: siteUrl\(\), price: TRACKED_PRICE \};/, "the live io is Resend, the canonical origin and the real price");
+  assert.match(cronIo, /sweepLifecycleMail\(supabaseAdmin\(\), lifecycleIo\(\)\)/);
+  assert.match(fs.readFileSync(new URL("../checkout/signup.ts", import.meta.url), "utf8"), /return mailTrialEnding\(db, lifecycleIo\(\), clientId\);/, "trial_will_end sends with the same io");
   assert.match(deliver, /\.from\("dashboard_members"\)\.select\("email"\)\.eq\("account_id", c\.account_id\)\.eq\("role", "owner"\)\.is\("removed_at", null\)/);
   assert.equal(body.match(/if \(agency\.has\(c\.account_id\)\) continue;/g)?.length, 2, "both loops skip agency mode");
   const ending = sweep.slice(sweep.indexOf("export async function mailTrialEnding("));

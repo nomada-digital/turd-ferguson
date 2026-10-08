@@ -85,6 +85,19 @@ export function setupReminderDue(p: { status: string | null; signedUpAt: string;
 }
 
 /**
+ * A due setup reminder goes only while a cluster is still empty (8 Oct 2026,
+ * review of 7e133a7). The reminder says how many are empty, and a client who
+ * filled every cluster from the Clusters page but never pressed Confirm on
+ * /setup was told "0 of your 10 clusters are still empty" under "Your
+ * clusters aren't set up yet". Their prompts are already read every morning -
+ * shouldTrack does not ask for the confirmation - so there is nothing left to
+ * remind them of, and nothing is sent.
+ */
+export function setupStillEmpty(p: { withPrompts: number; clusterLimit: number }): boolean {
+  return p.withPrompts < p.clusterLimit;
+}
+
+/**
  * The trial so far, in the Overview's own figures: namedRate from the first
  * finished check to today, and the other brand brandBoard ranks first. Before
  * any check finished, `since` is null and the email says so.
@@ -108,4 +121,26 @@ export function endedInTrial(p: { trialEndsAt: string | null; endedAt: number | 
   if (!p.trialEndsAt) return false;
   const end = Date.parse(p.trialEndsAt);
   return Number.isFinite(end) && (p.endedAt ?? p.now) <= end + HOUR;
+}
+
+/** A Stripe timestamp (seconds) in ms, or null. */
+const secs = (v: unknown) => (typeof v === "number" ? v * 1000 : null);
+
+/**
+ * Which plan_ended a customer.subscription.deleted gets: the trial's when
+ * the subscription ended inside its trial. The trial's end is Stripe's own
+ * trial_end on the deleted subscription, else client_domains.trial_ends_at
+ * (8 Oct 2026, review of 7e133a7). The column alone was not enough: signup
+ * writes it after the client is made and only logs a failed write, and with
+ * it missing a trial that was never charged got the paid copy, "Stripe sends
+ * the final receipt". Stripe's comes first because the column is a copy of
+ * it - or, when signup could not read the subscription, an estimate.
+ */
+export function planEndedInTrial(p: { trialEndsAt: string | null; sub: Record<string, unknown>; now: number }): boolean {
+  const stripeEnd = secs(p.sub.trial_end);
+  return endedInTrial({
+    trialEndsAt: stripeEnd !== null ? new Date(stripeEnd).toISOString() : p.trialEndsAt,
+    endedAt: secs(p.sub.ended_at) ?? secs(p.sub.canceled_at),
+    now: p.now,
+  });
 }

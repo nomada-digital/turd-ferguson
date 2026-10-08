@@ -288,11 +288,36 @@ export function orderEmailText(o: CompletedOrder, outcome: string, siteOrigin: s
 
 /**
  * A trial that just became a paying subscription: customer.subscription.updated
- * with status active where it was trialing. Logged and nothing else - the
- * client, its limits and its trial_ends_at stay as they are.
+ * with status active where it was trialing. Logged; the client's
+ * trial_ends_at follows Stripe's trial_end through trialEndsAtAfter below.
  */
 export function trialConverted(sub: Record<string, unknown>, previous: Record<string, unknown>): boolean {
   return str(previous.status) === "trialing" && str(sub.status) === "active";
+}
+
+/**
+ * What client_domains.trial_ends_at becomes after a
+ * customer.subscription.updated, or undefined to leave it (8 Oct 2026, review
+ * of 7e133a7).
+ *
+ * The column was Stripe's trial_end as signup read it, and nothing moved it
+ * afterwards. A trial ended early in Stripe - charged on day 5 - still read
+ * as running, so the daily cron would have sent trial_midpoint and
+ * trial_ending to a paying client ("cancel before then and nothing is
+ * charged"), and the sidebar and Settings kept the trial line and its Cancel.
+ * Stripe's trial_end is the one source: it moves when a trial is extended,
+ * and becomes the moment it ended when one is ended early. Once the
+ * subscription has left its trial the column is never later than now, so
+ * nothing reads the trial as running. An update that touches neither the
+ * status out of trialing nor trial_end - a pack bought - leaves it alone.
+ */
+export function trialEndsAtAfter(sub: Record<string, unknown>, previous: Record<string, unknown>, nowMs: number = Date.now()): string | null | undefined {
+  const left = str(previous.status) === "trialing" && str(sub.status) !== "trialing";
+  const moved = Object.prototype.hasOwnProperty.call(previous, "trial_end");
+  if (!left && !moved) return undefined;
+  const end = typeof sub.trial_end === "number" ? sub.trial_end * 1000 : null;
+  if (left) return new Date(Math.min(end ?? nowMs, nowMs)).toISOString();
+  return end === null ? null : new Date(end).toISOString();
 }
 
 /**

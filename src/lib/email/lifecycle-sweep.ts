@@ -1,19 +1,15 @@
-import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { TRACKED_PRICE } from "@/config/pricing";
-import { billingUrl, dashboardUrl, type Rendered, setupReminder, setupUrl, trialEnding, trialMidpoint, trialTerms } from "@/lib/email/lifecycle";
-import { lifecycleOn, sendLifecycle } from "@/lib/email/lifecycle-mail";
-import { SETUP_MAIL_EVENTS, SETUP_WINDOW_MS, TRIAL_MAIL_EVENT, type TrialMail, setupReminderDue, trialEndingOnStripe, trialMailDue, trialRecap, unsentEvent } from "@/lib/email/lifecycle-schedule";
-import { siteUrl } from "@/lib/scan/verify-email";
-import { supabaseAdmin } from "@/lib/supabase/admin";
-import { selectAll } from "@/lib/supabase/page";
-import { upsellMode } from "@/lib/tracking/ask";
-import { trackingDay } from "@/lib/tracking/decide";
-import type { AnswerRow } from "@/lib/tracking/figures";
-import { CLUSTER_BASE } from "@/lib/tracking/limits";
-import { SETUP_CONFIRMED_EVENT } from "@/lib/tracking/setup-landing";
-import type { TierKey } from "@/lib/tier-text";
+import { selectAll } from "../supabase/page.ts";
+import { upsellMode } from "../tracking/ask.ts";
+import { trackingDay } from "../tracking/decide.ts";
+import type { AnswerRow } from "../tracking/figures.ts";
+import { CLUSTER_BASE } from "../tracking/limits.ts";
+import { SETUP_CONFIRMED_EVENT } from "../tracking/setup-landing.ts";
+import type { TierKey } from "../tier-text.ts";
+import { billingUrl, dashboardUrl, type Rendered, setupReminder, setupUrl, trialEnding, trialMidpoint, trialTerms } from "./lifecycle.ts";
+import { lifecycleOn } from "./lifecycle-flag.ts";
+import { SETUP_MAIL_EVENTS, SETUP_WINDOW_MS, TRIAL_MAIL_EVENT, type TrialMail, setupReminderDue, setupStillEmpty, trialEndingOnStripe, trialMailDue, trialRecap, unsentEvent } from "./lifecycle-schedule.ts";
 
 /**
  * The lifecycle emails the daily cron sends (8 Oct 2026, audit activation-1):
@@ -31,7 +27,20 @@ import type { TierKey } from "@/lib/tier-text";
  *
  * Never fatal: the cron's dispatch has already run, and a failed client is
  * logged and left for tomorrow.
+ *
+ * Loadable by node --test since 8 Oct 2026 (review of 7e133a7): no
+ * server-only, relative imports, and the sender, origin and price come in as
+ * `io`. lifecycle-cron.ts passes the live ones (sendLifecycle, siteUrl(),
+ * TRACKED_PRICE); lifecycle-sweep.test.mts runs every rule here against an
+ * in-memory database with a recording sender.
  */
+
+/** What the sweep sends with: the sender, the origin its links are built on, and the alwaystracked price trialCharge words. */
+export type SweepIo = {
+  send: (input: { memberEmail: string; mail: Rendered }) => Promise<boolean>;
+  origin: string;
+  price: { us: number; uk: number };
+};
 
 type Client = {
   id: string;
@@ -91,7 +100,7 @@ async function liveCounts(db: SupabaseClient, clientId: string): Promise<{ clust
 }
 
 /** trial_midpoint or trial_ending for one client, with the trial so far in the Overview's figures. */
-async function trialMail(db: SupabaseClient, c: Client, name: TrialMail, now: number): Promise<Rendered> {
+async function trialMail(db: SupabaseClient, io: SweepIo, c: Client, name: TrialMail, now: number): Promise<Rendered> {
   const today = trackingDay(new Date(now));
   const { data: first, error: fErr } = await db
     .from("tracking_runs")
@@ -127,9 +136,8 @@ async function trialMail(db: SupabaseClient, c: Client, name: TrialMail, now: nu
     : [];
   const live = await liveCounts(db, c.id);
   const recap = trialRecap({ rows, firstDay, today, you: c.brand_name ?? c.domain, clustersInUse: live.clusters, clusterLimit: c.cluster_limit ?? CLUSTER_BASE, livePrompts: live.prompts });
-  const origin = siteUrl();
-  const trial = trialTerms({ endsAt: c.trial_ends_at!, market: c.market, price: TRACKED_PRICE, billing: billingUrl(c.slug, origin) });
-  const d = { domain: c.domain, link: dashboardUrl(c.slug, origin), recap, trial };
+  const trial = trialTerms({ endsAt: c.trial_ends_at!, market: c.market, price: io.price, billing: billingUrl(c.slug, io.origin) });
+  const d = { domain: c.domain, link: dashboardUrl(c.slug, io.origin), recap, trial };
   return name === "trial_midpoint" ? trialMidpoint(d) : trialEnding(d);
 }
 
@@ -138,7 +146,7 @@ async function trialMail(db: SupabaseClient, c: Client, name: TrialMail, now: nu
  * "taken" when another run's claim got there first (the unique index), or
  * there is no owner to mail.
  */
-async function deliver(db: SupabaseClient, c: Client, event: string, mail: Rendered): Promise<"sent" | "unsent" | "taken"> {
+async function deliver(db: SupabaseClient, io: SweepIo, c: Client, event: string, mail: Rendered): Promise<"sent" | "unsent" | "taken"> {
   const { data: owners, error: oErr } = await db.from("dashboard_members").select("email").eq("account_id", c.account_id).eq("role", "owner").is("removed_at", null);
   if (oErr) throw new Error(`could not read the owners: ${oErr.message}`);
   if (!owners?.length) return "taken";
@@ -148,7 +156,7 @@ async function deliver(db: SupabaseClient, c: Client, event: string, mail: Rende
     throw new Error(`could not record ${event}: ${cErr.message}`);
   }
   let mailed = 0;
-  for (const m of owners) if (await sendLifecycle({ memberEmail: m.email as string, mail })) mailed++;
+  for (const m of owners) if (await io.send({ memberEmail: m.email as string, mail })) mailed++;
   if (mailed) return "sent";
   // Nobody was mailed: the row leaves the sent set (and the unique index), so tomorrow tries again.
   const { error: uErr } = await db.from("dashboard_events").update({ event: unsentEvent(event) }).eq("id", claim.id as number);
@@ -156,7 +164,7 @@ async function deliver(db: SupabaseClient, c: Client, event: string, mail: Rende
   return "unsent";
 }
 
-export async function sweepLifecycleMail(db: SupabaseClient, now: number = Date.now()): Promise<SweepResult> {
+export async function sweepLifecycleMail(db: SupabaseClient, io: SweepIo, now: number = Date.now()): Promise<SweepResult> {
   const out: SweepResult = { sent: [], unsent: [], errors: [] };
   const on: Record<TrialMail | "setup_reminder", boolean> = {
     trial_midpoint: await lifecycleOn(db, "trial_midpoint"),
@@ -211,7 +219,7 @@ export async function sweepLifecycleMail(db: SupabaseClient, now: number = Date.
     const due = trialMailDue({ status: c.status, trialEndsAt: c.trial_ends_at, cancelledAt: c.trial_cancelled_at, sent: events.get(c.id) ?? none, now });
     if (!due || !on[due]) continue;
     try {
-      const r = await deliver(db, c, TRIAL_MAIL_EVENT[due], await trialMail(db, c, due, now));
+      const r = await deliver(db, io, c, TRIAL_MAIL_EVENT[due], await trialMail(db, io, c, due, now));
       if (r !== "taken") out[r].push(`${due} ${c.id}`);
     } catch (err) {
       out.errors.push(`${due} ${c.id}: ${msg(err)}`);
@@ -225,9 +233,12 @@ export async function sweepLifecycleMail(db: SupabaseClient, now: number = Date.
     if (!due) continue;
     try {
       const live = await liveCounts(db, c.id);
+      const clusterLimit = c.cluster_limit ?? CLUSTER_BASE;
+      // Every cluster already has prompts: the reminder would say "0 of your 10 are still empty" (review of 7e133a7).
+      if (!setupStillEmpty({ withPrompts: live.withPrompts, clusterLimit })) continue;
       const tier = (["tracked", "mentioned", "cited", "everywhere"].includes(c.tier ?? "") ? c.tier : "tracked") as TierKey;
-      const mail = setupReminder({ tier, domain: c.domain, link: setupUrl(c.slug, siteUrl()), withPrompts: live.withPrompts, clusterLimit: c.cluster_limit ?? CLUSTER_BASE });
-      const r = await deliver(db, c, due, mail);
+      const mail = setupReminder({ tier, domain: c.domain, link: setupUrl(c.slug, io.origin), withPrompts: live.withPrompts, clusterLimit });
+      const r = await deliver(db, io, c, due, mail);
       if (r !== "taken") out[r].push(`${due} ${c.id}`);
     } catch (err) {
       out.errors.push(`${due} ${c.id}: ${msg(err)}`);
@@ -236,25 +247,13 @@ export async function sweepLifecycleMail(db: SupabaseClient, now: number = Date.
   return out;
 }
 
-/** The cron's call: its own admin client, and nothing it does can fail the dispatch's answer. */
-export async function sweepLifecycleMailSafely(): Promise<SweepResult | { error: string }> {
-  try {
-    const out = await sweepLifecycleMail(supabaseAdmin());
-    for (const e of out.errors) console.warn(`[mail] lifecycle sweep: ${e}`);
-    return out;
-  } catch (err) {
-    console.warn(`[mail] lifecycle sweep failed: ${msg(err)}`);
-    return { error: msg(err) };
-  }
-}
-
 /**
  * Stripe's customer.subscription.trial_will_end, three days before a trial
  * ends: trial_ending's fallback trigger, for a day the cron misses. False
  * only when a read failed, so Stripe retries; a send that reached nobody is
  * released for the cron to try.
  */
-export async function mailTrialEnding(db: SupabaseClient, clientId: string, now: number = Date.now()): Promise<boolean> {
+export async function mailTrialEnding(db: SupabaseClient, io: SweepIo, clientId: string, now: number = Date.now()): Promise<boolean> {
   try {
     if (!(await lifecycleOn(db, "trial_ending"))) return true;
     const { data, error } = await db.from("client_domains").select(CLIENT_COLUMNS).eq("id", clientId).maybeSingle();
@@ -264,11 +263,27 @@ export async function mailTrialEnding(db: SupabaseClient, clientId: string, now:
     if ((await agencyAccounts(db, [c.account_id])).has(c.account_id)) return true;
     const sent = (await eventsFor(db, [c.id])).get(c.id) ?? new Set<string>();
     if (!trialEndingOnStripe({ status: c.status, trialEndsAt: c.trial_ends_at, cancelledAt: c.trial_cancelled_at, sent, now })) return true;
-    const r = await deliver(db, c, TRIAL_MAIL_EVENT.trial_ending, await trialMail(db, c, "trial_ending", now));
+    const r = await deliver(db, io, c, TRIAL_MAIL_EVENT.trial_ending, await trialMail(db, io, c, "trial_ending", now));
     if (r === "unsent") console.warn(`[mail] trial_ending for ${clientId} reached nobody; the cron tries again`);
     return true;
   } catch (err) {
     console.error(`[mail] trial_ending for ${clientId} not sent: ${msg(err)}`);
     return false;
   }
+}
+
+/**
+ * plan_ended's recipients (moved here from checkout/signup.ts on 8 Oct 2026,
+ * review of 7e133a7, so the rule has a behaviour test): the live owners, and
+ * none outside upsell mode nomada - the email sends the owner to Billing to
+ * ask us to restart, and only nomada mode has Ask us there, as the ended
+ * banner decides - or when a read failed.
+ */
+export async function planEndedOwners(db: SupabaseClient, accountId: string): Promise<{ email: unknown }[]> {
+  const { data: account, error: aErr } = await db.from("accounts").select("upsell_mode").eq("id", accountId).maybeSingle();
+  if (aErr) console.error(`[stripe] plan_ended not sent, account not read: ${aErr.message}`);
+  if (aErr || upsellMode(account?.upsell_mode) !== "nomada") return [];
+  const { data: owners, error: oErr } = await db.from("dashboard_members").select("email").eq("account_id", accountId).eq("role", "owner").is("removed_at", null);
+  if (oErr) console.error(`[stripe] plan_ended not sent, owners not read: ${oErr.message}`);
+  return owners ?? [];
 }

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { checkoutRequest } from "./session.ts";
-import { clustersToMake, completedOrder, HANDLED_EVENTS, handleWebhook, orderEmailText, orderRow, packsOn, signStripePayload, signupResume, subscriptionScanToken, trialStillRunning, verifyStripeSignature, type WebhookDeps } from "./webhook.ts";
+import { clustersToMake, completedOrder, HANDLED_EVENTS, handleWebhook, orderEmailText, orderRow, packsOn, signStripePayload, signupResume, subscriptionScanToken, trialEndsAtAfter, trialStillRunning, verifyStripeSignature, type WebhookDeps } from "./webhook.ts";
 
 /**
  * BRIEF-3 C4 (30 Sep 2026): the webhook's rules against recorded fixtures.
@@ -120,6 +120,33 @@ test("trial_will_end is handled, and only for a subscription still in its trial"
   assert.equal(trialStillRunning({ status: "trialing" }, nowMs), true, "no trial_end on the payload: Stripe's word that it is trialing stands");
   assert.equal(trialStillRunning({ status: "active", trial_end: NOW + 86_400 }, nowMs), false, "a trial ended early is already charging");
   assert.equal(trialStillRunning({ status: "trialing", trial_end: NOW - 1 }, nowMs), false);
+});
+
+/**
+ * Review of 7e133a7 (8 Oct 2026): client_domains.trial_ends_at never moved
+ * after signup, so a trial ended early in Stripe - charged - kept reading as
+ * running, and the daily cron's trial_midpoint and trial_ending would have
+ * told a paying client "cancel before then and nothing is charged". The
+ * column now follows Stripe's trial_end on customer.subscription.updated.
+ */
+test("trial_ends_at follows Stripe's trial_end when a trial is extended or ends, and is never later than now once it has", () => {
+  const nowMs = NOW * 1000;
+  const iso = (s: number) => new Date(s * 1000).toISOString();
+  const orig = NOW + 9 * 86_400;
+  // Ended early on day 5: Stripe sets trial_end to the moment it ended, and the status leaves trialing.
+  assert.equal(trialEndsAtAfter({ status: "active", trial_end: NOW }, { status: "trialing", trial_end: orig }, nowMs), iso(NOW));
+  // The same, with a payload that still carries the old future trial_end: clamped to now, never read as running.
+  assert.equal(trialEndsAtAfter({ status: "active", trial_end: orig }, { status: "trialing" }, nowMs), iso(NOW));
+  assert.equal(trialEndsAtAfter({ status: "past_due", trial_end: null }, { status: "trialing" }, nowMs), iso(NOW), "left the trial with no trial_end: ended now");
+  // The trial ran its course: trial_end is already behind now, and stays what it was.
+  assert.equal(trialEndsAtAfter({ status: "active", trial_end: NOW - 60 }, { status: "trialing" }, nowMs), iso(NOW - 60));
+  // Extended while still trialing: the new end.
+  assert.equal(trialEndsAtAfter({ status: "trialing", trial_end: orig + 7 * 86_400 }, { trial_end: orig }, nowMs), iso(orig + 7 * 86_400));
+  // A pack bought, an owner's cancel_at_period_end, a paid plan's renewal: left alone.
+  assert.equal(trialEndsAtAfter({ status: "trialing", trial_end: orig }, { items: {} }, nowMs), undefined);
+  assert.equal(trialEndsAtAfter({ status: "trialing", trial_end: orig, cancel_at_period_end: true }, { cancel_at_period_end: false }, nowMs), undefined);
+  assert.equal(trialEndsAtAfter({ status: "active", trial_end: null }, { current_period_end: NOW }, nowMs), undefined);
+  assert.equal(trialEndsAtAfter({ status: "active", trial_end: null }, {}, nowMs), undefined);
 });
 
 test("an event the endpoint is not registered for is answered and not recorded", async () => {
