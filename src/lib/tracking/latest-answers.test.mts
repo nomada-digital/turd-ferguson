@@ -114,3 +114,15 @@ test("fixture: every prompt has words for every engine at today's check, agreein
   );
   assert.equal(tabs[1]!.brands[0]!.name, "Tallyroo");
 });
+
+test("8 Oct 2026 (audit data-6): an answer whose other brands were not read says so, never 'None'", () => {
+  const [read, unread, absent] = answerTabs(
+    [row({ engine: "chatgpt", named: true, brands: [] }), row({ engine: "gemini", named: false, brands: [], brands_ok: false })],
+    ["chatgpt", "gemini", "perplexity"],
+    "Tallyroo",
+  );
+  assert.equal(read!.othersRead, true, "absent brands_ok is read");
+  assert.equal(unread!.othersRead, false);
+  assert.deepEqual(unread!.brands, []);
+  assert.equal(absent!.othersRead, true, "no answer is not a gap");
+});

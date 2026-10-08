@@ -1,4 +1,5 @@
 import { brandKey, subjectKeys } from "../scan/brand-name.ts";
+import { failureSummary } from "./decide.ts";
 import { addDays, type Day } from "./figures.ts";
 import { PROMPTS_PER_CLUSTER } from "./limits.ts";
 import type { OrderPick } from "./order-keyword.ts";
@@ -89,7 +90,7 @@ export function fixtureUnreadable(env: Record<string, string | undefined> = proc
  * swept - the default names 5 brands, cites 6 pages and has 6 placements.
  */
 /** Every TRACKING_FIXTURE_STATE, unset being `default`. Anything else serves the default. */
-export const FIXTURE_STATES = ["default", "signup", "signup-typed", "new", "partial", "failed", "unreadable", "stopped", "ungrouped", "pilot-mixed", "uncited", "long", "trial", "trial-ending", "trial-cancelled", "ended"] as const;
+export const FIXTURE_STATES = ["default", "signup", "signup-typed", "new", "partial", "failed", "unreadable", "stopped", "ungrouped", "pilot-mixed", "uncited", "long", "trial", "trial-ending", "trial-cancelled", "ended", "brands-unread"] as const;
 
 /**
  * The alwaystracked trial and its end (8 Oct 2026, audit activation-14): the
@@ -160,6 +161,7 @@ export function fixtureState(f: Fixture, env: Record<string, string | undefined>
   if (env.TRACKING_FIXTURE_STATE === "stopped") return stoppedPrompt(as);
   if (env.TRACKING_FIXTURE_STATE === "uncited") return { ...as, data: { ...as.data, answers: as.data.answers.map((a) => ({ ...a, citations: [] })) } };
   if (env.TRACKING_FIXTURE_STATE === "long") return longLists(as);
+  if (env.TRACKING_FIXTURE_STATE === "brands-unread") return brandsUnread(as);
   const st = env.TRACKING_FIXTURE_STATE ?? "";
   if (st === "trial" || st === "trial-ending" || st === "trial-cancelled" || st === "ended") return trialState(as, st, Date.now());
   if (env.TRACKING_FIXTURE_STATE !== "ungrouped") return as;
@@ -298,6 +300,24 @@ function failedReads(f: Fixture, outcome: "partial" | "failed"): Fixture {
     texts,
     data: { ...f.data, lastRun, answers: f.data.answers.map((a) => (hit(a) ? { ...a, answered: false, named: false, brands: [], citations: [] } : a)) },
   };
+}
+
+/**
+ * 8 Oct 2026 (audit reliability-1 / data-6): `TRACKING_FIXTURE_STATE=brands-unread`
+ * is today's run with ChatGPT's brand extraction failed, as the runner now
+ * records it. Every read landed, so today's ChatGPT answers keep their words,
+ * named flag and citations, but are stored brands_ok=false with no other
+ * brands; the run is partial with only a brand gap on its error line.
+ */
+const UNREAD_ENGINE = "chatgpt";
+
+function brandsUnread(f: Fixture): Fixture {
+  const hit = (a: OverviewData["answers"][number]) => a.run_date === f.today && a.engine === UNREAD_ENGINE && a.answered;
+  const n = f.data.answers.filter(hit).length;
+  const reads = f.data.answers.filter((a) => a.run_date === f.today).length;
+  const error = failureSummary(reads, [], [{ engine: UNREAD_ENGINE, unread: n, answered: n, reason: "language model error 529: Overloaded" }]);
+  const lastRun = { run_date: f.today, status: "partial", finished_at: `${f.today}T06:10:00Z`, error };
+  return { ...f, data: { ...f.data, lastRun, answers: f.data.answers.map((a) => (hit(a) ? { ...a, brands: [], brands_ok: false } : a)) } };
 }
 
 /**

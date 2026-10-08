@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
-import { expandFixture } from "./fixture-mode.ts";
+import { expandFixture, fixtureState } from "./fixture-mode.ts";
 import { type AnswerRow, brandBoard, comparisonRange, shareOfVoice } from "./figures.ts";
 import { CITED_WITH_TOP, NAMED_TOP, citedWithBrand, namedPage, openKey } from "./named-figures.ts";
 
@@ -106,4 +106,26 @@ test("?open= takes a folded key only", () => {
   assert.equal(openKey("Xero"), null);
   assert.equal(openKey("<x>"), null);
   assert.equal(openKey(["xero"]), null);
+});
+
+test("8 Oct 2026 (audit reliability-1 / data-6): Who is named reads the brands-unread fixture as if its unread answers were not there", () => {
+  const u = fixtureState(fx, { TRACKING_FIXTURE_STATE: "brands-unread" });
+  const unread = u.data.answers.filter((a) => a.brands_ok === false);
+  assert.ok(unread.length >= 40, `the state marks ${unread.length} answers`);
+  const without = u.data.answers.filter((a) => a.brands_ok !== false);
+  assert.deepEqual(namedPage({ answers: u.data.answers, range, before, you }), namedPage({ answers: without, range, before, you }));
+  assert.deepEqual(shareOfVoice(u.data.answers, range), shareOfVoice(without, range));
+  const key = namedPage({ answers: without, range, before, you }).rows[1]!.key;
+  for (const k of [key, "tallyroo"]) {
+    assert.deepEqual(
+      citedWithBrand({ answers: u.data.answers, range, key: k, you, domain: fx.client.domain }),
+      citedWithBrand({ answers: without, range, key: k, you, domain: fx.client.domain }),
+      k,
+    );
+  }
+  // As the runner stored it before 8 Oct - brands [] with nothing to say so - today's share was the client's to gain.
+  const today = { from: fx.today, to: fx.today };
+  const asBefore = u.data.answers.map((a) => (a.brands_ok === false ? { ...a, brands_ok: true } : a));
+  assert.ok(shareOfVoice(asBefore, today).pct! > shareOfVoice(u.data.answers, today).pct!, "the old storage inflates the share");
+  assert.ok(brandBoard(asBefore, today, null, you).find((b) => b.you)!.share.pct! > brandBoard(u.data.answers, today, null, you).find((b) => b.you)!.share.pct!);
 });

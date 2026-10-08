@@ -8,6 +8,7 @@ import { QUESTIONS } from "@/config/scan-shape";
 
 import { brandedQuestions, withoutBrand } from "./brand-name";
 import type { Market } from "./domain";
+import { batchBlocks, runBatches } from "./prose-batches";
 import { countingFetch, withRetry } from "./retry-policy";
 import { sourceKindRequest, sourceKindSystem } from "./source-kind-prompt";
 import { normaliseCandidate } from "./target-keyword";
@@ -592,23 +593,8 @@ const BrandList = z.object({
   ),
 });
 
-/**
- * Answers per request, by length of prose.
- *
- * This used to be one call for every answer an engine gave, joined into a
- * single string and cut at 120,000 characters. Both halves of that were the
- * shape the source classifier was already fixed for: the input grew with the
- * scan rather than with the batch, and the cut fell at the end of the joined
- * string, so what it dropped was whole later answers - the last questions
- * asked simply had no brands extracted from them and nothing said so.
- *
- * The output ceiling was the worse half. It was a flat 8,000 tokens against
- * an input that scaled with the scan, and unlike the classifier this call is
- * NOT wrapped in "never fatal": a truncated response fails the schema parse,
- * which threw out of Promise.all, which failed the whole run - after every
- * engine read on it had already been paid for.
- */
-const PROSE_BATCH_CHARS = 60_000;
+// Answers per request, and why a request is a batch of them rather than one
+// joined string: prose-batches.ts PROSE_BATCH_CHARS, with the history.
 
 /**
  * Pull the competitor set out of the Overview prose. Publications, directories
@@ -620,59 +606,54 @@ const PROSE_BATCH_CHARS = 60_000;
  * Duplicate names across batches are not merged here - the caller already
  * merges on brandKey, which folds case and punctuation, and two normalisers
  * that disagree is how a leaderboard grows a second row for one company.
+ *
+ * `failedBlocks` (8 Oct 2026, audit reliability-1 / data-6): the indices into
+ * `blocks` whose batch failed, so a caller can retry those answers and mark
+ * the ones still unread rather than store them as naming no one - the daily
+ * tracking runner read only `brands` and `calls`, so a 529 on one engine's
+ * batch shortened every rival's count and raised the client's share of voice
+ * on a run marked complete. `error` is the first failure's reason, for the
+ * caller's error line.
+ *
+ * `options.signal` aborts a request in flight and stops the next one from
+ * going out, and an aborted batch fails like any other. It does NOT cut short
+ * a wait between the SDK's own retries: `retryRequest` sleeps out a
+ * `retry-after` with no signal (retry-policy.ts), and so does `withRetry`. So
+ * the signal alone is no deadline; a caller that needs one stops waiting on
+ * this call when the signal fires (decide.ts extractWithRetry does).
+ * `options.billed` is the counter the requests are tallied on, live, so a
+ * caller that stopped waiting still knows what went out; `calls` is what this
+ * call added to it.
  */
 export async function extractBrands(
   blocks: string[],
   context: { topic: string; brand: string } = { topic: "", brand: "" },
-): Promise<{ brands: { brand: string; mentions: number }[]; calls: number; failedBatches: number }> {
-  // One answer is clamped to a whole batch rather than to some smaller share
-  // of one, so nothing is cut tighter here than the old 120,000-character cut
-  // would have cut it. 60,000 characters is some 15,000 words from a single
-  // engine answer; the clamp is a bound on the pathological case, not a size
-  // any answer in this pipeline is expected to reach.
-  const usable = blocks
-    .map((b) => b.trim())
-    .filter(Boolean)
-    .map((b) => (b.length > PROSE_BATCH_CHARS ? b.slice(0, PROSE_BATCH_CHARS) : b));
-  if (!usable.length) return { brands: [], calls: 0, failedBatches: 0 };
+  options: { signal?: AbortSignal; billed?: { calls: number } } = {},
+): Promise<{ brands: { brand: string; mentions: number }[]; calls: number; failedBatches: number; failedBlocks: number[]; error?: string }> {
+  // The batching and which answers a failed batch leaves unread are
+  // prose-batches.ts, where node --test runs them (8 Oct 2026, review).
+  const batches = batchBlocks(blocks);
+  if (!batches.length) return { brands: [], calls: 0, failedBatches: 0, failedBlocks: [] };
 
-  const batches: string[][] = [];
-  let current: string[] = [];
-  let size = 0;
-  for (const block of usable) {
-    if (current.length && size + block.length > PROSE_BATCH_CHARS) {
-      batches.push(current);
-      current = [];
-      size = 0;
-    }
-    current.push(block);
-    size += block.length;
-  }
-  if (current.length) batches.push(current);
-
-  const brands: { brand: string; mentions: number }[] = [];
   // Attempts, not batches. A batch that 529s twice and lands on the third is
   // three requests on the bill and was one on this counter.
-  const billed = { calls: 0 };
-  let failedBatches = 0;
-  for (const batch of batches) {
-    try {
-      brands.push(...(await extractBrandBatch(batch, context, billed)));
-    } catch (err) {
-      // One bad batch must not cost the scan its leaderboard, and must not
-      // cost it the engine reads already paid for. Counted and returned so
-      // the caller can say a leaderboard is partial rather than assume it.
-      failedBatches += 1;
-      console.warn("[scan] a prose batch failed to extract:", err instanceof Error ? err.message : err);
-    }
-  }
-  return { brands, calls: billed.calls, failedBatches };
+  const billed = options.billed ?? { calls: 0 };
+  const before = billed.calls;
+  // Counted and returned so the caller can say a leaderboard is partial
+  // rather than assume it.
+  const { items: brands, failedBatches, failedBlocks, error } = await runBatches(
+    batches,
+    (texts) => extractBrandBatch(texts, context, billed, options.signal),
+    (err) => (options.signal?.aborted ? "out of time" : describeAnthropicError(err).slice(0, 80)),
+  );
+  return { brands, calls: billed.calls - before, failedBatches, failedBlocks, ...(error ? { error } : {}) };
 }
 
 async function extractBrandBatch(
   batch: string[],
   context: { topic: string; brand: string },
   billed: { calls: number },
+  signal?: AbortSignal,
 ): Promise<{ brand: string; mentions: number }[]> {
   const res = await withRetry(() => anthropic(billed).messages.parse({
     model: MODEL,
@@ -710,7 +691,7 @@ async function extractBrandBatch(
           .join("\n\n"),
       },
     ],
-  }));
+  }, { signal }));
 
   return res.parsed_output?.brands ?? [];
 }

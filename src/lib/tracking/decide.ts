@@ -103,10 +103,162 @@ export function verifyRun(body: string, signature: string | null, secret: string
  * How a run ends. Complete only when every read landed; partial when some
  * failed after the retry; failed when none did, which is a run that measured
  * nothing and must not read as a day of zeros.
+ *
+ * `brandGaps` (8 Oct 2026, audit reliability-1 / data-6): engines whose brand
+ * extraction left answers without the other brands named. Partial, never
+ * failed - every read landed and is stored - and never complete, which is
+ * what a run with a failed extraction said before, with no error line.
  */
-export function runOutcome(reads: number, failed: number): "complete" | "partial" | "failed" {
+export function runOutcome(reads: number, failed: number, brandGaps = 0): "complete" | "partial" | "failed" {
   if (reads > 0 && failed >= reads) return "failed";
-  return failed > 0 ? "partial" : "complete";
+  return failed > 0 || brandGaps > 0 ? "partial" : "complete";
+}
+
+/**
+ * Brand extraction in the daily run (8 Oct 2026, audit reliability-1 /
+ * data-6). `extractBrands` swallows a failed batch so the paid reads survive,
+ * and returns which answers it covered; the runner read only the brands, so a
+ * 529 stored every answer in the batch as naming no other brand. Those rows
+ * shortened every rival's count and raised the client's share of voice.
+ *
+ * A batch that failed is retried once while the run has EXTRACT_RETRY_MIN_MS
+ * left. An answer still unread is stored brands_ok=false and left out of
+ * every brand figure, and the engine is a BrandGap on the run's error line.
+ */
+export type BrandGap = { engine: string; unread: number; answered: number; reason: string };
+
+/**
+ * Extraction starts after the reads, which may use RUN_BUDGET_MS to its last
+ * five seconds, so it may run into the 30s the budget leaves under the
+ * route's 300s - this much of it, keeping ten seconds to store the rows and
+ * close the run. Before the bound, an extraction past 300s took every read
+ * of the day with it, unstored, and the stall sweep marked the run failed.
+ *
+ * The bound is the runner stopping waiting (extractWithRetry's `signal`), not
+ * the signal alone: the SDK sleeps out a `retry-after` between its retries
+ * with no signal, so an aborted request could still keep the call open past
+ * the window (review, 8 Oct 2026).
+ */
+export const EXTRACT_GRACE_MS = 20_000;
+
+/** The retry starts only with this long left in the run's budget. */
+export const EXTRACT_RETRY_MIN_MS = 30_000;
+
+/** How long brand extraction may take from now, both passes: the run's budget plus the grace, never under 1ms. */
+export function extractionWindowMs(remainingMs: number): number {
+  return Number.isFinite(remainingMs) ? Math.max(1, remainingMs + EXTRACT_GRACE_MS) : EXTRACT_GRACE_MS;
+}
+
+/** Retry the failed batches once, only with time for it. */
+export function retryExtraction(unread: number, remainingMs: number): boolean {
+  return unread > 0 && remainingMs >= EXTRACT_RETRY_MIN_MS;
+}
+
+/** The retry is handed `retried` (indices into the engine's answers) and reports its failures by position in that list. */
+export function stillUnread(retried: readonly number[], failedInRetry: readonly number[]): number[] {
+  return failedInRetry.flatMap((i) => (retried[i] === undefined ? [] : [retried[i]!]));
+}
+
+/**
+ * What `extractBrands` returns that the runner reads: `failedBlocks` index into
+ * the blocks it was handed. Its `calls` is not read: the requests are counted
+ * on the `billed` it is handed, live, so a pass abandoned at the deadline is
+ * still billed for what it sent.
+ */
+export type Extracted = { brands: { brand: string }[]; failedBlocks: number[]; error?: string };
+
+/** An extraction pass the deadline stopped waiting on. */
+const OUT_OF_TIME = Symbol("out of time");
+
+/**
+ * `p`, or OUT_OF_TIME as soon as `signal` aborts, whichever comes first. `p`
+ * is not stopped, only no longer waited on - the SDK may be sleeping out a
+ * `retry-after` that no signal reaches - and its rejection is handled here,
+ * so an abandoned pass that throws later is not an unhandled rejection.
+ */
+function byDeadline<T>(p: Promise<T>, signal: AbortSignal | undefined): Promise<T | typeof OUT_OF_TIME> {
+  if (!signal) return p;
+  return new Promise((resolve, reject) => {
+    const stop = () => resolve(OUT_OF_TIME);
+    signal.addEventListener("abort", stop, { once: true });
+    p.then(
+      (v) => {
+        signal.removeEventListener("abort", stop);
+        resolve(v);
+      },
+      (err: unknown) => {
+        signal.removeEventListener("abort", stop);
+        reject(err);
+      },
+    );
+    if (signal.aborted) stop();
+  });
+}
+
+/**
+ * One engine's brand extraction and its one retry, with the extractor passed
+ * in so this runs under node --test. `unread` indexes `blocks`: the answers
+ * whose batch failed both times, or all of them if the extractor threw - it
+ * swallows a failed batch, so a throw is the unexpected case, and it used to
+ * leave the engine's answers naming no one with a log line as the only trace.
+ *
+ * `signal` is the hard deadline (review, 8 Oct 2026). When it fires, the pass
+ * in flight is no longer waited on and the answers it was handed are unread,
+ * "out of time"; no pass starts after it. The extractor is handed the signal
+ * by the caller, which cuts a request in flight short, but not the SDK's
+ * sleep between retries, which is why this races it rather than trusting it.
+ *
+ * `calls` is read off `billed`, which the extractor tallies each request on as
+ * it leaves: every request of every pass, failed batches' and an abandoned
+ * pass's included. After the signal fires no request leaves (the SDK checks it
+ * before each), so the count read at the deadline is the count.
+ */
+export async function extractWithRetry(
+  blocks: readonly string[],
+  extract: (blocks: string[], billed: { calls: number }) => Promise<Extracted>,
+  remainingMs: () => number,
+  signal?: AbortSignal,
+): Promise<{ names: string[]; calls: number; unread: number[]; reason: string }> {
+  const names: string[] = [];
+  const billed = { calls: 0 };
+  const pass = (some: string[]) => (signal?.aborted ? Promise.resolve(OUT_OF_TIME) : byDeadline(extract(some, billed), signal));
+  let unread = blocks.map((_, i) => i);
+  let reason = "";
+  try {
+    const out = await pass([...blocks]);
+    if (out === OUT_OF_TIME) {
+      reason = "out of time";
+    } else {
+      names.push(...out.brands.map((b) => b.brand));
+      unread = out.failedBlocks;
+      reason = out.error ?? "";
+      if (retryExtraction(unread.length, remainingMs())) {
+        const again = await pass(unread.map((i) => blocks[i]!));
+        if (again === OUT_OF_TIME) {
+          reason = "out of time";
+        } else {
+          names.push(...again.brands.map((b) => b.brand));
+          unread = stillUnread(unread, again.failedBlocks);
+          reason = again.error ?? reason;
+        }
+      }
+    }
+  } catch (err) {
+    reason = (err instanceof Error ? err.message : String(err)).slice(0, 80);
+  }
+  return { names, calls: billed.calls, unread, reason: unread.length ? reason || "unknown" : "" };
+}
+
+/**
+ * Whether a database error is `column` missing, as a select ("column
+ * tracking_answers.brands_ok does not exist") or a write ("Could not find the
+ * 'brands_ok' column ... in the schema cache") says it. A deploy can land
+ * before its additive migration (AGENTS.md); the reads and the runner's write
+ * that name brands_ok go again without it rather than fail.
+ */
+export function missingColumn(err: unknown, column: string): boolean {
+  const msg = typeof err === "string" ? err : (err as { message?: unknown } | null)?.message;
+  return typeof msg === "string" && msg.includes(column) && /does not exist|could not find/i.test(msg);
 }
 
 /** The London day after `day` (YYYY-MM-DD). Additions start at the next daily check. */
@@ -216,19 +368,41 @@ export function readFailureReason(err: unknown): string {
  * The run's error line: how many reads failed, then each engine's reasons
  * with a count - "4 of 21 reads failed - google_aio: 4 x HTTP 429". Null when
  * nothing failed. Keyword reads are listed as "keyword".
+ *
+ * Then any brand gap (8 Oct 2026, audit reliability-1 / data-6), after a
+ * full stop - "brand extraction failed - chatgpt: other brands not read in 12
+ * of 20 answers (language model error 529: Overloaded)" - so the days with
+ * unread answers can be found from the runs, not only from the answers.
  */
-export function failureSummary(reads: number, failures: readonly { engine: string; reason: string }[]): string | null {
-  if (!failures.length) return null;
-  const groups = new Map<string, number>();
-  for (const f of failures) {
-    const key = `${f.engine}: ${f.reason}`;
-    groups.set(key, (groups.get(key) ?? 0) + 1);
+export function failureSummary(reads: number, failures: readonly { engine: string; reason: string }[], gaps: readonly BrandGap[] = []): string | null {
+  const lines: string[] = [];
+  if (failures.length) {
+    const groups = new Map<string, number>();
+    for (const f of failures) {
+      const key = `${f.engine}: ${f.reason}`;
+      groups.set(key, (groups.get(key) ?? 0) + 1);
+    }
+    const parts = [...groups].map(([key, n]) => {
+      const [engine, ...rest] = key.split(": ");
+      return `${engine}: ${n} x ${rest.join(": ")}`;
+    });
+    lines.push(`${failures.length} of ${reads} reads failed - ${parts.join("; ")}`);
   }
-  const parts = [...groups].map(([key, n]) => {
-    const [engine, ...rest] = key.split(": ");
-    return `${engine}: ${n} x ${rest.join(": ")}`;
-  });
-  return `${failures.length} of ${reads} reads failed - ${parts.join("; ")}`.slice(0, 500);
+  if (gaps.length) {
+    const parts = gaps.map((g) => `${g.engine}: other brands not read in ${g.unread} of ${g.answered} answers${g.reason ? ` (${g.reason})` : ""}`);
+    lines.push(`brand extraction failed - ${parts.join("; ")}`);
+  }
+  return lines.length ? lines.join(". ").slice(0, 500) : null;
+}
+
+/**
+ * Whether a partial run's error line (failureSummary) says reads failed, not
+ * only a brand gap. No line is read failures: that is all partial meant
+ * before 8 Oct 2026, and the fixture's runs carry none. The screens say "some
+ * reads did not come back" only when this is true.
+ */
+export function readsFailedIn(error: string | null | undefined): boolean {
+  return !error || !error.startsWith("brand extraction failed");
 }
 
 /**

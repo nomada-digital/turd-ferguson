@@ -18,7 +18,7 @@ import { ANGLES, BRANDED_CHIP, BRANDED_NOTE, PROMPTS_PER_CLUSTER, type Subject, 
 import type { Compare, OverviewData } from "@/lib/tracking/overview-data";
 import { prefillCard } from "@/lib/tracking/order-keyword";
 import { KEYWORD_FIXED_NOTE } from "@/lib/tracking/rekey";
-import { partialRunNote } from "@/lib/tracking/run-note";
+import { lostReads, partialRunNote } from "@/lib/tracking/run-note";
 import { BULK_ID, type BulkCount } from "@/lib/tracking/stop";
 
 import type { TierKey } from "@/components/TierName";
@@ -152,7 +152,9 @@ export default function Clusters({
   // T11: the never filter carries the alwaysmentioned prompt; the unfiltered list, which is the
   // cluster layout's Google keywords panel (each row's position), carries alwayscited. Each only
   // when its rules allow (upgrade-prompts.ts), and each screen is judged on its own panel's facts.
-  const state = shown.length === 0 ? "empty" : data.lastRun?.status === "partial" ? "partial" : "ok";
+  // 8 Oct 2026 (audit reliability-1 / data-6): partial is lost reads (run-note.ts lostReads). A run
+  // partial only for a brand gap lost none, and neither prompt is judged on other brands.
+  const state = shown.length === 0 ? "empty" : lostReads(data.lastRun) ? "partial" : "ok";
   const facts: Facts | null =
     upgrade && filter === "never"
       ? { ...upgrade, today, state, neverNamed: neverNamedFacts({ cards, answers: data.answers, range, domain: upgrade.domain }) }

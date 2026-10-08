@@ -1,0 +1,17 @@
+-- Whether an answer's other brands were read (8 Oct 2026, dashboard audit
+-- reliability-1 and data-6, critical). The daily runner extracts the brands
+-- an engine named per batch of answers, and a batch that failed (an Anthropic
+-- 529, a truncated response) was stored as brands = '[]' - "no other brand
+-- named" - on a run marked complete. Those rows shortened every rival's count
+-- and raised the client's share of voice, and nothing recorded which they were.
+--
+-- The runner now writes false for an answer whose batch still failed after
+-- its retry, and every brand figure (share of voice, Who is named, a prompt's
+-- brands) leaves those rows out of numerator and denominator alike.
+--
+-- Additive: one column, a constant default, so no existing row is rewritten.
+-- Rows written before this read true, which means "not known to have failed":
+-- a gap before 8 Oct 2026 cannot be told apart from an answer naming no one.
+-- brands stays not null; an unread answer keeps whatever names the batches
+-- that did land attribute to it, and brands_ok says the list is short.
+alter table tracking_answers add column if not exists brands_ok boolean not null default true;

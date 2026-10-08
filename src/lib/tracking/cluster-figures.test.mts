@@ -264,6 +264,15 @@ test("T7 brands: answers naming each brand for one prompt, the client always lis
   assert.deepEqual(s, { answers: 2, rows: [{ name: "Zed", you: false, n: 2 }, { name: "Me", you: true, n: 1 }, { name: "Acme", you: false, n: 1 }] });
 });
 
+test("8 Oct 2026 (audit data-6): a prompt's brands leave out an answer whose other brands were not read, the client's mention included", () => {
+  const r = { from: "2026-09-01", to: "2026-09-02" };
+  const row = (named: boolean, brands: string[], brands_ok?: boolean) => ({ run_date: "2026-09-01", question_id: "p", engine: "chatgpt", answered: true, named, brands, ...(brands_ok === undefined ? {} : { brands_ok }) });
+  const read = [row(false, ["Zed"]), row(true, ["Zed"])];
+  const clean = promptBrands({ answers: read, range: r }, "p", "Me");
+  assert.deepEqual(promptBrands({ answers: [...read, row(true, [], false)], range: r }, "p", "Me"), clean);
+  assert.deepEqual(clean, { answers: 2, rows: [{ name: "Zed", you: false, n: 2 }, { name: "Me", you: true, n: 1 }] });
+});
+
 test("8 Oct 2026 (audit data-1): a past range counts only the clusters, prompts and keywords that existed in it", () => {
   // c9 (5 prompts, k9) started 16 Sep and c10 starts tomorrow; August knew neither.
   const aug = { from: "2026-08-05", to: "2026-09-01" };

@@ -5,6 +5,8 @@ import {
   type AnswerRow,
   basis,
   brandBoard,
+  brandGaps,
+  brandsRead,
   checkGrid,
   citedPages,
   comparisonRange,
@@ -209,4 +211,25 @@ test("a failed google_aio read (stored answered=false) never counts as not named
   // Positive control: the same row counted as an answer would have moved the rate.
   const asAnswer = overview({ ...base, answers: [...good, { ...failed, answered: true }] });
   assert.notDeepEqual(asAnswer.named, clean.named);
+});
+
+test("8 Oct 2026 (audit reliability-1 / data-6): an answer whose other brands were not read leaves share of voice and the board as they were, not inflated", () => {
+  const r = { from: "2026-10-01", to: "2026-10-07" };
+  const read = [a("2026-10-01", "q1", "gemini", true, ["Acme", "Bolt"]), a("2026-10-02", "q1", "gemini", false, ["Acme"])];
+  // ChatGPT's extraction failed on 2 Oct: whether it named the client is known, the other brands are not.
+  const unread: AnswerRow = { ...a("2026-10-02", "q1", "chatgpt", true), brands_ok: false };
+  const clean = shareOfVoice(read, r);
+  assert.deepEqual([clean.num, clean.den, clean.pct], [1, 4, 25]);
+  assert.deepEqual(shareOfVoice([...read, unread], r), clean, "out of numerator and denominator alike");
+  assert.deepEqual(brandBoard([...read, unread], r, null, "Tally"), brandBoard(read, r, null, "Tally"));
+  // Positive control: stored as it was before 8 Oct - brands [] read as "no other brand" - the share rises.
+  const asBefore = shareOfVoice([...read, { ...unread, brands_ok: true }], r);
+  assert.deepEqual([asBefore.num, asBefore.den, asBefore.pct], [2, 5, 40]);
+  // The named rate still counts it: whether the client was named does not hang on the extraction.
+  assert.deepEqual(namedRate([...read, unread], r), { num: 2, den: 3, pct: 67 });
+  const out = [{ ...unread, run_date: "2026-09-30" }, { ...unread, engine: "gemini", answered: false }];
+  assert.deepEqual(brandGaps([...read, unread, ...out], r), [{ day: "2026-10-02", engine: "chatgpt", answers: 1 }], "answered and in range only");
+  assert.equal(brandsRead({}), true, "a row from before the column, or the fixture's, is read");
+  assert.equal(brandsRead({ brands_ok: true }), true);
+  assert.equal(brandsRead({ brands_ok: false }), false);
 });

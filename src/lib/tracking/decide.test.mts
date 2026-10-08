@@ -2,15 +2,24 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  EXTRACT_GRACE_MS,
+  EXTRACT_RETRY_MIN_MS,
+  type Extracted,
   dayAfter,
+  extractWithRetry,
+  extractionWindowMs,
+  failureSummary,
   liveOn,
+  missingColumn,
   slugFor,
   underLimit,
   readTrackingSettings,
   refuseRun,
   runOutcome,
+  retryExtraction,
   shouldTrack,
   signRun,
+  stillUnread,
   trackingDay,
   upsellSetting,
   verifyRun,
@@ -99,4 +108,150 @@ test("a run that read nothing successfully is failed, not a day of zeros", () =>
   assert.equal(runOutcome(80, 3), "partial");
   assert.equal(runOutcome(80, 80), "failed");
   assert.equal(runOutcome(0, 0), "complete");
+});
+
+/**
+ * 8 Oct 2026, audit reliability-1 / data-6 (critical): a brand extraction that
+ * failed was stored as "no other brand named" on a run marked complete, which
+ * raised the client's share of voice. These run the runner's decisions about it.
+ */
+
+/**
+ * An extractor standing in for extractBrands: `fail` are the blocks whose batch fails, by text.
+ * One request per pass, tallied on `billed` as extractBrands' countingFetch does (8 Oct 2026,
+ * review: it returned `calls: 1`, and extractWithRetry summed what came back - which a pass
+ * abandoned at the deadline never does).
+ */
+const extractor = (fail: (b: string) => boolean, calls: string[][] = []) => async (blocks: string[], billed: { calls: number }): Promise<Extracted> => {
+  calls.push(blocks);
+  billed.calls += 1;
+  const failedBlocks = blocks.flatMap((b, i) => (fail(b) ? [i] : []));
+  return {
+    brands: blocks.filter((b) => !fail(b)).map((b) => ({ brand: `Rival of ${b}` })),
+    failedBlocks,
+    ...(failedBlocks.length ? { error: "language model error 529: Overloaded" } : {}),
+  };
+};
+
+test("brand extraction: one engine's extraction throwing gives a partial run with every one of its answers unread", async () => {
+  const plenty = () => 200_000;
+  const chatgpt = await extractWithRetry(["a1", "a2", "a3"], async () => {
+    throw new Error("ANTHROPIC_API_KEY must be set.");
+  }, plenty);
+  assert.deepEqual(chatgpt, { names: [], calls: 0, unread: [0, 1, 2], reason: "ANTHROPIC_API_KEY must be set." });
+  const gemini = await extractWithRetry(["g1", "g2"], extractor(() => false), plenty);
+  assert.deepEqual(gemini.unread, [], "the other engine is whole");
+
+  const gaps = [{ engine: "chatgpt", unread: chatgpt.unread.length, answered: 3, reason: chatgpt.reason }];
+  assert.equal(runOutcome(5, 0, gaps.length), "partial", "every read landed, so not failed - but not complete either");
+  assert.equal(runOutcome(5, 0, 0), "complete", "no gap, no change");
+  assert.equal(runOutcome(1, 0, 1), "partial", "one read that landed and an extraction that did not is partial, not failed");
+  const error = failureSummary(5, [], gaps)!;
+  assert.match(error, /brand extraction/);
+  assert.equal(error, "brand extraction failed - chatgpt: other brands not read in 3 of 3 answers (ANTHROPIC_API_KEY must be set.)");
+});
+
+test("brand extraction: a failed batch is retried once, and only the answers it still misses are unread", async () => {
+  const plenty = () => 200_000;
+  // Retry lands: nothing unread, both passes billed, names from both.
+  let first = true;
+  const calls: string[][] = [];
+  const healed = await extractWithRetry(["a", "b", "c"], async (blocks, billed) => {
+    const out = await extractor((b) => first && b !== "a", calls)(blocks, billed);
+    first = false;
+    return out;
+  }, plenty);
+  assert.deepEqual(calls, [["a", "b", "c"], ["b", "c"]], "the retry is handed only the failed answers");
+  assert.deepEqual(healed, { names: ["Rival of a", "Rival of b", "Rival of c"], calls: 2, unread: [], reason: "" });
+
+  // Retry misses one: its index is mapped back to the engine's answers.
+  const still = await extractWithRetry(["a", "b", "c", "d"], extractor((b) => b === "b" || b === "d"), plenty);
+  assert.deepEqual(still.unread, [1, 3]);
+  const half = await extractWithRetry(["a", "b", "c", "d"], (() => {
+    let n = 0;
+    return async (blocks: string[], billed: { calls: number }) => extractor((b) => (n === 0 ? b !== "a" : b === "d"))(blocks, billed).finally(() => n++);
+  })(), plenty);
+  assert.deepEqual(half.unread, [3], "b and c landed on the retry, d did not");
+  assert.equal(half.reason, "language model error 529: Overloaded");
+
+  // No time: no retry, and the first pass's misses stand.
+  const tight: string[][] = [];
+  const late = await extractWithRetry(["a", "b"], extractor((b) => b === "b", tight), () => EXTRACT_RETRY_MIN_MS - 1);
+  assert.equal(tight.length, 1, "no second call");
+  assert.deepEqual(late.unread, [1]);
+});
+
+test("brand extraction: the deadline is hard - a pass the SDK keeps asleep past it is abandoned, its answers unread and its requests billed (review, 8 Oct 2026)", async () => {
+  // The SDK sleeps out a retry-after between its own retries with no signal, so an aborted
+  // extraction could keep the run past 300s with the day's reads unstored. Stand-in: a pass
+  // that sends two requests, then never comes back (the sleep), and ignores the signal.
+  const asleep = async (_blocks: string[], billed: { calls: number }): Promise<Extracted> => {
+    billed.calls += 2;
+    return new Promise<Extracted>(() => {});
+  };
+  const plenty = () => 200_000;
+  const t0 = Date.now();
+  const first = await extractWithRetry(["a", "b", "c"], asleep, plenty, AbortSignal.timeout(20));
+  assert.ok(Date.now() - t0 < 1_000, "returned at the deadline, not when the pass did");
+  assert.deepEqual(first, { names: [], calls: 2, unread: [0, 1, 2], reason: "out of time" });
+
+  // The retry asleep: the first pass's names stand, only the retried answers are unread.
+  let n = 0;
+  const retryAsleep = async (blocks: string[], billed: { calls: number }) => (n++ === 0 ? extractor((b) => b !== "a")(blocks, billed) : asleep(blocks, billed));
+  const second = await extractWithRetry(["a", "b", "c"], retryAsleep, plenty, AbortSignal.timeout(20));
+  assert.deepEqual(second, { names: ["Rival of a"], calls: 3, unread: [1, 2], reason: "out of time" });
+
+  // Already past it: no pass starts, nothing is billed.
+  const passes: string[][] = [];
+  const none = await extractWithRetry(["a"], extractor(() => false, passes), plenty, AbortSignal.abort());
+  assert.equal(passes.length, 0);
+  assert.deepEqual(none, { names: [], calls: 0, unread: [0], reason: "out of time" });
+
+  // Inside it, the signal changes nothing.
+  assert.deepEqual(await extractWithRetry(["a", "b"], extractor((b) => b === "b"), plenty, AbortSignal.timeout(60_000)), { names: ["Rival of a"], calls: 2, unread: [1], reason: "language model error 529: Overloaded" });
+
+  // An abandoned pass that throws later is handled, not an unhandled rejection that ends the process.
+  const late = await extractWithRetry(["a"], async (_b, billed) => {
+    billed.calls += 1;
+    await new Promise((r) => setTimeout(r, 40));
+    throw new Error("APIUserAbortError");
+  }, plenty, AbortSignal.timeout(5));
+  assert.deepEqual(late, { names: [], calls: 1, unread: [0], reason: "out of time" });
+  await new Promise((r) => setTimeout(r, 60));
+});
+
+test("brand extraction: the retry rule, the index map and the deadline", () => {
+  assert.equal(retryExtraction(0, 200_000), false, "nothing to retry");
+  assert.equal(retryExtraction(3, EXTRACT_RETRY_MIN_MS), true);
+  assert.equal(retryExtraction(3, EXTRACT_RETRY_MIN_MS - 1), false);
+  assert.deepEqual(stillUnread([2, 5, 9], [0, 2]), [2, 9]);
+  assert.deepEqual(stillUnread([2, 5], [4]), [], "an index past the retried list maps to nothing");
+  assert.equal(extractionWindowMs(100_000), 100_000 + EXTRACT_GRACE_MS);
+  assert.equal(extractionWindowMs(-5_000), EXTRACT_GRACE_MS - 5_000, "reads that overran the budget still get what is left of the grace");
+  assert.equal(extractionWindowMs(-60_000), 1, "never zero or negative, which AbortSignal.timeout reads as abort now");
+  assert.equal(extractionWindowMs(Number.NaN), EXTRACT_GRACE_MS);
+  // 270s budget, 300s ceiling: the window never reaches past 290s of the run.
+  assert.ok(270_000 + EXTRACT_GRACE_MS <= 290_000);
+});
+
+test("brand extraction: the error line puts the read failures first and the gap after", () => {
+  const gaps = [
+    { engine: "chatgpt", unread: 12, answered: 20, reason: "language model error 529: Overloaded" },
+    { engine: "gemini", unread: 1, answered: 20, reason: "" },
+  ];
+  assert.equal(
+    failureSummary(57, [{ engine: "google_aio", reason: "HTTP 429" }], gaps),
+    "1 of 57 reads failed - google_aio: 1 x HTTP 429. brand extraction failed - chatgpt: other brands not read in 12 of 20 answers (language model error 529: Overloaded); gemini: other brands not read in 1 of 20 answers",
+  );
+  assert.equal(failureSummary(57, [], []), null);
+  assert.equal(failureSummary(21, [{ engine: "google_aio", reason: "HTTP 429" }]), "1 of 21 reads failed - google_aio: 1 x HTTP 429", "without gaps, the line is as it was");
+});
+
+test("a missing brands_ok column is recognised in both of PostgREST's wordings, and nothing else is", () => {
+  assert.equal(missingColumn({ message: "column tracking_answers.brands_ok does not exist" }, "brands_ok"), true, "a select");
+  assert.equal(missingColumn({ message: "Could not find the 'brands_ok' column of 'tracking_answers' in the schema cache" }, "brands_ok"), true, "a write");
+  assert.equal(missingColumn(new Error("could not read the answers: column tracking_answers.brands_ok does not exist"), "brands_ok"), true, "wrapped by paged()");
+  assert.equal(missingColumn({ message: "column tracking_answers.brands does not exist" }, "brands_ok"), false, "another column");
+  assert.equal(missingColumn({ message: "duplicate key value violates unique constraint" }, "brands_ok"), false);
+  assert.equal(missingColumn(null, "brands_ok"), false);
 });

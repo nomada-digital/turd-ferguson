@@ -1,4 +1,4 @@
-import { type AnswerRow, type Day, type Range, type Rate, type SerpRow, daysIn, pointsDelta, rate } from "./figures.ts";
+import { type AnswerRow, type Day, type Range, type Rate, type SerpRow, brandsRead, daysIn, pointsDelta, rate } from "./figures.ts";
 import { APP_LIMITS } from "../../config/contact.ts";
 import type { Angle } from "./limits.ts";
 
@@ -390,14 +390,15 @@ export function promptStrip(input: Pick<ClusterInput, "answers" | "range" | "eng
  * boards-3/QuestionDetail.dc.html): of the prompt's answers in range, how
  * many named each brand - the client always, then the three others named in
  * most, most first. A count of answers, not of mentions, so no row can
- * exceed `answers`.
+ * exceed `answers`. An answer whose other brands were not read counts for no
+ * one, the client included (figures.ts brandsRead, 8 Oct 2026, audit data-6).
  */
 export function promptBrands(input: Pick<ClusterInput, "answers" | "range">, promptId: string, you: string): { answers: number; rows: { name: string; you: boolean; n: number }[] } {
   let answers = 0;
   let mine = 0;
   const others = new Map<string, { name: string; n: number }>();
   for (const a of input.answers) {
-    if (a.question_id !== promptId || !a.answered || !within(a.run_date, input.range)) continue;
+    if (a.question_id !== promptId || !a.answered || !brandsRead(a) || !within(a.run_date, input.range)) continue;
     answers++;
     if (a.named) mine++;
     for (const key of new Set(a.brands.map((b) => b.toLowerCase()))) {

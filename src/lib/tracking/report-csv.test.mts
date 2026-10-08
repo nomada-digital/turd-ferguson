@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import type { PlacementsView } from "./placement-figures.ts";
-import { answersCsv, csvField, isReportKind, keywordsCsv, placementsCsv, reportFilename } from "./report-csv.ts";
+import { BRANDS_NOT_READ, answersCsv, csvField, isReportKind, keywordsCsv, placementsCsv, reportFilename } from "./report-csv.ts";
 
 test("R97 part 4: the placements CSV is the table, Whole cluster first, blanks for a row not live, footnote last", () => {
   const view: PlacementsView = {
@@ -115,4 +115,25 @@ test("the kind is one of two words, and the filename carries slug, kind and rang
   assert.equal(isReportKind(null), false);
   assert.equal(reportFilename("tallyroo", "answers", R), "tallyroo-answers-2026-09-02-to-2026-09-29.csv");
   assert.equal(reportFilename('ev"il/..', "keywords", R), "evil-keywords-2026-09-02-to-2026-09-29.csv");
+});
+
+test("8 Oct 2026 (audit data-6): an answer whose other brands were not read says so in brands named, after any it did attribute", () => {
+  const csv = answersCsv(
+    {
+      clusters: [],
+      keywords: [],
+      questions: [{ id: "q1", text: "one", added_on: "2026-09-01", stopped_on: null, cluster_id: null, angle: null }],
+      answers: [
+        { run_date: "2026-09-03", question_id: "q1", engine: "chatgpt", answered: true, named: true, brands: [], brands_ok: false, citations: [] },
+        { run_date: "2026-09-03", question_id: "q1", engine: "gemini", answered: true, named: false, brands: ["Ledgerline"], brands_ok: false, citations: [] },
+        { run_date: "2026-09-03", question_id: "q1", engine: "perplexity", answered: true, named: false, brands: [], brands_ok: true, citations: [] },
+      ],
+    },
+    R,
+  );
+  assert.deepEqual(csv.trimEnd().split("\r\n").slice(1), [
+    `2026-09-03,,,,one,chatgpt,yes,yes,${BRANDS_NOT_READ},`,
+    `2026-09-03,,,,one,gemini,yes,no,Ledgerline; ${BRANDS_NOT_READ},`,
+    "2026-09-03,,,,one,perplexity,yes,no,,",
+  ]);
 });

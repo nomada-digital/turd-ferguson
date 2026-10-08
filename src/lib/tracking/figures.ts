@@ -19,7 +19,39 @@ export type AnswerRow = {
   named: boolean;
   /** Other brands named in the answer, as the runner writes them. */
   brands: string[];
+  /**
+   * False when the runner's brand extraction failed for this answer, so
+   * `brands` is not the list of others named (8 Oct 2026, audit
+   * reliability-1 / data-6). Absent - a read from before the column, or the
+   * fixture - is read: true is the column's default.
+   */
+  brands_ok?: boolean;
 };
+
+/**
+ * Whether an answer's other brands were read. An answered row that fails this
+ * is left out of every brand figure - share of voice, the brand board, Who is
+ * named, a prompt's brands - in numerator and denominator alike, the way an
+ * unanswered read is left out of the named rate. Counted as naming no one, it
+ * shortened every rival's count and raised the client's share.
+ */
+export const brandsRead = (a: Pick<AnswerRow, "brands_ok">): boolean => a.brands_ok !== false;
+
+/** Answers in the range whose other brands were not read, per day and engine, oldest first. */
+export function brandGaps(rows: readonly AnswerRow[], r: Range): { day: Day; engine: string; answers: number }[] {
+  const n = new Map<string, number>();
+  for (const a of rows) {
+    if (!a.answered || brandsRead(a) || !within(a.run_date, r)) continue;
+    const key = `${a.run_date} ${a.engine}`;
+    n.set(key, (n.get(key) ?? 0) + 1);
+  }
+  return [...n]
+    .map(([key, answers]) => {
+      const [day, engine] = key.split(" ") as [Day, string];
+      return { day, engine, answers };
+    })
+    .sort((x, y) => x.day.localeCompare(y.day) || x.engine.localeCompare(y.engine));
+}
 
 export type QuestionRow = { id: string; added_on: Day; stopped_on: Day | null };
 export type SerpRow = { run_date: Day; keyword_id: string; position: number | null };
@@ -115,13 +147,14 @@ export function questionsNamed(rows: AnswerRow[], r: Range): Rate {
 /**
  * Share of voice: the client's mentions over every brand mention in the range,
  * with the client's rank among the brands named. One named answer is one
- * mention, the same unit as one other brand in one answer.
+ * mention, the same unit as one other brand in one answer. An answer whose
+ * other brands were not read counts on neither side (brandsRead).
  */
 export function shareOfVoice(rows: AnswerRow[], r: Range): Rate & { rank: number | null; brands: number } {
   const counts = new Map<string, number>();
   let mine = 0;
   for (const a of rows) {
-    if (!a.answered || !within(a.run_date, r)) continue;
+    if (!a.answered || !brandsRead(a) || !within(a.run_date, r)) continue;
     if (a.named) mine++;
     // R143 (1 Oct 2026): spellings fold by the scan's brandKey, as brandBoard's rows do.
     for (const b of a.brands) counts.set(brandKey(b), (counts.get(brandKey(b)) ?? 0) + 1);
@@ -237,7 +270,8 @@ export function movers(rows: AnswerRow[], r: Range, before: Range | null): { id:
  * R143 (1 Oct 2026; BRIEF-4 P3): brands are keyed by the scan's folding rules
  * (`brand-name.ts` brandKey), so "Xero" and "Xero." are one row, shown in the
  * spelling the engines used most; `key` is that fold, `before` the mentions
- * in the comparison range (0 is "New").
+ * in the comparison range (0 is "New"). An answer whose other brands were not
+ * read counts for no one, the client included (brandsRead, 8 Oct 2026).
  */
 export function brandBoard(rows: AnswerRow[], r: Range, before: Range | null, you: string): { key: string; name: string; you: boolean; share: Rate; delta: number | null; before: number | null }[] {
   const youKey = brandKey(you);
@@ -252,7 +286,7 @@ export function brandBoard(rows: AnswerRow[], r: Range, before: Range | null, yo
       total++;
     };
     for (const a of rows) {
-      if (!a.answered || !within(a.run_date, range)) continue;
+      if (!a.answered || !brandsRead(a) || !within(a.run_date, range)) continue;
       if (a.named) bump(you, youKey);
       // The client is counted once, off `named`; the runner never lists it among the others.
       for (const b of a.brands) if (brandKey(b) !== youKey) bump(b);

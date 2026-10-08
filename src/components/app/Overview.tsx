@@ -13,6 +13,7 @@ import {
   addDays,
   basis as basisLine,
   brandBoard,
+  brandGaps,
   citedPages,
   dailySeries,
   daysIn,
@@ -29,7 +30,7 @@ import { type ClusterCard, clusterCards, clusterChart, clusterSummary, pendingBa
 import { rangeLabel } from "@/lib/tracking/date-range";
 import type { Compare, OverviewData } from "@/lib/tracking/overview-data";
 import { type PlacementRow, chartMarkers } from "@/lib/tracking/placement-figures";
-import { MISSING_READS } from "@/lib/tracking/run-note";
+import { MISSING_READS, brandGapNote, lostReads } from "@/lib/tracking/run-note";
 
 import ClusterChart from "./ClusterChart";
 import DatePicker from "./DatePicker";
@@ -265,7 +266,9 @@ export default function Overview({
 
   // R151 (1 Oct 2026): a partial run (decide.ts runOutcome - some reads failed after the retry)
   // said "Checked today" like a whole one. The figures skip an unanswered read, so say so.
-  const missing = data.lastRun?.status === "partial" ? ` ${MISSING_READS}` : "";
+  // 8 Oct 2026: not for a run partial only because brand extraction failed - no read was lost;
+  // the Who is named instead panel says what was (brandGapNote).
+  const missing = lostReads(data.lastRun) ? ` ${MISSING_READS}` : "";
   const checked = data.lastRun?.finished_at
     ? data.lastRun.run_date === today
       ? `Checked today at ${londonTime(data.lastRun.finished_at)}.${missing} ${ended ? "Tracking has ended, so this was the last check." : liveQuestions ? "Next check tomorrow at 06:00." : "No more checks until a cluster has prompts."}`
@@ -360,6 +363,10 @@ export default function Overview({
   // ---- 4 and 5 ----
   const moved = movers(data.answers, range, o.compare);
   const board = brandBoard(data.answers, range, o.compare, brand);
+  // 8 Oct 2026 (audit data-6): answers whose other brands were not read are out of the board and share of voice.
+  const gaps = brandGaps(data.answers, range);
+  const gapNote = brandGapNote(gaps);
+  const brandAnswers = o.named.den - gaps.reduce((s, g) => s + g.answers, 0);
   const top = board.slice(0, 5);
   const rest = board.slice(5);
   const restShare = rest.reduce((s, b) => s + b.share.num, 0);
@@ -455,6 +462,7 @@ export default function Overview({
               <SeeAll card="Who is named instead" clientPath={clientPath} keep={new URLSearchParams(rangeQuery).toString()} />
             </div>
             <p style={{ margin: 0, fontSize: "14px", color: T.soft }}>Share of every brand mention across your prompts.</p>
+            {gapNote ? <p style={{ margin: 0, fontSize: "13px", lineHeight: 1.5, color: T.soft }}>{gapNote}</p> : null}
           </div>
           <ol style={{ listStyle: "none", margin: 0, padding: "0 0 8px" }}>
             {top.map((b, i) => (
@@ -484,7 +492,7 @@ export default function Overview({
               </li>
             ) : null}
           </ol>
-          <p style={{ margin: 0, padding: "4px 24px 20px", fontSize: "13px", color: T.soft }}>{`${board.length} brand${board.length === 1 ? " was" : "s were"} named across ${o.named.den.toLocaleString("en-GB")} answers.`}</p>
+          <p style={{ margin: 0, padding: "4px 24px 20px", fontSize: "13px", color: T.soft }}>{`${board.length} brand${board.length === 1 ? " was" : "s were"} named across ${brandAnswers.toLocaleString("en-GB")} answers.`}</p>
         </section>
   );
   const keywordsCard = (

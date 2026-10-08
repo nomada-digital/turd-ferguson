@@ -1,5 +1,5 @@
 import { brandKey } from "../scan/brand-name.ts";
-import { type AnswerRow, type CitationRow, type CitedPageRow, type Range, type Rate, brandBoard, citedPageRows, rate } from "./figures.ts";
+import { type AnswerRow, type CitationRow, type CitedPageRow, type Range, type Rate, brandBoard, brandsRead, citedPageRows, rate } from "./figures.ts";
 
 /**
  * Who is named (R143, 1 Oct 2026; BRIEF-4 P3): the full page of the
@@ -13,6 +13,10 @@ import { type AnswerRow, type CitationRow, type CitedPageRow, type Range, type R
  * The cluster and engine filters narrow the answers first, then the same
  * helper runs on what is left, so a filtered share is a share of the brand
  * mentions in that cluster or on that engine.
+ *
+ * Answers whose other brands were not read (figures.ts brandsRead, 8 Oct
+ * 2026, audit data-6) are dropped with the filters, so the page's answer
+ * count, engines and days are the board's basis, not the named rate's.
  *
  * Plain module, relative imports only, so node --test can load it.
  */
@@ -42,7 +46,7 @@ export const NAMED_TOP = 50;
 const within = (d: string, r: Range) => d >= r.from && d <= r.to;
 
 export function namedPage(input: { answers: AnswerRow[]; range: Range; before: Range | null; you: string; only?: ReadonlySet<string> | null; engine?: string | null }): NamedPage {
-  const rows = input.answers.filter((a) => (!input.only || input.only.has(a.question_id)) && (!input.engine || a.engine === input.engine));
+  const rows = input.answers.filter((a) => brandsRead(a) && (!input.only || input.only.has(a.question_id)) && (!input.engine || a.engine === input.engine));
   const board = brandBoard(rows, input.range, input.before, input.you);
   const youKey = brandKey(input.you);
 
@@ -109,6 +113,7 @@ export function citedWithBrand(input: { answers: (AnswerRow & CitationRow)[]; ra
   const rows = input.answers.filter(
     (a) =>
       a.answered &&
+      brandsRead(a) &&
       (!input.only || input.only.has(a.question_id)) &&
       (!input.engine || a.engine === input.engine) &&
       (a.brands.some((b) => brandKey(b) === input.key) || (a.named && input.key === youKey)),
