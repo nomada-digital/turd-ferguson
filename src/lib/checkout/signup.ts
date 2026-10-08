@@ -7,7 +7,7 @@ import { sendOrderEmail } from "@/lib/checkout/order-mail";
 import { clustersToMake, orderEmailText, orderRow, packsOn, signupResume, subscriptionScanToken, trialConverted, type CompletedOrder } from "@/lib/checkout/webhook";
 import { readSubscription } from "@/lib/checkout/stripe";
 import { TRACKED_PRICE } from "@/config/pricing";
-import { trialCharge, trialDay } from "@/config/trial";
+import { trialCharge, trialMoment } from "@/config/trial";
 import { dayAfter, slugFor, trackingDay } from "@/lib/tracking/decide";
 import { angleFor, clusterLimitFor, insertCluster, insertKeyword, insertPrompts, namesBrandIn, PROMPTS_PER_CLUSTER } from "@/lib/tracking/limits";
 import { planEnded, welcome } from "@/lib/email/lifecycle";
@@ -236,7 +236,7 @@ async function trialEndOf(o: CompletedOrder): Promise<string | null> {
 
 export async function onCheckoutCompleted(db: SupabaseClient, o: CompletedOrder, eventId: string): Promise<boolean> {
   const trialEndsAt = await trialEndOf(o);
-  const trial = trialEndsAt ? { firstCharge: trialDay(trialEndsAt), amount: trialCharge(o.market, TRACKED_PRICE) } : null;
+  const trial = trialEndsAt ? { firstCharge: trialMoment(trialEndsAt, o.market), amount: trialCharge(o.market, TRACKED_PRICE) } : null;
   const r = await clientFromOrder(db, o);
   if (!r.ok) {
     console.error(`[stripe] signup failed for ${eventId}: ${r.outcome}`);

@@ -2,7 +2,7 @@ import SubmitButton from "@/components/app/SubmitButton";
 import TierName, { type TierKey } from "@/components/TierName";
 import { APP_LIMITS } from "@/config/contact";
 import { TRACKED_PRICE } from "@/config/pricing";
-import { trialDay, trialStatus } from "@/config/trial";
+import { trialMoment, trialStatus } from "@/config/trial";
 import { T } from "@/config/tokens";
 import type { UpsellMode } from "@/lib/tracking/ask";
 import { formatDay } from "@/lib/tracking/figures";
@@ -63,7 +63,12 @@ export default function Settings({
   keep = "",
   trialEndsAt = null,
   trialCancelledAt = null,
+  ended = false,
+  livePrompts = 1,
 }: {
+  /** client_domains.status is ended, and how many prompts are live: neither gets "Tomorrow at 06:00" (8 Oct 2026, audit activation-4/5). */
+  ended?: boolean;
+  livePrompts?: number;
   domain: string;
   brand: string | null;
   market: string;
@@ -95,7 +100,7 @@ export default function Settings({
   const askAction = `/api/app/${encodeURIComponent(slug)}/ask${keep}`;
   const owners = members.filter((m) => m.role === "owner").length;
   const names = [brand?.trim() || domain, ...aliases.filter((a) => a !== brand)];
-  const trial = trialStatus({ trialEndsAt, cancelled: Boolean(trialCancelledAt), market, price: TRACKED_PRICE });
+  const trial = ended ? null : trialStatus({ trialEndsAt, cancelled: Boolean(trialCancelledAt), market, price: TRACKED_PRICE });
   return (
     <div className="app-col" style={{ display: "flex", flexDirection: "column", gap: "20px", minWidth: 0, maxWidth: "880px" }}>
       <header style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
@@ -126,7 +131,7 @@ export default function Settings({
         <Row label="Clusters in use">{`${clustersInUse} of ${clusterLimit}`}</Row>
         {/* DS56 (2 Oct 2026, R173 pass 6): signup sets started_on to the first check, tomorrow, so "since" read a day still to come. */}
         <Row label={startedOn && startedOn > today ? "Tracking from" : "Tracking since"}>{startedOn ? formatDay(startedOn, true) : "Not started yet"}</Row>
-        <Row label="Next check">Tomorrow at 06:00</Row>
+        <Row label="Next check">{ended ? "None - tracking has ended" : livePrompts ? "Tomorrow at 06:00" : "Once a cluster has prompts"}</Row>
         <div style={{ ...ROW, flexDirection: "column", alignItems: "flex-start", gap: "10px" }}>
           <span style={{ color: T.soft }}>Names we match</span>
           <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexWrap: "wrap", gap: "8px" }}>
@@ -253,17 +258,25 @@ export default function Settings({
           {/* "Cancel trial" (Danny, 8 Oct 2026): no Stripe portal, so it is here, behind a confirm like Remove, posted as a plain form. */}
           {trial && !trialCancelledAt && trialEndsAt ? (
             <div style={{ ...ROW, alignItems: "center" }}>
-              <span style={{ color: T.soft }}>{`Your free trial ends ${trialDay(trialEndsAt)}. Cancel before then and nothing is charged.`}</span>
+              <span style={{ color: T.soft }}>{`Your free trial ends ${trialMoment(trialEndsAt, market)}. Cancel before then and nothing is charged.`}</span>
               <details>
                 <summary style={{ ...BUTTON, display: "flex", alignItems: "center", listStyle: "none" }}>Cancel trial</summary>
                 <form method="post" action={`/api/app/${encodeURIComponent(slug)}/trial`} style={{ margin: "8px 0 0", display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "8px", textAlign: "right" }}>
                   <input type="hidden" id="set-trial-confirm" name="confirm" value="1" />
-                  <span style={{ fontSize: "13px", color: T.soft, maxWidth: "260px" }}>{`Tracking carries on until ${trialDay(trialEndsAt)}, then stops. You are not charged.`}</span>
+                  <span style={{ fontSize: "13px", color: T.soft, maxWidth: "260px" }}>{`Tracking carries on until ${trialMoment(trialEndsAt, market)}, then stops. You are not charged.`}</span>
                   <SubmitButton busy="Cancelling..." style={DARK}>Yes, cancel the trial</SubmitButton>
                 </form>
               </details>
             </div>
           ) : null}
+        </section>
+      ) : trial ? (
+        // 8 Oct 2026 (audit activation-12): an editor or viewer saw the trial and no way to act on it.
+        <section aria-labelledby="set-billing" style={SECTION}>
+          <h2 id="set-billing" style={HEAD}>Billing</h2>
+          <p style={{ margin: 0, borderTop: `1px solid ${T.line}`, padding: "14px 24px", fontSize: "14px", lineHeight: 1.5, color: T.soft }}>
+            Only an owner can change billing or cancel the trial - ask one of them.
+          </p>
         </section>
       ) : null}
 

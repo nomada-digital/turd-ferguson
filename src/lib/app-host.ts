@@ -150,3 +150,16 @@ export function stripPrefix(pathname: string): string | null {
   if (pathname.startsWith(`${APP_PREFIX}/`)) return pathname.slice(APP_PREFIX.length);
   return null;
 }
+
+/** The marketing site's own origin: where checkout, pricing and the tier pages live. */
+export const SITE_ORIGIN = "https://alwayscited.com";
+
+/**
+ * A link from the dashboard to a page on the marketing site (8 Oct 2026,
+ * audit ia-2). Relative while the dashboard shares the site's host; absolute
+ * once it has its own, where `/checkout` would otherwise be rewritten into the
+ * dashboard tree and 404.
+ */
+export function siteHref(path: string, env?: { APP_HOST?: string }): string {
+  return appHost(env) ? `${SITE_ORIGIN}${path}` : path;
+}

@@ -97,6 +97,7 @@ export default async function ClientDashboard({
           clusterLimit={client.cluster_limit ?? CLUSTER_BASE}
           placements={placements}
           canWrite={canWrite}
+          ended={client.status === "ended"}
         />
       </div>
     </div>

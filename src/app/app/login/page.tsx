@@ -4,6 +4,8 @@ import TierName from "@/components/TierName";
 import { CONTACT_EMAIL } from "@/config/contact";
 import { T } from "@/config/tokens";
 
+import { TRIAL } from "@/config/trial";
+import { siteHref } from "@/lib/app-host";
 import { safeNext } from "@/lib/tracking/next-path";
 import { LOGIN_SENT } from "@/lib/tracking/session";
 
@@ -70,6 +72,11 @@ export default async function AppLogin({ searchParams }: { searchParams: Promise
       )}
       {/* R164: where a signed-out visitor was going, carried through the email link. */}
       <LoginForm next={safeNext(q.next) ?? undefined} refused={q.email === "bad"} again={sent} />
+      {/* 8 Oct 2026 (audit ia-13): login answered a non-member with nothing but a mailto. Same for members and not, so it reveals no one. */}
+      <p style={{ margin: "20px 0 0", fontSize: "14px", lineHeight: 1.6, color: T.soft }}>
+        No dashboard yet? <TierName tier="tracked" />{TRIAL.enabled ? ` starts with ${TRIAL.days} days free.` : " tracks your AI visibility daily."}{" "}
+        <a href={siteHref("/alwaystracked")} style={{ color: T.accent, fontWeight: 600 }}>See the plan</a>
+      </p>
     </section>
   );
 }

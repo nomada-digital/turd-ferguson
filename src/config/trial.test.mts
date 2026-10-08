@@ -6,7 +6,7 @@ import { checkoutRequest, type CheckoutContext, type Order } from "../lib/checko
 import { SECTORS } from "./sector-pricing.ts";
 import { completedOrder, orderEmailText, orderRow, trialConverted } from "../lib/checkout/webhook.ts";
 import { refuseTrialCancel } from "../lib/tracking/limits.ts";
-import { TRIAL, TRIAL_LINE, TRIAL_TERMS, noTrialLine, trialApplies, trialCharge, trialDay, trialLine, trialStatus } from "./trial.ts";
+import { TRIAL, TRIAL_LINE, TRIAL_TERMS, noTrialLine, trialApplies, trialCharge, trialLine, trialMoment, trialStatus } from "./trial.ts";
 
 /**
  * The alwaystracked 14-day free trial (Danny, 8 Oct 2026), built dark: every
@@ -106,8 +106,8 @@ test("a trialing checkout is recognised, records 0 paid and the trial end, and t
   assert.ok(built.row);
   assert.equal(built.row!.amount_total, 0);
   assert.equal(built.row!.trial_ends_at, "2026-10-22T10:00:00.000Z");
-  const mail = orderEmailText(o, "made", "https://alwayscited.com", { firstCharge: trialDay("2026-10-22T10:00:00.000Z"), amount: trialCharge("us", { us: 129, uk: 99 }) });
-  assert.match(mail.text, /^Trial started - first charge 22 Oct 2026, \$129 a month$/m);
+  const mail = orderEmailText(o, "made", "https://alwayscited.com", { firstCharge: trialMoment("2026-10-22T10:00:00.000Z", "us"), amount: trialCharge("us", { us: 129, uk: 99 }) });
+  assert.match(mail.text, /^Trial started - first charge 22 Oct 2026, 6:00am ET, \$129 a month$/m);
 });
 
 test("a paid checkout carries no trial", () => {
@@ -144,11 +144,20 @@ test("cancel is refused with no trial running, twice, or with no subscription to
 
 test("the plan line: in the client's currency while running, the stop date once cancelled, nothing after", () => {
   const price = { us: 129, uk: 99 };
-  assert.equal(trialStatus({ trialEndsAt: running.trialEndsAt, cancelled: false, market: "US", price, now: NOW }), "Free trial - ends 22 Oct 2026. Then $129 a month.");
-  assert.equal(trialStatus({ trialEndsAt: running.trialEndsAt, cancelled: false, market: "UK", price, now: NOW }), "Free trial - ends 22 Oct 2026. Then £99 + VAT a month.");
-  assert.equal(trialStatus({ trialEndsAt: running.trialEndsAt, cancelled: true, market: "US", price, now: NOW }), "Trial cancelled - tracking stops 22 Oct 2026");
+  assert.equal(trialStatus({ trialEndsAt: running.trialEndsAt, cancelled: false, market: "US", price, now: NOW }), "Free trial - ends 22 Oct 2026, 6:00am ET. Then $129 a month.");
+  assert.equal(trialStatus({ trialEndsAt: running.trialEndsAt, cancelled: false, market: "UK", price, now: NOW }), "Free trial - ends 22 Oct 2026, 11:00 UK time. Then £99 + VAT a month.");
+  assert.equal(trialStatus({ trialEndsAt: running.trialEndsAt, cancelled: true, market: "US", price, now: NOW }), "Trial cancelled - tracking stops 22 Oct 2026, 6:00am ET");
   assert.equal(trialStatus({ trialEndsAt: running.trialEndsAt, cancelled: false, market: "US", price, now: Date.parse("2026-10-23T00:00:00Z") }), null);
   assert.equal(trialStatus({ trialEndsAt: null, cancelled: false, market: "US", price, now: NOW }), null);
+});
+
+test("the end is the moment Stripe charges, in the client's own zone, never a London date a day late (audit activation-3)", () => {
+  // A US checkout at 4:30pm PT ends at 23:30 UTC - the next day in London.
+  assert.equal(trialMoment("2026-10-22T23:30:00Z", "US"), "22 Oct 2026, 7:30pm ET");
+  assert.equal(trialMoment("2026-10-23T04:30:00Z", "us"), "23 Oct 2026, 12:30am ET");
+  assert.equal(trialMoment("2026-10-22T13:05:00Z", "UK"), "22 Oct 2026, 14:05 UK time");
+  // After the clocks go back (25 Oct 2026) London is UTC again.
+  assert.equal(trialMoment("2026-11-05T13:05:00Z", "UK"), "5 Nov 2026, 13:05 UK time");
 });
 
 // ------------------------------------------------------------- copy

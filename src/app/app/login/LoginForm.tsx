@@ -41,7 +41,7 @@ export default function LoginForm({ next, refused, again }: { next?: string; ref
     setMessage(null);
     setFieldError(null);
     const address = normalizeEmail(email);
-    if (!address) return refuse("Enter your work email.");
+    if (!address) return refuse("Enter the email you signed up or were invited with.");
     if (address.length > SCAN_LIMITS.email || !isPlausibleEmail(address)) return refuse(BAD_EMAIL);
     setBusy(true);
     try {
@@ -67,7 +67,7 @@ export default function LoginForm({ next, refused, again }: { next?: string; ref
     <form action="/api/app/login" method="post" onSubmit={submit} noValidate style={{ display: "grid", gap: "12px" }}>
       {next ? <input type="hidden" id="app-login-next" name="next" value={next} /> : null}
       <label htmlFor="app-login-email" style={{ fontSize: "14px", fontWeight: 600 }}>
-        Work email
+        Email
       </label>
       <div>
         <input

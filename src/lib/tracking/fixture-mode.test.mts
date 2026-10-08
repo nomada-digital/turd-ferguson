@@ -215,3 +215,17 @@ test("DS44: TRACKING_FIXTURE_STATE=long keeps every reading and puts rivals, cit
   assert.ok(brands.size > 10 && pages.size > 10 && l.placements.length > 10, `${brands.size} brands, ${pages.size} pages, ${l.placements.length} placements`);
   assert.ok(l.placements.every((p) => p.cluster_id === "c1"));
 });
+
+test("8 Oct 2026: the trial states carry a trial end in real time, a cancel, or an ended status", () => {
+  for (const st of ["trial", "trial-ending", "trial-cancelled", "ended"] as const) assert.ok(FIXTURE_STATES.includes(st), st);
+  const now = Date.now();
+  const t = fixtureState(fx, { TRACKING_FIXTURE_STATE: "trial" });
+  const days = (iso: string | null | undefined) => (Date.parse(iso ?? "") - now) / 86_400_000;
+  assert.ok(Math.abs(days(t.client.trial_ends_at) - 9) < 0.01);
+  assert.equal(t.client.trial_cancelled_at, null);
+  assert.ok(Math.abs(days(fixtureState(fx, { TRACKING_FIXTURE_STATE: "trial-ending" }).client.trial_ends_at) - 2) < 0.01);
+  assert.ok(days(fixtureState(fx, { TRACKING_FIXTURE_STATE: "trial-cancelled" }).client.trial_cancelled_at) < 0);
+  const e = fixtureState(fx, { TRACKING_FIXTURE_STATE: "ended" });
+  assert.equal(e.client.status, "ended");
+  assert.equal(fx.client.status, undefined, "the default client carries no status, as before");
+});

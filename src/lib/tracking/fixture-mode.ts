@@ -25,7 +25,7 @@ export function fixtureMode(env: Record<string, string | undefined> = process.en
 }
 
 export type Fixture = {
-  client: { id: string; slug: string; brand: string; domain: string; market: string; tier: string; started_on: string; question_limit: number; keyword_limit: number; cluster_limit: number };
+  client: { id: string; slug: string; brand: string; domain: string; market: string; tier: string; started_on: string; question_limit: number; keyword_limit: number; cluster_limit: number; status?: string; trial_ends_at?: string | null; trial_cancelled_at?: string | null };
   member: { email: string; role: string };
   today: Day;
   data: OverviewData;
@@ -89,7 +89,22 @@ export function fixtureUnreadable(env: Record<string, string | undefined> = proc
  * swept - the default names 5 brands, cites 6 pages and has 6 placements.
  */
 /** Every TRACKING_FIXTURE_STATE, unset being `default`. Anything else serves the default. */
-export const FIXTURE_STATES = ["default", "signup", "signup-typed", "new", "partial", "failed", "unreadable", "stopped", "ungrouped", "pilot-mixed", "uncited", "long"] as const;
+export const FIXTURE_STATES = ["default", "signup", "signup-typed", "new", "partial", "failed", "unreadable", "stopped", "ungrouped", "pilot-mixed", "uncited", "long", "trial", "trial-ending", "trial-cancelled", "ended"] as const;
+
+/**
+ * The alwaystracked trial and its end (8 Oct 2026, audit activation-14): the
+ * trial UI went live with no state that drew it. `trial` ends in 9 days,
+ * `trial-ending` in 2, `trial-cancelled` in 9 with the owner's cancel stamped
+ * yesterday, and `ended` is a client whose subscription has gone (status
+ * ended, as onSubscriptionDeleted leaves it). The trial end is real time, not
+ * the fixture's day, because the dashboard compares it with the clock.
+ */
+function trialState(f: Fixture, state: string, now: number): Fixture {
+  const at = (days: number) => new Date(Math.floor((now + days * 86_400_000) / 60_000) * 60_000).toISOString();
+  if (state === "ended") return { ...f, client: { ...f.client, status: "ended" } };
+  const ends = at(state === "trial-ending" ? 2 : 9);
+  return { ...f, client: { ...f.client, trial_ends_at: ends, trial_cancelled_at: state === "trial-cancelled" ? at(-1) : null } };
+}
 
 const LONG_RIVALS = 18;
 const LONG_PAGES = 16;
@@ -145,6 +160,8 @@ export function fixtureState(f: Fixture, env: Record<string, string | undefined>
   if (env.TRACKING_FIXTURE_STATE === "stopped") return stoppedPrompt(as);
   if (env.TRACKING_FIXTURE_STATE === "uncited") return { ...as, data: { ...as.data, answers: as.data.answers.map((a) => ({ ...a, citations: [] })) } };
   if (env.TRACKING_FIXTURE_STATE === "long") return longLists(as);
+  const st = env.TRACKING_FIXTURE_STATE ?? "";
+  if (st === "trial" || st === "trial-ending" || st === "trial-cancelled" || st === "ended") return trialState(as, st, Date.now());
   if (env.TRACKING_FIXTURE_STATE !== "ungrouped") return as;
   return { ...as, placements: [], data: { ...as.data, clusters: [], questions: as.data.questions.map((q) => ({ ...q, cluster_id: null })) } };
 }

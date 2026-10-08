@@ -5,13 +5,13 @@ import BrandMark from "@/components/BrandMark";
 import EngineLogo from "@/components/EngineLogo";
 import TierName, { type TierKey } from "@/components/TierName";
 import { PACK_CLUSTERS, TRACKED_BASIS, TRACKED_PRICE, contactUrlFor } from "@/config/pricing";
-import { trialStatus } from "@/config/trial";
+import { trialMoment, trialStatus } from "@/config/trial";
 import { T } from "@/config/tokens";
 import { ENGINE_SPECS, type Engine } from "@/lib/scan/engines";
 import { KEYWORDS_PER_CLUSTER, PROMPTS_PER_CLUSTER } from "@/lib/tracking/limits";
 
 import { CLUSTER_NAV, CLUSTER_TABS, NAV, PLACEMENTS_ITEM, TABS, navHref } from "./nav";
-import { appPath } from "@/lib/app-host";
+import { appPath, siteHref } from "@/lib/app-host";
 
 const WORDS = ["no", "one", "two", "three", "four", "five"];
 
@@ -81,7 +81,7 @@ function NavIcon({ item, size }: { item: string; size: number }) {
   );
 }
 
-type Client ={ slug: string; domain: string; brand: string | null; market: string; trial_ends_at?: string | null; trial_cancelled_at?: string | null };
+type Client ={ slug: string; domain: string; brand: string | null; market: string; trial_ends_at?: string | null; trial_cancelled_at?: string | null; status?: string };
 
 function Lockup({ size }: { size: number }) {
   return (
@@ -140,7 +140,22 @@ export default function Sidebar({
   const tabs: readonly string[] = clusters ? CLUSTER_TABS : TABS;
   const name = client.brand ?? client.domain;
   // The alwaystracked trial (8 Oct 2026): "Free trial - ends <date>. Then $129 a month." or the cancelled line.
-  const trial = trialStatus({ trialEndsAt: client.trial_ends_at ?? null, cancelled: Boolean(client.trial_cancelled_at), market: client.market, price: TRACKED_PRICE });
+  const ended = client.status === "ended";
+  const trial = ended ? null : trialStatus({ trialEndsAt: client.trial_ends_at ?? null, cancelled: Boolean(client.trial_cancelled_at), market: client.market, price: TRACKED_PRICE });
+  /**
+   * The plan banner (8 Oct 2026, audit activation-12, activation-5): a strip
+   * across the top of every dashboard page at every width - the plan card is
+   * hidden on phones - for the two things a client must not miss: how long the
+   * free trial has left, and that tracking has ended.
+   */
+  const daysLeft = client.trial_ends_at ? Math.ceil((Date.parse(client.trial_ends_at) - Date.now()) / 86_400_000) : null;
+  const banner: { tone: "trial" | "ended"; text: string; link: { href: string; label: string } } | null = ended
+    ? { tone: "ended", text: `Tracking has ended for ${client.brand ?? client.domain}. Everything read so far stays here.`, link: { href: siteHref(`/checkout?tier=alwaystracked&website=${encodeURIComponent(client.domain)}`), label: "Start tracking again" } }
+    : trial && client.trial_ends_at && !client.trial_cancelled_at
+      ? { tone: "trial", text: `Free trial: ${daysLeft === 1 ? "1 day" : `${daysLeft} days`} left, ends ${trialMoment(client.trial_ends_at, client.market)}.`, link: { href: appPath(`/${client.slug}/settings`) + "#set-billing", label: "Billing" } }
+      : trial
+        ? { tone: "trial", text: trial, link: { href: appPath(`/${client.slug}/settings`) + "#set-billing", label: "Billing" } }
+        : null;
   // R130 (30 Sep 2026): a built screen is a link; an unbuilt one is drawn
   // disabled with "Coming soon" - no href, not focusable, aria-disabled.
   // R151 (1 Oct): the nav and tabs are AppLinks, so moving between screens is
@@ -166,6 +181,12 @@ export default function Sidebar({
       <a href="#app-content" className="btn-primary sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:px-4 focus:py-3 focus:text-sm focus:inline-flex focus:items-center focus:min-h-11">
         Skip to content
       </a>
+      {banner ? (
+        <div role="status" className="app-banner" style={{ flex: "1 1 100%", display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "center", gap: "4px 12px", padding: "10px 16px", fontSize: "14px", lineHeight: 1.4, textAlign: "center", boxSizing: "border-box", background: banner.tone === "trial" ? T.wash : T.chip, borderBottom: `1px solid ${banner.tone === "trial" ? T.washLine : T.line}`, color: T.ink }}>
+          <span>{banner.text}</span>
+          <a href={banner.link.href} style={{ display: "inline-flex", alignItems: "center", minHeight: "44px", fontWeight: 600, color: T.accent, textDecoration: "underline", textUnderlineOffset: "2px" }}>{banner.link.label}</a>
+        </div>
+      ) : null}
       <header className="app-topbar" style={{ alignItems: "center", justifyContent: "space-between", height: "60px", padding: "0 16px", background: T.surface, borderBottom: `1px solid ${T.line}`, flex: "1 1 100%", minWidth: 0, boxSizing: "border-box" }}>
         <Lockup size={16} />
         {/* DS5 (2 Oct 2026, R172 pass 1): the sidebar's switcher is hidden on the phone shell, so
@@ -291,6 +312,7 @@ export default function Sidebar({
             {clusters && clusterLimit ? `${clusterLimit * PROMPTS_PER_CLUSTER} prompts and ${clusterLimit * KEYWORDS_PER_CLUSTER} Google keywords, checked every day on ${WORDS[engines.length] ?? engines.length} engines.` : `${TRACKED_BASIS}.`}
           </p>
           {trial ? <p style={{ margin: 0, fontSize: "13px", lineHeight: 1.5, fontWeight: 600, color: T.ink }}>{trial}</p> : null}
+          {ended ? <p style={{ margin: 0, fontSize: "13px", lineHeight: 1.5, fontWeight: 600, color: T.ink }}>Tracking has ended. No more checks run.</p> : null}
           <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
             {engines.map((e) => (
               <EngineLogo key={e} engine={e} size={18} title={ENGINE_SPECS[e].label} />
@@ -301,12 +323,12 @@ export default function Sidebar({
               </span>
             )}
           </div>
-          {upsell && !engines.includes("claude") ? (
+          {upsell && !ended && !engines.includes("claude") ? (
             <p style={{ margin: 0, fontSize: "12px", lineHeight: 1.5, color: T.soft }}>
               Claude joins as a fifth engine on <TierName tier="mentioned" />.
             </p>
           ) : null}
-          {upsell && clusters && packPrice ? (
+          {upsell && !ended && clusters && packPrice ? (
             // R151 (3 Oct 2026): was bare /contact, so the enquiry arrived with no plan; now "About <their tier>", as every tier's call does.
             <a href={contactUrlFor(tier)} style={{ fontSize: "13px", fontWeight: 600, color: T.accent }}>
               {`Add ${PACK_CLUSTERS} clusters for ${packPrice} a month`}

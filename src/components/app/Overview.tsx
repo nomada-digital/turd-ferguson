@@ -132,7 +132,10 @@ export default function Overview({
   reportPath,
   placements,
   canWrite = true,
+  ended = false,
 }: {
+  /** client_domains.status is ended: no next check is promised (8 Oct 2026, audit activation-5). */
+  ended?: boolean;
   /** DS75 (2 Oct 2026): owner or editor. A viewer cannot group prompts, so the ungrouped card sends them to Clusters to see them, not to group them. */
   canWrite?: boolean;
   /** R97 part 5: the client's placements, on mentioned and above; the cluster chart's "Show placements" draws the live ones. Undefined draws no switch. */
@@ -198,6 +201,9 @@ export default function Overview({
   const pendingKeywords = cards ? cards.filter((c) => c.status === "pending" && c.keyword).length : 0;
   // R148 pass 7 (1 Oct 2026): "set up" includes prompts whose first check is tomorrow - on day zero that is all of them.
   const liveQuestions = data.questions.filter((q) => q.stopped_on === null).length;
+  // The runner skips a client with no live prompt (decide.ts shouldTrack), so a
+  // day-zero client with none must not be promised tomorrow's check (8 Oct 2026, audit activation-4).
+  const firstCheckLine = ended ? "Tracking has ended." : liveQuestions ? "Your first check runs tomorrow at 06:00." : "Nothing is checked until a cluster has prompts.";
   const hasData = o.named.den > 0;
   const beforeRange = !!startedOn && range.to < startedOn;
   // R151 (3 Oct 2026): with nothing read in the range, the filled "Download report" outweighed the
@@ -261,9 +267,9 @@ export default function Overview({
   const missing = data.lastRun?.status === "partial" ? ` ${MISSING_READS}` : "";
   const checked = data.lastRun?.finished_at
     ? data.lastRun.run_date === today
-      ? `Checked today at ${londonTime(data.lastRun.finished_at)}.${missing} Next check tomorrow at 06:00.`
-      : `Last checked ${formatDay(data.lastRun.run_date)} at ${londonTime(data.lastRun.finished_at)}.${missing} ${range.to === today ? "Nothing from today's check yet, so today is blank." : "Next check at 06:00."}`
-    : "Your first check runs tomorrow at 06:00.";
+      ? `Checked today at ${londonTime(data.lastRun.finished_at)}.${missing} ${ended ? "Tracking has ended, so this was the last check." : "Next check tomorrow at 06:00."}`
+      : `Last checked ${formatDay(data.lastRun.run_date)} at ${londonTime(data.lastRun.finished_at)}.${missing} ${ended ? "Tracking has ended, so no more checks run." : range.to === today ? "Nothing from today's check yet, so today is blank." : "Next check at 06:00."}`
+    : firstCheckLine;
   // Mobile.dc.html: "Checked today at 06:10", nothing after it. DS8 (2 Oct 2026, R172 pass 1): a
   // partial run is not on the board, and "some reads missing" alone left the phone guessing what
   // it meant for the figures, so the phone says the same sentence the desktop line does.
@@ -271,7 +277,7 @@ export default function Overview({
 
   if (!hasData) {
     // R148 pass 7 (1 Oct 2026): only a start that has happened "began" - on day zero it starts tomorrow, and said "Tracking began" with tomorrow's date.
-    const line = beforeRange && startedOn && startedOn <= today ? `Tracking began ${formatDay(startedOn, true)}.` : "Your first check runs tomorrow at 06:00.";
+    const line = beforeRange && startedOn && startedOn <= today ? `Tracking began ${formatDay(startedOn, true)}.` : firstCheckLine;
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: "24px", minWidth: 0 }}>
         {header}

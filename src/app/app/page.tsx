@@ -20,5 +20,7 @@ export default async function AppHome() {
   if (!email) redirect(appPath("/login"));
   const clients = await repo.clientsFor(email);
   if (!clients.length) redirect(appPath("/login?access=none"));
-  redirect(appPath(`/${clients[0]!.slug}`));
+  // An ended client is still listed (its history stays), but is never where a member lands (audit ia-12).
+  const landing = clients.find((c) => c.status !== "ended") ?? clients[0]!;
+  redirect(appPath(`/${landing.slug}`));
 }

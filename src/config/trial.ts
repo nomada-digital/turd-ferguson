@@ -51,10 +51,21 @@ export function noTrialLine(p: { tier: string; packs: number; repeat: TrialRepea
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-/** A London calendar day, "22 Oct 2026", from a timestamp. */
-export function trialDay(iso: string): string {
-  const [y, m, d] = new Date(iso).toLocaleDateString("en-CA", { timeZone: "Europe/London" }).split("-");
-  return `${Number(d)} ${MONTHS[Number(m) - 1]} ${y}`;
+/**
+ * The moment a trial ends and Stripe charges, in the client's own time zone:
+ * "22 Oct 2026, 7:30pm ET" for a US client, "22 Oct 2026, 14:30 UK time" for
+ * a UK one (8 Oct 2026, audit activation-3). A bare London date could read a
+ * day after the charge - a US checkout at 4:30pm PT ends at 23:30 UTC, which
+ * is the next day in London.
+ */
+export function trialMoment(iso: string, market: string): string {
+  const uk = market.toLowerCase() === "uk";
+  const zone = uk ? "Europe/London" : "America/New_York";
+  const t = new Date(iso);
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-GB", { timeZone: zone, day: "numeric", month: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", hour12: !uk }).formatToParts(t).map((p) => [p.type, p.value]));
+  const day = `${Number(parts.day)} ${MONTHS[Number(parts.month) - 1]} ${parts.year}`;
+  if (uk) return `${day}, ${parts.hour!.padStart(2, "0")}:${parts.minute} UK time`;
+  return `${day}, ${Number(parts.hour)}:${parts.minute}${(parts.dayPeriod ?? "").toLowerCase().replace(/\s|\./g, "")} ET`;
 }
 
 /** What the first charge will be, in the client's currency: "$129 a month", UK "£99 + VAT a month". */
@@ -69,8 +80,8 @@ export function trialCharge(market: string, price: { us: number; uk: number }): 
 export function trialStatus(p: { trialEndsAt: string | null; cancelled: boolean; market: string; price: { us: number; uk: number }; now?: number }): string | null {
   if (!p.trialEndsAt) return null;
   if (new Date(p.trialEndsAt).getTime() <= (p.now ?? Date.now())) return null;
-  const day = trialDay(p.trialEndsAt);
-  return p.cancelled ? `Trial cancelled - tracking stops ${day}` : `Free trial - ends ${day}. Then ${trialCharge(p.market, p.price)}.`;
+  const at = trialMoment(p.trialEndsAt, p.market);
+  return p.cancelled ? `Trial cancelled - tracking stops ${at}` : `Free trial - ends ${at}. Then ${trialCharge(p.market, p.price)}.`;
 }
 
 /**
