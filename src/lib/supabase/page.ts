@@ -76,3 +76,88 @@ export async function selectAll<T>(
     from += rows.length;
   }
 }
+
+/**
+ * How many pages `selectAllCounted` has in flight at once. Six keeps one
+ * dashboard read to a handful of PostgREST requests at a time, with the page's
+ * other reads beside it, while a full year of one client (73 pages) is about
+ * a dozen round trips rather than 73.
+ */
+export const PARALLEL_PAGES = 6;
+
+/**
+ * Every row of a paged select, with the pages after the first read side by
+ * side instead of one after another (8 Oct 2026, audit perf-3 and perf-1).
+ *
+ * The dashboard's answers are days x prompts x engines: 11,200 rows for a
+ * full-size alwaystracked client on the default 28 days and the 28 before, so
+ * twelve pages, and no page was asked for until the one before it had come
+ * back. Every page is a round trip from the function to the database, so the
+ * read's wall time grew with the client and with the range, and Reports - all
+ * of a client's history - grew every day.
+ *
+ * The first page also asks for an exact count, which PostgREST answers from
+ * the same statement. Every remaining offset is then known, and they go out
+ * `parallel` at a time. Offsets advance by what the first page actually held,
+ * not by PAGE, so a server whose `db-max-rows` is below PAGE is still read
+ * whole, as `selectAll` reads it. The request that proves the end still goes
+ * out, as below, but beside the pages rather than after them.
+ *
+ * Rows that move during the read - the morning run writing answers between
+ * two requests - shift every later offset by one, so the read is done again
+ * with `selectAll` when it sees that. It sees it in two ways: a page holding a
+ * different number of rows than the count promised, or any row at all at
+ * offset `total`, which one more request asks for, issued last in the batch.
+ * The second is needed (review, 8 Oct 2026): answer ids are random uuids, so a
+ * new row lands anywhere in id order and pushes every later row along by one.
+ * Every page then stays full, and when `total` is a multiple of the page size
+ * the last one is full too, so a size check alone returned a row twice and
+ * dropped another. A server that sends no count is also read with `selectAll`.
+ *
+ * What this does not catch: a write that lands after the end probe has read
+ * but before a page still in flight beside it does - a window about one
+ * request wide - and a write during the sequential re-read, which can read a
+ * row twice as `selectAll`, and the old one-after-another read, always could.
+ */
+export async function selectAllCounted<T>(
+  page: (
+    from: number,
+    to: number,
+    count: boolean,
+  ) => PromiseLike<{ data: T[] | null; error: { message: string } | null; count?: number | null }>,
+  parallel: number = PARALLEL_PAGES,
+): Promise<T[]> {
+  const again = () => selectAll<T>((from, to) => page(from, to, false));
+  const first = await page(0, PAGE - 1, true);
+  if (first.error) throw new Error(first.error.message);
+  const head = first.data ?? [];
+  const total = first.count;
+  if (typeof total !== "number") return again();
+  if (head.length >= total) return head;
+  // Rows the count promised and the page did not hold: no page size to step by.
+  if (!head.length) return again();
+
+  const step = head.length;
+  const offsets: number[] = [];
+  for (let at = step; at < total; at += step) offsets.push(at);
+  // The end probe: one row at `total`, last in the list so it is asked for after every page is.
+  offsets.push(total);
+  const pages: T[][] = new Array(offsets.length);
+  let next = 0;
+  let moved = false;
+  const worker = async () => {
+    while (next < offsets.length) {
+      const i = next++;
+      const at = offsets[i];
+      const end = at >= total;
+      const { data, error } = await page(at, end ? at : at + step - 1, false);
+      if (error) throw new Error(error.message);
+      const rows = data ?? [];
+      if (rows.length !== (end ? 0 : Math.min(step, total - at))) moved = true;
+      pages[i] = end ? [] : rows;
+    }
+  };
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(parallel, offsets.length)) }, worker));
+  if (moved) return again();
+  return head.concat(...pages);
+}

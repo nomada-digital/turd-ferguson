@@ -55,7 +55,7 @@ export default async function ClientClusters({
   const engines = enginesFor(tier);
   const today = repo.today();
   const sp = await searchParams;
-  const { range, compare } = rangeFrom(sp, today);
+  const { range, compare } = rangeFrom(sp, today, client.started_on);
   const [data, upgrade, typed] = await Promise.all([repo.loadOverview(client.id, range, compare), repo.upgradeContext(client.id, email, today), repo.orderKeyword(client.id)]);
   const one = (k: string) => (typeof sp[k] === "string" ? (sp[k] as string) : null);
   const f = one("filter");
@@ -91,7 +91,7 @@ export default async function ClientClusters({
 
   return (
     <div className="app-shell" style={{ display: "flex", flexWrap: "wrap", minHeight: "100vh", color: T.ink }}>
-      <Sidebar keep={rangeQuery(sp, today)} client={client} others={clients.filter((c) => c.slug !== slug)} email={email} role={client.role} tier={tier} engines={engines} clusters current="Clusters" placements={placedTier(tier)} clusterLimit={client.cluster_limit ?? CLUSTER_BASE} packPrice={packPrice} upsell={upgrade.mode === "nomada"} />
+      <Sidebar keep={rangeQuery(sp, today, client.started_on)} client={client} others={clients.filter((c) => c.slug !== slug)} email={email} role={client.role} tier={tier} engines={engines} clusters current="Clusters" placements={placedTier(tier)} clusterLimit={client.cluster_limit ?? CLUSTER_BASE} packPrice={packPrice} upsell={upgrade.mode === "nomada"} />
       <div id="app-content" tabIndex={-1} className="app-main" style={{ flex: "1 1 480px", minWidth: 0, padding: "36px 40px 48px", background: T.bg }}>
         <Clusters
           brand={client.brand ?? client.domain}

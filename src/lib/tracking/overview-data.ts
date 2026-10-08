@@ -1,10 +1,12 @@
 import "server-only";
 
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { selectAllCounted } from "@/lib/supabase/page";
 
 import { missingColumn, trackingDay } from "./decide.ts";
 import type { LatestAnswers, LatestRow } from "./latest-answers.ts";
 import type { Angle } from "./limits.ts";
+import { type AnswerPlan, type AnswersTable, type ReadOpts, type Structure, answerPlan, boundStated, planPrompts, readAnswers } from "./read-shape.ts";
 import { type AnswerRow, type CitationRow, type Day, type Range, type SerpRow, addDays, comparisonRange } from "./figures.ts";
 
 /**
@@ -23,14 +25,14 @@ const DAY = /^\d{4}-\d{2}-\d{2}$/;
  * to the last 28 days to today against the previous period. A malformed or
  * reversed range falls back to the default rather than erroring.
  */
-export function rangeFrom(params: Record<string, string | string[] | undefined>, today: Day = trackingDay()): { range: Range; compare: Compare } {
+export function rangeFrom(params: Record<string, string | string[] | undefined>, today: Day = trackingDay(), startedOn: Day | null = null): { range: Range; compare: Compare } {
   const one = (k: string) => (typeof params[k] === "string" ? (params[k] as string) : undefined);
   const compare: Compare = one("compare") === "month" || one("compare") === "none" ? (one("compare") as Compare) : "prev";
   const from = one("from");
   const to = one("to");
-  if (from && to && DAY.test(from) && DAY.test(to) && from <= to && to <= today && !Number.isNaN(Date.parse(from)) && !Number.isNaN(Date.parse(to))) {
-    return { range: { from, to }, compare };
-  }
+  // perf-8 (8 Oct 2026): a stated from before rangeFloor starts on it; a range wholly before it is the default.
+  const bounded = from && to && DAY.test(from) && DAY.test(to) && from <= to && to <= today && !Number.isNaN(Date.parse(from)) && !Number.isNaN(Date.parse(to)) ? boundStated({ from, to }, today, startedOn) : null;
+  if (bounded) return { range: bounded, compare };
   return { range: { from: addDays(today, -27), to: today }, compare };
 }
 
@@ -40,8 +42,8 @@ export function rangeFrom(params: Record<string, string | string[] | undefined>,
  * and only when stated, so moving between pages keeps the reader's range.
  * "" when nothing is stated - the next page takes its own default.
  */
-export function rangeQuery(params: Record<string, string | string[] | undefined>, today: Day = trackingDay()): string {
-  const { range, compare } = rangeFrom(params, today);
+export function rangeQuery(params: Record<string, string | string[] | undefined>, today: Day = trackingDay(), startedOn: Day | null = null): string {
+  const { range, compare } = rangeFrom(params, today, startedOn);
   const q = new URLSearchParams();
   if (params.from === range.from && params.to === range.to) {
     q.set("from", range.from);
@@ -52,14 +54,17 @@ export function rangeQuery(params: Record<string, string | string[] | undefined>
   return s ? `?${s}` : "";
 }
 
-async function paged<R>(query: (lo: number, hi: number) => PromiseLike<{ data: R[] | null; error: { message: string } | null }>, what: string): Promise<R[]> {
-  const out: R[] = [];
-  const size = 1000;
-  for (let lo = 0; ; lo += size) {
-    const { data, error } = await query(lo, lo + size - 1);
-    if (error) throw new Error(`could not read ${what}: ${error.message}`);
-    out.push(...(data ?? []));
-    if (!data || data.length < size) return out;
+/**
+ * A paged read (8 Oct 2026, audit perf-3): the first page with its count, then
+ * the rest side by side (supabase/page.ts `selectAllCounted`), where every
+ * page used to wait for the one before. `count` is true on the first page
+ * only; pass it to `.select(columns, { count })`.
+ */
+async function paged<R>(query: (lo: number, hi: number, count: "exact" | undefined) => PromiseLike<{ data: R[] | null; error: { message: string } | null; count?: number | null }>, what: string): Promise<R[]> {
+  try {
+    return await selectAllCounted<R>((lo, hi, count) => query(lo, hi, count ? "exact" : undefined));
+  } catch (err) {
+    throw new Error(`could not read ${what}: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
@@ -154,64 +159,70 @@ export async function loadClusterNotes(clientId: string, questionIds: string[]):
 
 export type ClusterNote = { note_date: Day; text: string; question_id: string };
 
-export async function loadOverview(clientId: string, range: Range, compare: Compare): Promise<OverviewData> {
+/**
+ * The clusters, prompts and keywords alone (8 Oct 2026, audit perf-4): what
+ * Settings and Setup draw, and what Placements needs to pick its cluster,
+ * without a single answer read beside them.
+ */
+export async function loadStructure(clientId: string): Promise<Structure> {
+  const db = supabaseAdmin();
+  // Started together, awaited in turn: each paged read checks its own error.
+  const clustersP = paged((lo, hi, count) => db.from("tracked_clusters").select("id, name, keyword_id, tier, started_on, stopped_on", { count }).eq("client_domain_id", clientId).order("started_on").range(lo, hi), "the clusters");
+  const questionsP = paged((lo, hi, count) => db.from("tracked_questions").select("id, text, added_on, stopped_on, cluster_id, angle", { count }).eq("client_domain_id", clientId).order("added_on").range(lo, hi), "the questions");
+  const keywordsP = paged((lo, hi, count) => db.from("tracked_keywords").select("id, keyword, added_on, stopped_on, search_volume, intent", { count }).eq("client_domain_id", clientId).order("added_on").range(lo, hi), "the keywords");
+  for (const p of [clustersP, questionsP, keywordsP]) p.catch(() => {});
+  return {
+    clusters: (await clustersP) as OverviewData["clusters"],
+    questions: (await questionsP) as OverviewData["questions"],
+    keywords: (await keywordsP) as OverviewData["keywords"],
+  };
+}
+
+/**
+ * One client's range, shaped by `opts` (read-shape.ts, 8 Oct 2026): which
+ * answer columns, only one cluster's prompts, or a structure already read.
+ * Unshaped, it is every answer with its brands and citations, as before.
+ */
+export async function loadOverview(clientId: string, range: Range, compare: Compare, opts: ReadOpts = {}): Promise<OverviewData> {
   const db = supabaseAdmin();
   const earliest = comparisonRange(range, compare)?.from ?? range.from;
+  // The columns and the prompts are read-shape.ts's decision, the one the fixture's shapeRead takes too.
+  const plan = answerPlan(opts);
 
   // Started together, awaited in turn: each paged read checks its own error.
-  const clustersP = paged((lo, hi) => db.from("tracked_clusters").select("id, name, keyword_id, tier, started_on, stopped_on").eq("client_domain_id", clientId).order("started_on").range(lo, hi), "the clusters");
-  const questionsP = paged((lo, hi) => db.from("tracked_questions").select("id, text, added_on, stopped_on, cluster_id, angle").eq("client_domain_id", clientId).order("added_on").range(lo, hi), "the questions");
-  const keywordsP = paged((lo, hi) => db.from("tracked_keywords").select("id, keyword, added_on, stopped_on, search_volume, intent").eq("client_domain_id", clientId).order("added_on").range(lo, hi), "the keywords");
-  const answersP = withBrandsOk(
-    (cols) =>
-      paged(
-        (lo, hi) =>
-          db
-            .from("tracking_answers")
-            .select(cols)
-            .eq("client_domain_id", clientId)
-            .gte("run_date", earliest)
-            .lte("run_date", range.to)
-            .order("id")
-            .range(lo, hi),
-        "the answers",
-      ),
-    "run_date, question_id, engine, answered, named, brands, citations",
-  );
+  const structureP = opts.structure ? Promise.resolve(opts.structure) : loadStructure(clientId);
+  // Cast: tsc gives up (TS2589) matching supabase-js's builder generics to AnswersQuery's six calls. The calls are the
+  // ones this read made before; read-shape.test.mts runs readAnswers on a fake PostgREST and holds it equal to shapeRead.
+  const answersTable = (() => db.from("tracking_answers")) as unknown as AnswersTable;
+  const answersRead = (p: AnswerPlan, ids: string[] | null) =>
+    readAnswers(answersTable, p, ids, { clientId, from: earliest, to: range.to }).catch((err: unknown) => {
+      throw new Error(`could not read the answers: ${err instanceof Error ? err.message : String(err)}`);
+    });
+  // A one-cluster read waits on the prompts for its ids: one round trip, for a tenth of the rows on a 10-cluster client.
+  const answersP = plan === null ? Promise.resolve([]) : plan.cluster === null ? answersRead(plan, null) : structureP.then((s) => answersRead(plan, planPrompts(plan, s)));
   const serpP = paged(
-    (lo, hi) =>
-      db.from("tracking_serp").select("run_date, keyword_id, position").eq("client_domain_id", clientId).gte("run_date", earliest).lte("run_date", range.to).order("id").range(lo, hi),
+    (lo, hi, count) =>
+      db.from("tracking_serp").select("run_date, keyword_id, position", { count }).eq("client_domain_id", clientId).gte("run_date", earliest).lte("run_date", range.to).order("id").range(lo, hi),
     "the keyword positions",
   );
   // A throw below must not leave these rejecting unobserved; each await still throws.
-  for (const p of [clustersP, questionsP, keywordsP, answersP, serpP]) p.catch(() => {});
+  for (const p of [structureP, answersP, serpP]) p.catch(() => {});
   const [{ data: runRows, error: runErr }, { data: noteRows, error: noteErr }] = await Promise.all([
     db.from("tracking_runs").select("run_date, status, finished_at, error").eq("client_domain_id", clientId).in("status", ["complete", "partial"]).order("run_date", { ascending: false }).limit(1),
     db.from("tracking_notes").select("note_date, text").eq("client_domain_id", clientId).gte("note_date", range.from).lte("note_date", range.to).order("note_date"),
   ]);
   if (runErr) throw new Error(`could not read the runs: ${runErr.message}`);
   if (noteErr) throw new Error(`could not read the notes: ${noteErr.message}`);
-  const clusters = await clustersP;
-  const questions = await questionsP;
-  const keywords = await keywordsP;
+  const { clusters, questions, keywords } = await structureP;
+  // Mapped in readAnswers: a column the plan left out reads as an empty list (read-shape.ts answerRow).
   const answers = await answersP;
   const serp = await serpP;
 
   return {
-    clusters: clusters as OverviewData["clusters"],
-    questions: questions as OverviewData["questions"],
-    keywords: keywords as OverviewData["keywords"],
-    // `select(cols)` takes a built string, which supabase-js cannot type; the rows are the columns named.
-    answers: (answers as unknown as Record<string, unknown>[]).map((a) => ({
-      run_date: a.run_date as Day,
-      question_id: a.question_id as string,
-      engine: a.engine as string,
-      answered: a.answered as boolean,
-      named: a.named as boolean,
-      brands: Array.isArray(a.brands) ? (a.brands as unknown[]).filter((b): b is string => typeof b === "string") : [],
-      ...brandsOkOf(a),
-      citations: Array.isArray(a.citations) ? (a.citations as CitationRow["citations"]) : [],
-    })),
+    clusters,
+    questions,
+    keywords,
+    answers,
     serp: serp as SerpRow[],
     lastRun: (runRows?.[0] as OverviewData["lastRun"]) ?? null,
     notes: (noteRows ?? []) as OverviewData["notes"],

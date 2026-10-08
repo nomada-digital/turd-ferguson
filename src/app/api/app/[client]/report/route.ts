@@ -33,7 +33,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ client: string 
   const client = (await repo.clientsFor(email)).find((c) => c.slug === slug);
   if (!client) return NextResponse.json({ error: "Not found." }, { status: 404 });
 
-  let range = rangeFrom(Object.fromEntries(sp), repo.today()).range;
+  let range = rangeFrom(Object.fromEntries(sp), repo.today(), client.started_on).range;
   let body: string;
   if (kind === "placements") {
     // The placements screen's own read (placements-screen.ts), so the file is the table on the page.
@@ -42,7 +42,8 @@ export async function GET(req: Request, ctx: { params: Promise<{ client: string 
     range = screen.range;
     body = placementsCsv(screen.view, screen.keyword ?? screen.cluster.name, PLACEMENTS_FOOTNOTE);
   } else {
-    const data = await repo.loadOverview(client.id, range, "none");
+    // perf-4 (8 Oct 2026): the keywords file is tracking_serp's rows, so it reads no answer.
+    const data = await repo.loadOverview(client.id, range, "none", kind === "keywords" ? { answers: "none" } : {});
     body = kind === "answers" ? answersCsv(data, range) : keywordsCsv(data, range);
   }
   // T10: the download is counted (ids only); the fixture writes nothing.

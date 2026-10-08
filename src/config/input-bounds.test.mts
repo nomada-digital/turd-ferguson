@@ -177,6 +177,9 @@ const EXEMPT: Record<string, Exemption> = {
   // filter as hidden fields so a search keeps them. Nobody types in them; the
   // page re-reads each - rangeFrom clamps from/to/compare, and filter is
   // anything but named/never read as all.
+  // 8 Oct 2026 (audit perf-8): the three pages' rangeFrom now also takes the
+  // client's started_on, for the floor a stated from is held to
+  // (read-shape.ts rangeFloor); the recorded call below moved with it.
   ...Object.fromEntries(
     (["from", "to", "compare", "filter"] as const).map((f) => [
       `cl-${f}`,
@@ -187,7 +190,7 @@ const EXEMPT: Record<string, Exemption> = {
           "re-validates it: rangeFrom for the range, and a two-value whitelist for the filter.",
         ].join(" "),
         holds: [
-          { file: "app/app/[client]/clusters/page.tsx", needs: f === "filter" ? 'f === "named" || f === "never"' : "rangeFrom(sp, today)" },
+          { file: "app/app/[client]/clusters/page.tsx", needs: f === "filter" ? 'f === "named" || f === "never"' : "rangeFrom(sp, today, client.started_on)" },
         ],
       },
     ]),
@@ -198,9 +201,9 @@ const EXEMPT: Record<string, Exemption> = {
   ...Object.fromEntries(
     (
       [
-        ["from", "rangeFrom(sp, today)"],
-        ["to", "rangeFrom(sp, today)"],
-        ["compare", "rangeFrom(sp, today)"],
+        ["from", "rangeFrom(sp, today, client.started_on)"],
+        ["to", "rangeFrom(sp, today, client.started_on)"],
+        ["compare", "rangeFrom(sp, today, client.started_on)"],
         ["cluster", '(data.clusters ?? []).some((c) => c.id === one("cluster"))'],
         ["engine", 'engines.find((e) => e === one("engine"))'],
         ["kind", 'k === "yours" || k === "others" ? k : "all"'],
@@ -222,9 +225,9 @@ const EXEMPT: Record<string, Exemption> = {
   ...Object.fromEntries(
     (
       [
-        ["from", "rangeFrom(sp, today)"],
-        ["to", "rangeFrom(sp, today)"],
-        ["compare", "rangeFrom(sp, today)"],
+        ["from", "rangeFrom(sp, today, client.started_on)"],
+        ["to", "rangeFrom(sp, today, client.started_on)"],
+        ["compare", "rangeFrom(sp, today, client.started_on)"],
         ["cluster", '(data.clusters ?? []).some((c) => c.id === one("cluster"))'],
         ["engine", 'engines.find((e) => e === one("engine"))'],
       ] as const

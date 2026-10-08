@@ -8,7 +8,7 @@ import type { TierKey } from "@/components/TierName";
 import { enginesFor, trackingPackPrice } from "@/config/pricing";
 import { T } from "@/config/tokens";
 import { CLUSTER_BASE } from "@/lib/tracking/limits";
-import { rangeFrom, rangeQuery } from "@/lib/tracking/overview-data";
+import { rangeQuery } from "@/lib/tracking/overview-data";
 import { placedTier } from "@/lib/tracking/placement-figures";
 import { trackingRepo } from "@/lib/tracking/repo";
 import { askRefusal, askToast } from "@/lib/tracking/ask";
@@ -41,16 +41,16 @@ export default async function ClientSettings({ params, searchParams }: { params:
   const tier = (client.tier as TierKey) ?? "tracked";
   const engines = enginesFor(tier);
   const today = repo.today();
-  const { range, compare } = rangeFrom({}, today);
-  const [data, upgrade, settings] = await Promise.all([repo.loadOverview(client.id, range, compare), repo.upgradeContext(client.id, email, today), repo.settings(client.id)]);
+  // perf-4 (8 Oct 2026): Settings draws the clusters and prompts only, so no answer is read.
+  const [structure, upgrade, settings] = await Promise.all([repo.structure(client.id), repo.upgradeContext(client.id, email, today), repo.settings(client.id)]);
   const clusterLimit = client.cluster_limit ?? CLUSTER_BASE;
   // A stopped cluster frees its slot at once, as the Clusters page counts it.
-  const inUse = (data.clusters ?? []).filter((c) => c.stopped_on === null).length;
+  const inUse = (structure.clusters ?? []).filter((c) => c.stopped_on === null).length;
 
   return (
     <div className="app-shell" style={{ display: "flex", flexWrap: "wrap", minHeight: "100vh", color: T.ink }}>
       {/* DS39 (2 Oct 2026, R173 pass 4): Settings shows no range, but a range the nav brought in rides on to the next page. */}
-      <Sidebar keep={rangeQuery(sp, today)} client={client} others={clients.filter((c) => c.slug !== slug)} email={email} role={client.role} tier={tier} engines={engines} clusters current="Settings" placements={placedTier(tier)} clusterLimit={clusterLimit} packPrice={trackingPackPrice(client.market)} upsell={upgrade.mode === "nomada"} />
+      <Sidebar keep={rangeQuery(sp, today, client.started_on)} client={client} others={clients.filter((c) => c.slug !== slug)} email={email} role={client.role} tier={tier} engines={engines} clusters current="Settings" placements={placedTier(tier)} clusterLimit={clusterLimit} packPrice={trackingPackPrice(client.market)} upsell={upgrade.mode === "nomada"} />
       <div id="app-content" tabIndex={-1} className="app-main" style={{ flex: "1 1 480px", minWidth: 0, padding: "36px 40px 48px", background: T.bg }}>
         <Settings
           domain={client.domain}
@@ -67,7 +67,7 @@ export default async function ClientSettings({ params, searchParams }: { params:
           mode={upgrade.mode}
           slug={slug}
           owner={client.role === "owner"}
-          keep={rangeQuery(sp, today)}
+          keep={rangeQuery(sp, today, client.started_on)}
           toast={
             sp.trial === "cancelled"
               ? "Trial cancelled. Tracking stops when the trial ends, and nothing is charged."
@@ -82,7 +82,7 @@ export default async function ClientSettings({ params, searchParams }: { params:
           trialEndsAt={client.trial_ends_at ?? null}
           trialCancelledAt={client.trial_cancelled_at ?? null}
           ended={client.status === "ended"}
-          livePrompts={(data.questions ?? []).filter((q) => q.stopped_on === null).length}
+          livePrompts={(structure.questions ?? []).filter((q) => q.stopped_on === null).length}
           accountClients={settings.accountClients}
         />
       </div>

@@ -15,7 +15,6 @@ import { ADMIN_LIMITS } from "@/lib/tracking/decide";
 import { verdictFromQuery } from "@/lib/tracking/add-cluster";
 import { prefillCard } from "@/lib/tracking/order-keyword";
 import { loginHref } from "@/lib/tracking/next-path";
-import { rangeFrom } from "@/lib/tracking/overview-data";
 import { placedTier } from "@/lib/tracking/placement-figures";
 import { writeRole } from "@/lib/tracking/member";
 import { trackingRepo } from "@/lib/tracking/repo";
@@ -74,10 +73,10 @@ export default async function ClientSetup({
   if (!client) notFound();
   const tier = (client.tier as TierKey) ?? "tracked";
   const today = repo.today();
-  const { range, compare } = rangeFrom({}, today);
-  const [data, confirmed, typed] = await Promise.all([repo.loadOverview(client.id, range, compare), repo.setupConfirmed(client.id), repo.orderKeyword(client.id)]);
-  const cards = setupCards(data);
-  const ungrouped = ungroupedShown(data.questions, today).length;
+  // perf-4 (8 Oct 2026): setup draws the clusters, prompts and keywords only, so no answer is read.
+  const [structure, confirmed, typed] = await Promise.all([repo.structure(client.id), repo.setupConfirmed(client.id), repo.orderKeyword(client.id)]);
+  const cards = setupCards(structure);
+  const ungrouped = ungroupedShown(structure.questions, today).length;
   // R180: the keyword typed at checkout, with no scan behind the order, prefills the first keywordless card's field.
   const prefill = prefillCard(cards, typed);
   const canWrite = refuseRole(writeRole(client)) === null;
