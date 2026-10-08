@@ -124,9 +124,8 @@ export function proxy(request: NextRequest) {
      *
      * Not here: `frame-ancestors 'none'`. The CSP is next.config.ts's header,
      * applied after this runs, so a rewrite of it here found nothing to
-     * rewrite and the app host still answered 'self' (8 Oct 2026, checked on
-     * next start). It needs a host-conditioned header in next.config.ts, which
-     * reads APP_HOST at build - open before Danny sets APP_HOST (D2).
+     * rewrite (8 Oct 2026, checked on next start). next.config.ts carries it
+     * as a host-conditioned header instead, read at build.
      */
     res.headers.set("x-robots-tag", "noindex, nofollow");
     return res;

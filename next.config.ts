@@ -124,6 +124,9 @@ const CSP = [
   ...(isDev ? [] : ["upgrade-insecure-requests"]),
 ].join("; ");
 
+/** The dashboard's host name, without a port, when APP_HOST names one (src/lib/app-host.ts). */
+const APP_HOSTNAME = (process.env.APP_HOST ?? "").trim().toLowerCase().split(":")[0] || null;
+
 const nextConfig: NextConfig = {
   /**
    * Off because it was shipping a stale stylesheet to production.
@@ -241,6 +244,17 @@ const nextConfig: NextConfig = {
       { source: "/app/:path*", headers: [noIndex] },
       // The order form and its confirmation (R91, 29 Sep 2026): an order in progress.
       { source: "/checkout/:path*", headers: [noIndex] },
+      /**
+       * The dashboard's own host (APP_HOST, 8 Oct 2026): nothing on it is
+       * meant to be framed, the marketing site included, so frame-ancestors
+       * is 'none' there. Last, so it overrides the site-wide CSP above. Read
+       * at build: absent while APP_HOST is unset, which is production today;
+       * setting APP_HOST in Vercel takes a redeploy, and that build adds it.
+       * The proxy could not do this - this header is applied after it runs.
+       */
+      ...(APP_HOSTNAME
+        ? [{ source: "/:path*", has: [{ type: "host" as const, value: APP_HOSTNAME.replace(/\./g, "\\.") }], headers: [{ key: "content-security-policy", value: CSP.replace("frame-ancestors 'self'", "frame-ancestors 'none'") }, noIndex] }]
+        : []),
     ];
   },
 };

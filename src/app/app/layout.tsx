@@ -19,6 +19,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   fixtureMode();
   return (
     <>
+      {/* Hides the marketing chrome on the dashboard's own host (SiteChrome, globals.css). */}
+      <span data-app-tree hidden />
       {children}
       <UsageBeacon />
     </>

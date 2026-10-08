@@ -15,6 +15,19 @@ export function isAppPath(pathname: string | null): boolean {
   return pathname === "/app" || (pathname ?? "").startsWith("/app/");
 }
 
+/**
+ * On the dashboard's own host (APP_HOST, 8 Oct 2026) the browser path carries
+ * no /app, so the check above cannot see it, and reading the Host header in
+ * the root layout would make every static page dynamic. Instead the chrome is
+ * wrapped, and the /app layout's `data-app-tree` marker hides it through one
+ * `:has()` rule in globals.css - server drawn, so it holds with JS off.
+ * `display: contents`, in the stylesheet rather than inline so the hiding
+ * rule can outrank it, keeps the wrapper out of the layout.
+ */
 export default function SiteChrome({ children }: { children: React.ReactNode }) {
-  return isAppPath(usePathname()) ? null : children;
+  return isAppPath(usePathname()) ? null : (
+    <div className="site-chrome">
+      {children}
+    </div>
+  );
 }

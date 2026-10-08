@@ -1978,3 +1978,13 @@ html[data-motion="on"] .app-pending { animation: appPending 1.1s ease-in-out inf
   .app-tap { position: relative; }
   .app-tap::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 44px; transform: translateY(-50%); }
 }
+
+/* The dashboard's own host (APP_HOST, 8 Oct 2026): the /app layout's marker
+   hides the marketing header and footer, which SiteChrome cannot tell apart by
+   path there. See src/components/SiteChrome.tsx. */
+.site-chrome {
+  display: contents;
+}
+body:has([data-app-tree]) .site-chrome {
+  display: none;
+}

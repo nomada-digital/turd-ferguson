@@ -58,7 +58,7 @@ const PLACES: { t: string; u: string; by: number }[] = [
 ];
 
 const ROWS: { surface: string; brand: string; note: string }[] = [
-  { surface: "The visibility dashboard", brand: "Yours", note: "Your logo and colours, on your subdomain if you want one." },
+  { surface: "The visibility dashboard", brand: "Yours", note: "Your logo and colours." },
   { surface: "Monthly reporting", brand: "Yours", note: "Generated from the same data, none of our marks on it." },
   { surface: "Placement summaries", brand: "Yours", note: "What went live, where, and what it moved." },
   { surface: "Outreach to publishers", brand: "Ours", note: "We approach the title. Your client is never named unless you ask." },

@@ -26,6 +26,7 @@ import assert from "node:assert/strict";
 import { gzipSync } from "node:zlib";
 
 import { expandFixture } from "../../src/lib/tracking/fixture-mode.ts";
+import { clusterCards, clusterSummary } from "../../src/lib/tracking/cluster-figures.ts";
 import { addDays, overview, type Rate } from "../../src/lib/tracking/figures.ts";
 
 const ROOT = path.resolve(import.meta.dirname, "..", "..");
@@ -67,13 +68,17 @@ const o = overview({
   keywordCount: fx.data.keywords.filter((k) => k.stopped_on === null).length,
 });
 const pct = (r: Rate) => (r.pct === null ? "-" : `${r.pct}%`);
-/** What figures.ts says each `data-figure` must read on the default range. */
+// T4b part 3 (30 Sep 2026): the headline and three of the figures read by cluster; share of voice stays figures.ts.
+const cs = clusterSummary(
+  clusterCards({ clusters: fx.data.clusters, questions: fx.data.questions, keywords: fx.data.keywords, answers: fx.data.answers, serp: fx.data.serp, range, before: o.compare, today: fx.today, engines: [] }),
+);
+/** What figures.ts and cluster-figures.ts say each `data-figure` must read on the default range. */
 const EXPECTED: Record<string, string> = {
-  "headline-named": pct(o.named),
-  named: pct(o.named),
-  questions: `${o.questions.num} of ${o.questions.den}`,
+  "headline-named": pct(cs.now),
+  named: pct(cs.now),
+  questions: `${cs.promptsNamed.num} of ${cs.promptsNamed.den}`,
   sov: pct(o.sov),
-  keywords: `${o.keywords.num} of ${o.keywords.den}`,
+  keywords: `${cs.page1.num} of ${cs.page1.den}`,
 };
 
 let server: Server | null = null;
@@ -132,7 +137,16 @@ for (const width of WIDTHS) {
 
       test("3. Tab never loses focus to body, and focus is visible", async () => {
         const { ctx, page } = await open();
-        for (let i = 0; i < 25; i++) {
+        // 30 Sep 2026 (T4b mobile): below 560px the chart's 28 day buttons are
+        // display:none, so the phone overview has fewer than 25 stops and the
+        // Tab after the last one leaves the document - that is the end of the
+        // page, not lost focus. Walk every stop there is, up to 25; a floor of
+        // 10 keeps a walk that finds nothing from passing.
+        const stops = await page.evaluate(
+          () => [...document.querySelectorAll<HTMLElement>("a[href], button:not([disabled]), input, select, textarea, [tabindex]:not([tabindex='-1'])")].filter((el) => el.offsetParent !== null || getComputedStyle(el).position === "fixed").length,
+        );
+        assert.ok(stops >= 10, `only ${stops} tab stops found`);
+        for (let i = 0; i < Math.min(25, stops); i++) {
           await page.keyboard.press("Tab");
           const f = await page.evaluate(() => {
             const el = document.activeElement as HTMLElement | null;
