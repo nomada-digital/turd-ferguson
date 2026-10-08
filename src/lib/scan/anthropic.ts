@@ -627,13 +627,22 @@ const PROSE_BATCH_CHARS = 60_000;
  * tracking runner read only `brands` and `calls`, so a 529 on one engine's
  * batch shortened every rival's count and raised the client's share of voice
  * on a run marked complete. `error` is the first failure's reason, for the
- * caller's error line. `options.signal` bounds every request, SDK retries
- * included: an aborted batch fails like any other and costs no request.
+ * caller's error line.
+ *
+ * `options.signal` aborts a request in flight and stops the next one from
+ * going out, and an aborted batch fails like any other. It does NOT cut short
+ * a wait between the SDK's own retries: `retryRequest` sleeps out a
+ * `retry-after` with no signal (retry-policy.ts), and so does `withRetry`. So
+ * the signal alone is no deadline; a caller that needs one stops waiting on
+ * this call when the signal fires (decide.ts extractWithRetry does).
+ * `options.billed` is the counter the requests are tallied on, live, so a
+ * caller that stopped waiting still knows what went out; `calls` is what this
+ * call added to it.
  */
 export async function extractBrands(
   blocks: string[],
   context: { topic: string; brand: string } = { topic: "", brand: "" },
-  options: { signal?: AbortSignal } = {},
+  options: { signal?: AbortSignal; billed?: { calls: number } } = {},
 ): Promise<{ brands: { brand: string; mentions: number }[]; calls: number; failedBatches: number; failedBlocks: number[]; error?: string }> {
   // One answer is clamped to a whole batch rather than to some smaller share
   // of one, so nothing is cut tighter here than the old 120,000-character cut
@@ -663,7 +672,8 @@ export async function extractBrands(
   const brands: { brand: string; mentions: number }[] = [];
   // Attempts, not batches. A batch that 529s twice and lands on the third is
   // three requests on the bill and was one on this counter.
-  const billed = { calls: 0 };
+  const billed = options.billed ?? { calls: 0 };
+  const before = billed.calls;
   let failedBatches = 0;
   const failedBlocks: number[] = [];
   let error: string | undefined;
@@ -680,7 +690,7 @@ export async function extractBrands(
       console.warn("[scan] a prose batch failed to extract:", err instanceof Error ? err.message : err);
     }
   }
-  return { brands, calls: billed.calls, failedBatches, failedBlocks, ...(error ? { error } : {}) };
+  return { brands, calls: billed.calls - before, failedBatches, failedBlocks, ...(error ? { error } : {}) };
 }
 
 async function extractBrandBatch(

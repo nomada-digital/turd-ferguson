@@ -375,7 +375,10 @@ export async function runTrackingDay(runId: string): Promise<{ status: string; s
     // retried once while the budget allows; an answer still unread is stored
     // brands_ok=false, which every brand figure leaves out, and its engine is
     // a BrandGap, so the run is partial and its error line says which. One
-    // deadline bounds both passes (decide.ts extractionWindowMs).
+    // deadline bounds both passes (decide.ts extractionWindowMs), and it is
+    // hard: extractWithRetry stops waiting when it fires, because the SDK's
+    // sleep between its own retries does not hear the signal. The requests
+    // are counted as they leave, so a pass it stopped waiting on is billed.
     const subject = subjectKeys(brand, domain);
     const others = new Map<Engine, string[]>();
     const unread = new Set<AnswerRow>();
@@ -386,7 +389,7 @@ export async function runTrackingDay(runId: string): Promise<{ status: string; s
       engines.map(async (engine) => {
         const read = answers.filter((a) => a.engine === engine && a.answered && a.response_text);
         if (!read.length) return;
-        const out = await extractWithRetry(read.map((a) => a.response_text!), (blocks) => extractBrands(blocks, context, { signal }), remainingMs);
+        const out = await extractWithRetry(read.map((a) => a.response_text!), (blocks, billed) => extractBrands(blocks, context, { signal, billed }), remainingMs, signal);
         spend.calls += out.calls;
         const seen = new Map<string, string>();
         for (const name of out.names) {

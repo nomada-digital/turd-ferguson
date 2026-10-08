@@ -135,7 +135,12 @@ test("census: runner marks a read failed only after its retry loop, keeps billed
 test("census: runner reads which answers brand extraction missed and stores them brands_ok=false (8 Oct 2026, audit reliability-1)", () => {
   // It read only the brands, so a failed batch was stored as naming no other brand on a complete run.
   // extractWithRetry (decide.ts, tested in decide.test.mts) reads failedBlocks and retries them.
-  assert.match(runner, /await extractWithRetry\(.*extractBrands\(blocks, context, \{ signal \}\)/, "every extraction goes through the retry and the deadline");
+  // 8 Oct 2026 (review): was `extractBrands(blocks, context, { signal })` with no signal for
+  // extractWithRetry. The signal alone is no deadline - the SDK sleeps out a retry-after
+  // without it - so extractWithRetry races each pass against it, and the requests are
+  // tallied on `billed` as they leave, so a pass it stops waiting on is still billed.
+  assert.match(runner, /await extractWithRetry\(.*\(blocks, billed\) => extractBrands\(blocks, context, \{ signal, billed \}\), remainingMs, signal\)/, "every extraction goes through the retry and the hard deadline, billed live");
+  assert.match(runner, /spend\.calls \+= out\.calls;/, "and what it sent is on the run's model calls");
   assert.equal([...runner.matchAll(/extractBrands\(/g)].length, 1, "no extraction around it");
   assert.match(runner, /for \(const i of out\.unread\) unread\.add\(read\[i\]!\);/, "its unread answers are the engine's");
   assert.match(runner, /brands_ok: !unread\.has\(answers\[i\]!\)/, "an unread answer is stored brands_ok=false");

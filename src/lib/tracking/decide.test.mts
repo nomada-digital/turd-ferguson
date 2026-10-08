@@ -116,13 +116,18 @@ test("a run that read nothing successfully is failed, not a day of zeros", () =>
  * raised the client's share of voice. These run the runner's decisions about it.
  */
 
-/** An extractor standing in for extractBrands: `fail` are the blocks whose batch fails, by text. */
-const extractor = (fail: (b: string) => boolean, calls: string[][] = []) => async (blocks: string[]): Promise<Extracted> => {
+/**
+ * An extractor standing in for extractBrands: `fail` are the blocks whose batch fails, by text.
+ * One request per pass, tallied on `billed` as extractBrands' countingFetch does (8 Oct 2026,
+ * review: it returned `calls: 1`, and extractWithRetry summed what came back - which a pass
+ * abandoned at the deadline never does).
+ */
+const extractor = (fail: (b: string) => boolean, calls: string[][] = []) => async (blocks: string[], billed: { calls: number }): Promise<Extracted> => {
   calls.push(blocks);
+  billed.calls += 1;
   const failedBlocks = blocks.flatMap((b, i) => (fail(b) ? [i] : []));
   return {
     brands: blocks.filter((b) => !fail(b)).map((b) => ({ brand: `Rival of ${b}` })),
-    calls: 1,
     failedBlocks,
     ...(failedBlocks.length ? { error: "language model error 529: Overloaded" } : {}),
   };
@@ -151,8 +156,8 @@ test("brand extraction: a failed batch is retried once, and only the answers it 
   // Retry lands: nothing unread, both passes billed, names from both.
   let first = true;
   const calls: string[][] = [];
-  const healed = await extractWithRetry(["a", "b", "c"], async (blocks) => {
-    const out = await extractor((b) => first && b !== "a", calls)(blocks);
+  const healed = await extractWithRetry(["a", "b", "c"], async (blocks, billed) => {
+    const out = await extractor((b) => first && b !== "a", calls)(blocks, billed);
     first = false;
     return out;
   }, plenty);
@@ -164,7 +169,7 @@ test("brand extraction: a failed batch is retried once, and only the answers it 
   assert.deepEqual(still.unread, [1, 3]);
   const half = await extractWithRetry(["a", "b", "c", "d"], (() => {
     let n = 0;
-    return async (blocks: string[]) => extractor((b) => (n === 0 ? b !== "a" : b === "d"))(blocks).finally(() => n++);
+    return async (blocks: string[], billed: { calls: number }) => extractor((b) => (n === 0 ? b !== "a" : b === "d"))(blocks, billed).finally(() => n++);
   })(), plenty);
   assert.deepEqual(half.unread, [3], "b and c landed on the retry, d did not");
   assert.equal(half.reason, "language model error 529: Overloaded");
@@ -174,6 +179,45 @@ test("brand extraction: a failed batch is retried once, and only the answers it 
   const late = await extractWithRetry(["a", "b"], extractor((b) => b === "b", tight), () => EXTRACT_RETRY_MIN_MS - 1);
   assert.equal(tight.length, 1, "no second call");
   assert.deepEqual(late.unread, [1]);
+});
+
+test("brand extraction: the deadline is hard - a pass the SDK keeps asleep past it is abandoned, its answers unread and its requests billed (review, 8 Oct 2026)", async () => {
+  // The SDK sleeps out a retry-after between its own retries with no signal, so an aborted
+  // extraction could keep the run past 300s with the day's reads unstored. Stand-in: a pass
+  // that sends two requests, then never comes back (the sleep), and ignores the signal.
+  const asleep = async (_blocks: string[], billed: { calls: number }): Promise<Extracted> => {
+    billed.calls += 2;
+    return new Promise<Extracted>(() => {});
+  };
+  const plenty = () => 200_000;
+  const t0 = Date.now();
+  const first = await extractWithRetry(["a", "b", "c"], asleep, plenty, AbortSignal.timeout(20));
+  assert.ok(Date.now() - t0 < 1_000, "returned at the deadline, not when the pass did");
+  assert.deepEqual(first, { names: [], calls: 2, unread: [0, 1, 2], reason: "out of time" });
+
+  // The retry asleep: the first pass's names stand, only the retried answers are unread.
+  let n = 0;
+  const retryAsleep = async (blocks: string[], billed: { calls: number }) => (n++ === 0 ? extractor((b) => b !== "a")(blocks, billed) : asleep(blocks, billed));
+  const second = await extractWithRetry(["a", "b", "c"], retryAsleep, plenty, AbortSignal.timeout(20));
+  assert.deepEqual(second, { names: ["Rival of a"], calls: 3, unread: [1, 2], reason: "out of time" });
+
+  // Already past it: no pass starts, nothing is billed.
+  const passes: string[][] = [];
+  const none = await extractWithRetry(["a"], extractor(() => false, passes), plenty, AbortSignal.abort());
+  assert.equal(passes.length, 0);
+  assert.deepEqual(none, { names: [], calls: 0, unread: [0], reason: "out of time" });
+
+  // Inside it, the signal changes nothing.
+  assert.deepEqual(await extractWithRetry(["a", "b"], extractor((b) => b === "b"), plenty, AbortSignal.timeout(60_000)), { names: ["Rival of a"], calls: 2, unread: [1], reason: "language model error 529: Overloaded" });
+
+  // An abandoned pass that throws later is handled, not an unhandled rejection that ends the process.
+  const late = await extractWithRetry(["a"], async (_b, billed) => {
+    billed.calls += 1;
+    await new Promise((r) => setTimeout(r, 40));
+    throw new Error("APIUserAbortError");
+  }, plenty, AbortSignal.timeout(5));
+  assert.deepEqual(late, { names: [], calls: 1, unread: [0], reason: "out of time" });
+  await new Promise((r) => setTimeout(r, 60));
 });
 
 test("brand extraction: the retry rule, the index map and the deadline", () => {

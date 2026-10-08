@@ -133,6 +133,11 @@ export type BrandGap = { engine: string; unread: number; answered: number; reaso
  * route's 300s - this much of it, keeping ten seconds to store the rows and
  * close the run. Before the bound, an extraction past 300s took every read
  * of the day with it, unstored, and the stall sweep marked the run failed.
+ *
+ * The bound is the runner stopping waiting (extractWithRetry's `signal`), not
+ * the signal alone: the SDK sleeps out a `retry-after` between its retries
+ * with no signal, so an aborted request could still keep the call open past
+ * the window (review, 8 Oct 2026).
  */
 export const EXTRACT_GRACE_MS = 20_000;
 
@@ -154,8 +159,41 @@ export function stillUnread(retried: readonly number[], failedInRetry: readonly 
   return failedInRetry.flatMap((i) => (retried[i] === undefined ? [] : [retried[i]!]));
 }
 
-/** What `extractBrands` returns that the runner reads: `failedBlocks` index into the blocks it was handed. */
-export type Extracted = { brands: { brand: string }[]; calls: number; failedBlocks: number[]; error?: string };
+/**
+ * What `extractBrands` returns that the runner reads: `failedBlocks` index into
+ * the blocks it was handed. Its `calls` is not read: the requests are counted
+ * on the `billed` it is handed, live, so a pass abandoned at the deadline is
+ * still billed for what it sent.
+ */
+export type Extracted = { brands: { brand: string }[]; failedBlocks: number[]; error?: string };
+
+/** An extraction pass the deadline stopped waiting on. */
+const OUT_OF_TIME = Symbol("out of time");
+
+/**
+ * `p`, or OUT_OF_TIME as soon as `signal` aborts, whichever comes first. `p`
+ * is not stopped, only no longer waited on - the SDK may be sleeping out a
+ * `retry-after` that no signal reaches - and its rejection is handled here,
+ * so an abandoned pass that throws later is not an unhandled rejection.
+ */
+function byDeadline<T>(p: Promise<T>, signal: AbortSignal | undefined): Promise<T | typeof OUT_OF_TIME> {
+  if (!signal) return p;
+  return new Promise((resolve, reject) => {
+    const stop = () => resolve(OUT_OF_TIME);
+    signal.addEventListener("abort", stop, { once: true });
+    p.then(
+      (v) => {
+        signal.removeEventListener("abort", stop);
+        resolve(v);
+      },
+      (err: unknown) => {
+        signal.removeEventListener("abort", stop);
+        reject(err);
+      },
+    );
+    if (signal.aborted) stop();
+  });
+}
 
 /**
  * One engine's brand extraction and its one retry, with the extractor passed
@@ -163,34 +201,52 @@ export type Extracted = { brands: { brand: string }[]; calls: number; failedBloc
  * whose batch failed both times, or all of them if the extractor threw - it
  * swallows a failed batch, so a throw is the unexpected case, and it used to
  * leave the engine's answers naming no one with a log line as the only trace.
- * `calls` is every attempt that returned, failed batches' requests included.
+ *
+ * `signal` is the hard deadline (review, 8 Oct 2026). When it fires, the pass
+ * in flight is no longer waited on and the answers it was handed are unread,
+ * "out of time"; no pass starts after it. The extractor is handed the signal
+ * by the caller, which cuts a request in flight short, but not the SDK's
+ * sleep between retries, which is why this races it rather than trusting it.
+ *
+ * `calls` is read off `billed`, which the extractor tallies each request on as
+ * it leaves: every request of every pass, failed batches' and an abandoned
+ * pass's included. After the signal fires no request leaves (the SDK checks it
+ * before each), so the count read at the deadline is the count.
  */
 export async function extractWithRetry(
   blocks: readonly string[],
-  extract: (blocks: string[]) => Promise<Extracted>,
+  extract: (blocks: string[], billed: { calls: number }) => Promise<Extracted>,
   remainingMs: () => number,
+  signal?: AbortSignal,
 ): Promise<{ names: string[]; calls: number; unread: number[]; reason: string }> {
   const names: string[] = [];
-  let calls = 0;
+  const billed = { calls: 0 };
+  const pass = (some: string[]) => (signal?.aborted ? Promise.resolve(OUT_OF_TIME) : byDeadline(extract(some, billed), signal));
   let unread = blocks.map((_, i) => i);
   let reason = "";
   try {
-    const out = await extract([...blocks]);
-    calls += out.calls;
-    names.push(...out.brands.map((b) => b.brand));
-    unread = out.failedBlocks;
-    reason = out.error ?? "";
-    if (retryExtraction(unread.length, remainingMs())) {
-      const again = await extract(unread.map((i) => blocks[i]!));
-      calls += again.calls;
-      names.push(...again.brands.map((b) => b.brand));
-      unread = stillUnread(unread, again.failedBlocks);
-      reason = again.error ?? reason;
+    const out = await pass([...blocks]);
+    if (out === OUT_OF_TIME) {
+      reason = "out of time";
+    } else {
+      names.push(...out.brands.map((b) => b.brand));
+      unread = out.failedBlocks;
+      reason = out.error ?? "";
+      if (retryExtraction(unread.length, remainingMs())) {
+        const again = await pass(unread.map((i) => blocks[i]!));
+        if (again === OUT_OF_TIME) {
+          reason = "out of time";
+        } else {
+          names.push(...again.brands.map((b) => b.brand));
+          unread = stillUnread(unread, again.failedBlocks);
+          reason = again.error ?? reason;
+        }
+      }
     }
   } catch (err) {
     reason = (err instanceof Error ? err.message : String(err)).slice(0, 80);
   }
-  return { names, calls, unread, reason: unread.length ? reason || "unknown" : "" };
+  return { names, calls: billed.calls, unread, reason: unread.length ? reason || "unknown" : "" };
 }
 
 /**
