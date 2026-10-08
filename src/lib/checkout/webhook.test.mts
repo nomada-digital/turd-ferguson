@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { checkoutRequest } from "./session.ts";
-import { clustersToMake, completedOrder, handleWebhook, orderEmailText, orderRow, packsOn, signStripePayload, signupResume, subscriptionScanToken, verifyStripeSignature, type WebhookDeps } from "./webhook.ts";
+import { clustersToMake, completedOrder, HANDLED_EVENTS, handleWebhook, orderEmailText, orderRow, packsOn, signStripePayload, signupResume, subscriptionScanToken, trialStillRunning, verifyStripeSignature, type WebhookDeps } from "./webhook.ts";
 
 /**
  * BRIEF-3 C4 (30 Sep 2026): the webhook's rules against recorded fixtures.
@@ -33,6 +33,7 @@ const updated = {
   data: { object: { id: "sub_fixture", metadata: { scan_token: TOKEN }, items: { data: [{ quantity: 1, price: { metadata: {} } }, { quantity: 2, metadata: { kind: "pack" } }] } } },
 };
 const deleted = { id: "evt_fixture_deleted", type: "customer.subscription.deleted", data: { object: { id: "sub_fixture", metadata: { scan_token: TOKEN } } } };
+const trialWillEnd = { id: "evt_fixture_trial_will_end", type: "customer.subscription.trial_will_end", data: { object: { id: "sub_fixture", status: "trialing", trial_end: NOW + 3 * 86_400, metadata: { scan_token: TOKEN } } } };
 
 function deps(seen = new Set<string>()) {
   const calls: string[] = [];
@@ -50,6 +51,7 @@ function deps(seen = new Set<string>()) {
     completed: async (o) => (calls.push(`completed ${o.email} ${o.scanToken}`), true),
     updated: async (s) => (calls.push(`updated ${packsOn(s)}`), true),
     deleted: async (s) => (calls.push(`deleted ${subscriptionScanToken(s)}`), true),
+    trialWillEnd: async (s) => (calls.push(`trial_will_end ${subscriptionScanToken(s)}`), true),
   };
   return { d, calls, seen };
 }
@@ -92,6 +94,7 @@ test("each handled event reaches its handler, with the fixture's values", async 
   await post(completed, d);
   await post(updated, d);
   await post(deleted, d);
+  await post(trialWillEnd, d);
   assert.deepEqual(calls, [
     "record evt_fixture_completed",
     `completed owner@example.com ${TOKEN}`,
@@ -99,7 +102,24 @@ test("each handled event reaches its handler, with the fixture's values", async 
     "updated 2",
     "record evt_fixture_deleted",
     `deleted ${TOKEN}`,
+    "record evt_fixture_trial_will_end",
+    `trial_will_end ${TOKEN}`,
   ]);
+});
+
+/**
+ * 8 Oct 2026 (audit activation-1): trial_will_end is the fourth event, the
+ * fallback trigger for trial_ending. It reaches nothing until the Stripe
+ * endpoint is subscribed to it (Danny's step), and it is acted on only for a
+ * subscription still trialing - Stripe also sends it when a trial is ended early.
+ */
+test("trial_will_end is handled, and only for a subscription still in its trial", () => {
+  assert.deepEqual([...HANDLED_EVENTS], ["checkout.session.completed", "customer.subscription.updated", "customer.subscription.deleted", "customer.subscription.trial_will_end"]);
+  const nowMs = NOW * 1000;
+  assert.equal(trialStillRunning(trialWillEnd.data.object, nowMs), true);
+  assert.equal(trialStillRunning({ status: "trialing" }, nowMs), true, "no trial_end on the payload: Stripe's word that it is trialing stands");
+  assert.equal(trialStillRunning({ status: "active", trial_end: NOW + 86_400 }, nowMs), false, "a trial ended early is already charging");
+  assert.equal(trialStillRunning({ status: "trialing", trial_end: NOW - 1 }, nowMs), false);
 });
 
 test("an event the endpoint is not registered for is answered and not recorded", async () => {

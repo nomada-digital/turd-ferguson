@@ -199,3 +199,30 @@ test("the invite names who added you and the role", () => {
   const t = all.invite.text;
   assert.match(t, /sam@tallyroo\.com added you to the tallyroo\.com dashboard as a viewer/);
 });
+
+/**
+ * 8 Oct 2026 (audit activation-1): the cron's sends - trial_midpoint,
+ * trial_ending, setup_reminder - and Stripe's trial_will_end, read off the
+ * source the way first_reading is above. Each asks its flag before any read,
+ * claims its dashboard_events row before the send, mails live owners only and
+ * never in agency mode; the cron runs it after the dispatch and cannot fail on it.
+ */
+test("the lifecycle sweep: flags first, claim before send, live owners, no agency, after the dispatch", () => {
+  const sweep = fs.readFileSync(new URL("./lifecycle-sweep.ts", import.meta.url), "utf8");
+  const body = sweep.slice(sweep.indexOf("export async function sweepLifecycleMail("));
+  assert.ok(body.length > 500, "sweepLifecycleMail is gone from lifecycle-sweep.ts");
+  const flags = ["trial_midpoint", "trial_ending", "setup_reminder"].map((n) => body.indexOf(`lifecycleOn(db, "${n}")`));
+  for (const at of flags) assert.ok(at >= 0 && at < body.indexOf('.from("client_domains")'), "a flag is asked before the first read");
+  assert.match(body, /if \(!on\.trial_midpoint && !on\.trial_ending && !on\.setup_reminder\) return out;/);
+  assert.match(body, /if \(!due \|\| !on\[due\]\) continue;/, "a trial email goes only with its own flag on");
+  const deliver = sweep.slice(sweep.indexOf("async function deliver("), sweep.indexOf("export async function sweepLifecycleMail("));
+  assert.ok(deliver.indexOf('.insert({ client_domain_id: c.id') < deliver.indexOf("sendLifecycle("), "the claim is written before the send");
+  assert.match(deliver, /\.from\("dashboard_members"\)\.select\("email"\)\.eq\("account_id", c\.account_id\)\.eq\("role", "owner"\)\.is\("removed_at", null\)/);
+  assert.equal(body.match(/if \(agency\.has\(c\.account_id\)\) continue;/g)?.length, 2, "both loops skip agency mode");
+  const ending = sweep.slice(sweep.indexOf("export async function mailTrialEnding("));
+  assert.ok(ending.indexOf('lifecycleOn(db, "trial_ending")') >= 0 && ending.indexOf('lifecycleOn(db, "trial_ending")') < ending.indexOf("deliver("), "trial_will_end asks the flag first");
+  const cron = fs.readFileSync(new URL("../../app/api/cron/track/route.ts", import.meta.url), "utf8");
+  assert.ok(cron.indexOf("await dispatchTrackingRuns()") < cron.indexOf("await sweepLifecycleMailSafely()"), "the sweep runs after the dispatch");
+  const hook = fs.readFileSync(new URL("../../app/api/stripe/webhook/route.ts", import.meta.url), "utf8");
+  assert.match(hook, /trialWillEnd: \(sub\) => onTrialWillEnd\(supabaseAdmin\(\), sub\)/);
+});

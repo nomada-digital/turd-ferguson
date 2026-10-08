@@ -209,13 +209,19 @@ const EXEMPT: Record<string, { why: string; evidence: RegExp; where: string }> =
    * daily tracking runner is not a visitor's scan, so `checkCeilings` - an
    * allowance per hashed IP and a count of free scans - is the wrong guard.
    * It has its own pair, both read before a single request goes out.
+   *
+   * 8 Oct 2026 (audit activation-1): after the dispatch it also sends the
+   * lifecycle emails that go by the calendar (lib/email/lifecycle-sweep.ts) -
+   * Resend messages, not model or SERP spend - each behind its own flag, off
+   * by default, and once per client per email.
    */
   "cron/track": {
     why:
       "Opens one tracking run per active client with a live question and hands each to /api/track/run. " +
       "Behind CRON_SECRET; refused outright by refuseRun when tracking_enabled is off or today's tracking " +
       "dfs_cost has reached tracking_daily_cost_cap_usd; and the unique (client, day) row means a second " +
-      "call the same day dispatches nothing.",
+      "call the same day dispatches nothing. Its lifecycle emails go only with their email_<name>_enabled " +
+      "flag on, to live owners, once per client per email, claimed in dashboard_events before the send.",
     evidence: /refuseRun\(await trackingSettings\(\), await trackingSpentOn\(day\)\)/,
     where: "src/lib/tracking/runner.ts",
   },

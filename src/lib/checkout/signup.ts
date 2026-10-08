@@ -4,7 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { siteUrl } from "@/lib/scan/verify-email";
 import { appUrl } from "@/lib/app-host";
 import { sendOrderEmail } from "@/lib/checkout/order-mail";
-import { clustersToMake, orderEmailText, orderRow, packsOn, signupResume, subscriptionScanToken, trialConverted, type CompletedOrder } from "@/lib/checkout/webhook";
+import { clustersToMake, orderEmailText, orderRow, packsOn, signupResume, subscriptionScanToken, trialConverted, trialStillRunning, type CompletedOrder } from "@/lib/checkout/webhook";
 import { readSubscription } from "@/lib/checkout/stripe";
 import { TRACKED_PRICE } from "@/config/pricing";
 import { trialCharge, trialMoment } from "@/config/trial";
@@ -14,6 +14,7 @@ import { upsellMode } from "@/lib/tracking/ask";
 import { billingUrl, planEnded, trialTerms, welcome } from "@/lib/email/lifecycle";
 import { lifecycleOn, sendLifecycle } from "@/lib/email/lifecycle-mail";
 import { endedInTrial } from "@/lib/email/lifecycle-schedule";
+import { mailTrialEnding } from "@/lib/email/lifecycle-sweep";
 import type { TierKey } from "@/lib/tier-text";
 import { sendLoginLink } from "@/lib/tracking/login-mail";
 import { LOGIN_TTL_MS, hashToken, newToken } from "@/lib/tracking/session";
@@ -384,4 +385,18 @@ async function planEndedOwners(db: SupabaseClient, accountId: string): Promise<{
   const { data: owners, error: oErr } = await db.from("dashboard_members").select("email").eq("account_id", accountId).eq("role", "owner").is("removed_at", null);
   if (oErr) console.error(`[stripe] plan_ended not sent, owners not read: ${oErr.message}`);
   return owners ?? [];
+}
+
+/**
+ * customer.subscription.trial_will_end (8 Oct 2026, audit activation-1):
+ * trial_ending's fallback trigger, behind the same flag and the same
+ * once-a-client record as the cron's (lifecycle-sweep.ts). A subscription no
+ * longer trialing - a trial ended early - is left alone.
+ */
+export async function onTrialWillEnd(db: SupabaseClient, sub: Record<string, unknown>): Promise<boolean> {
+  if (!trialStillRunning(sub)) return true;
+  const clientId = await clientOfSubscription(db, sub);
+  if (clientId === false) return false;
+  if (!clientId) return true;
+  return mailTrialEnding(db, clientId);
 }
