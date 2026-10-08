@@ -6,6 +6,8 @@ import EngineLogo from "@/components/EngineLogo";
 import { T } from "@/config/tokens";
 import { ENGINE_SPECS, type Engine } from "@/lib/scan/engines";
 
+import { H, READOUT_W, W, X0, X1, Y0, Y1, boardDayAt, dayStrip, readoutAt } from "./chart-board";
+
 /**
  * The overview's chart (T4, 29 Sep 2026), hand-built SVG as
  * boards/Main.dc.html draws it - no chart library. The engine chips, the
@@ -26,8 +28,13 @@ import { ENGINE_SPECS, type Engine } from "@/lib/scan/engines";
  * 11px, the lines stretch to the width, and the day's detail is a row above
  * the plot that always shows a day (the latest until one is picked). A tap or
  * a slide along the plot picks the day. The board's readout is placed in
- * pixels from the measured width and kept inside it, and the card clips
- * sideways as a backstop.
+ * pixels from the measured width and kept inside it (chart-board.ts), and the
+ * card clips sideways as a backstop.
+ *
+ * On a touch screen the lede says "Tap a day, or slide along the chart", and
+ * a touch screen can be wide enough for the board - a large tablet, a touch
+ * laptop - so the board takes the same slide as Compact (review, 8 Oct 2026:
+ * at 1280 and 1366 a finger along the board picked nothing).
  */
 
 export type Point = { pct: number | null; num: number; den: number };
@@ -44,27 +51,6 @@ export type ChartData = {
   brand: string;
   questions: number;
 };
-
-const W = 1056;
-const H = 300;
-const X0 = 40;
-const X1 = 1044;
-const Y0 = 264;
-const Y1 = 16;
-/** The desktop readout's drawn width: 220px of text and its 14px padding each side, as since T4. */
-const READOUT_W = 248;
-
-/**
- * Where the desktop readout goes for a day at board x: 12px right of it, or
- * 12px left when that would pass the plot's edge, never past either edge. In
- * pixels from the plot's measured width; before that is known, the old guess.
- */
-function readoutAt(x: number, plotW: number | null): React.CSSProperties {
-  if (!plotW) return { left: `${(x / W) * 100}%`, transform: x > 780 ? "translateX(calc(-100% - 12px))" : "translateX(12px)" };
-  const px = (x / W) * plotW;
-  const left = px + 12 + READOUT_W <= plotW ? px + 12 : Math.max(0, px - 12 - READOUT_W);
-  return { left: `${Math.round(left)}px` };
-}
 
 function path(days: ChartDay[], pick: (d: ChartDay) => Point, max: number): string {
   const step = days.length > 1 ? (X1 - X0) / (days.length - 1) : 0;
@@ -184,6 +170,11 @@ export default function OverviewChart({ data }: { data: ChartData }) {
     refs.current[Math.max(0, Math.min(lastDay, to))]?.focus();
   };
   const xAt = (i: number) => X0 + i * step;
+  const strip = dayStrip(now.length);
+  const slideTo = (e: PointerEvent<HTMLDivElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    return boardDayAt(r.width ? (e.clientX - r.left) / r.width : 0, now.length);
+  };
   const line = path(now, pick, max);
   const lastX = (() => {
     for (let i = now.length - 1; i >= 0; i--) if (pick(now[i]!).pct !== null) return xAt(i);
@@ -243,7 +234,19 @@ export default function OverviewChart({ data }: { data: ChartData }) {
 
       <Compact now={now} before={prev ? before : null} pick={pick} max={max} ticks={ticks} colour={colour} notes={data.notes} engines={shown === "all" ? data.engines : [shown]} lfl={lfl} hover={hover} setHover={setHover} cursor={cursor} setCursor={setCursor} refs={smRefs} onDayKey={onDayKey} summary={summary} />
 
-      <div ref={plot} className="app-ovc-lg" style={{ position: "relative", width: "100%", maxWidth: `${W}px` }} onMouseLeave={() => setHover(null)}>
+      <div
+        ref={plot}
+        className="app-ovc-lg"
+        style={{ position: "relative", width: "100%", maxWidth: `${W}px`, touchAction: "pan-y" }}
+        onMouseLeave={() => setHover(null)}
+        // A touch or a pen: a slide along the board picks the day under it, as on Compact. The mouse has the day buttons' hover.
+        onPointerDown={(e) => {
+          if (e.pointerType !== "mouse") setHover(slideTo(e));
+        }}
+        onPointerMove={(e) => {
+          if (e.pointerType !== "mouse" && e.buttons) setHover(slideTo(e));
+        }}
+      >
         <svg width="100%" viewBox={`0 0 ${W} ${H}`} role="img" aria-label={summary} style={{ display: "block", overflow: "visible" }}>
           {area ? <path d={area} fill={colour} fillOpacity={0.07} /> : null}
           {ticks.map((v, i) => {
@@ -289,7 +292,8 @@ export default function OverviewChart({ data }: { data: ChartData }) {
           </span>
         ))}
 
-        <div style={{ position: "absolute", inset: `0 ${((W - X1 + step / 2) / W) * 100}% 12% ${((X0 - step / 2) / W) * 100}%`, display: "flex" }}>
+        {/* One button per day, each centred on its day's line (chart-board.ts, dayStrip). */}
+        <div style={{ position: "absolute", inset: `0 ${((W - strip.right) / W) * 100}% 12% ${(strip.left / W) * 100}%`, display: "flex" }}>
           {now.map((d, i) => {
             const p = pick(d);
             return (
