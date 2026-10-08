@@ -9,7 +9,8 @@ import type { OverviewData } from "./overview-data.ts";
 import { chartSeries, citeRows, placementsView } from "./placement-figures.ts";
 import { urlKey } from "./placements.ts";
 import { presets } from "./date-range.ts";
-import { ANSWER_SELECT, boundStated, clusterQuestionIds, monthSlice, rangeFloor, reportSpan, shapeRead } from "./read-shape.ts";
+import { PAGE } from "../supabase/page.ts";
+import { ANSWER_SELECT, type AnswersQuery, type AnswersTable, type ReadOpts, answerPlan, answerRow, boundStated, clusterQuestionIds, monthSlice, planPrompts, rangeFloor, readAnswers, reportSpan, selectColumns, shapeRead } from "./read-shape.ts";
 import { monthFigures, reportMonths } from "./report-months.ts";
 
 /**
@@ -58,6 +59,139 @@ test("the shapes select what they say, and an emptied column reads as an empty l
   assert.equal(c1.answers.length, d.answers.filter((a) => ids.has(a.question_id)).length);
   assert.deepEqual(c1.clusters, d.clusters, "every cluster is still read, for the page's N of M");
   assert.deepEqual(shapeRead(d, { cluster: "nope" }).answers, []);
+});
+
+/**
+ * Review, 8 Oct 2026: the shaping is one decision (answerPlan, planPrompts)
+ * and one read (readAnswers), taken by loadOverview and by the fixture's
+ * shapeRead alike. Every equality test in this file runs on shapeRead, so
+ * these hold the production read to it: the same function loadOverview calls,
+ * on a fake PostgREST that serves the fixture's rows the way the real one
+ * does - only the selected columns, only the filtered rows, by id, at most
+ * PAGE at a time, with the exact count when asked.
+ */
+test("the plan: the shape's columns, the cluster's prompts, and no read at all for none", () => {
+  assert.deepEqual(answerPlan({}), { select: ANSWER_SELECT.full, cluster: null });
+  assert.deepEqual(answerPlan({ answers: "verdicts" }), { select: ANSWER_SELECT.verdicts, cluster: null });
+  assert.deepEqual(answerPlan({ answers: "cites", cluster: "c1" }), { select: ANSWER_SELECT.cites, cluster: "c1" });
+  assert.equal(answerPlan({ answers: "none" }), null);
+  assert.equal(answerPlan({ answers: "none", cluster: "c1" }), null);
+  const d = base.data;
+  assert.equal(planPrompts(answerPlan({})!, d), null, "every prompt");
+  assert.deepEqual(planPrompts(answerPlan({ cluster: "c1" })!, d), clusterQuestionIds(d.questions, "c1"));
+  assert.deepEqual(planPrompts(answerPlan({ cluster: "nope" })!, d), [], "a cluster with no prompts reads nothing");
+});
+
+test("a column the select left out reads as an empty list, and a stray brand is dropped", () => {
+  const row = { run_date: "2026-09-01", question_id: "q1", engine: "chatgpt", answered: true, named: false };
+  assert.deepEqual(answerRow(row), { ...row, brands: [], citations: [] });
+  assert.deepEqual(answerRow({ ...row, brands: ["Xero", 3, null], citations: null }).brands, ["Xero"]);
+  const a = base.data.answers.find((x) => x.brands.length && x.citations.length)!;
+  assert.deepEqual(answerRow(selectColumns(a, ANSWER_SELECT.full)), a);
+  assert.deepEqual(answerRow(selectColumns(a, ANSWER_SELECT.cites)), { ...a, brands: [] });
+  assert.deepEqual(answerRow(selectColumns(a, ANSWER_SELECT.verdicts)), { ...a, brands: [], citations: [] });
+});
+
+/** Two reads' rows equal, failing on the count or the first row that differs - a diff of thousands of rows takes a minute. */
+function sameRows(got: readonly object[], want: readonly object[], what: string) {
+  assert.equal(got.length, want.length, `${what}: row count`);
+  const i = got.findIndex((g, k) => JSON.stringify(g) !== JSON.stringify(want[k]));
+  if (i >= 0) assert.deepEqual(got[i], want[i], `${what}: row ${i}`);
+}
+
+/** A fake PostgREST holding one client's tracking_answers, ids in fixture order. */
+function postgrest(rows: readonly object[], clientId: string) {
+  const calls: string[][] = [];
+  const table: AnswersTable = () => ({
+    select(columns, options) {
+      const log = [`select ${columns}${options.count ? " (count)" : ""}`];
+      calls.push(log);
+      const keep: ((r: Record<string, unknown>) => boolean)[] = [];
+      let byId = false;
+      let [lo, hi] = [0, Number.MAX_SAFE_INTEGER];
+      const q: AnswersQuery = {
+        eq: (c, v) => (log.push(`eq ${c}`), keep.push(c === "client_domain_id" ? () => v === clientId : (r) => r[c] === v), q),
+        gte: (c, v) => (log.push(`gte ${c}`), keep.push((r) => String(r[c]) >= v), q),
+        lte: (c, v) => (log.push(`lte ${c}`), keep.push((r) => String(r[c]) <= v), q),
+        in: (c, vs) => (log.push(`in ${c}`), keep.push((r) => vs.includes(r[c] as string)), q),
+        order: (c) => (log.push(`order ${c}`), (byId = c === "id"), q),
+        range: (a, b) => (([lo, hi] = [a, b]), q),
+        then: (ok, fail) => {
+          const all = rows.map((r, id) => ({ id, ...r })).filter((r) => keep.every((k) => k(r)));
+          // Unordered, the planner's order is not the id order: reversed here, so a dropped order shows.
+          const ordered = byId ? all : all.reverse();
+          const data = ordered.slice(lo, Math.min(hi + 1, lo + PAGE)).map((r) => selectColumns(r, columns));
+          return Promise.resolve({ data, error: null, count: options.count ? all.length : null }).then(ok, fail);
+        },
+      };
+      return q;
+    },
+  });
+  return { table, calls };
+}
+
+test("readAnswers, loadOverview's own read, returns on PostgREST exactly what shapeRead gives the fixture", async () => {
+  let reads = 0;
+  for (const state of ["default", "pilot-mixed", "ungrouped"]) {
+    const f = fixtures.find(([s]) => s === state)![1];
+    const db = postgrest(f.data.answers, f.client.id);
+    const where = (r: Range) => ({ clientId: f.client.id, from: r.from, to: r.to });
+    const ranges: Range[] = [{ from: addDays(f.today, -55), to: f.today }, { from: "2026-09-01", to: "2026-09-14" }];
+    const clusters = [undefined, ...f.data.clusters.slice(0, 2).map((c) => c.id), "nope"];
+    for (const answers of [undefined, "full", "cites", "verdicts", "none"] as const) {
+      for (const cluster of clusters) {
+        for (const r of ranges) {
+          const opts: ReadOpts = { answers, cluster };
+          const plan = answerPlan(opts);
+          const want = within(shapeRead(f.data, opts), r).answers;
+          const got = plan === null ? [] : await readAnswers(db.table, plan, planPrompts(plan, f.data), where(r));
+          sameRows(got, want, `${state} ${answers ?? "unsaid"} ${cluster ?? "every cluster"} ${r.from}`);
+          reads++;
+        }
+      }
+    }
+    const other = await readAnswers(db.table, answerPlan({})!, null, { ...where(ranges[0]), clientId: "someone-else" });
+    assert.equal(other.length, 0, "another client's id reads none of these rows");
+  }
+  // 5 shapes x 2 ranges x (every cluster, up to two clusters, none): 40 on default, 30 on pilot-mixed's one cluster, 20 ungrouped.
+  assert.ok(reads >= 90, `only ${reads} reads compared`);
+});
+
+test("readAnswers asks PostgREST for the plan's columns and, for one cluster, only its prompts", async () => {
+  const f = fixtures[0][1];
+  const r = { from: addDays(f.today, -55), to: f.today };
+  const db = postgrest(f.data.answers, f.client.id);
+  const plan = answerPlan({ answers: "cites", cluster: "c1" })!;
+  const got = await readAnswers(db.table, plan, planPrompts(plan, f.data), { clientId: f.client.id, from: r.from, to: r.to });
+  assert.ok(got.length > 0);
+  assert.deepEqual(db.calls[0], [`select ${ANSWER_SELECT.cites} (count)`, "eq client_domain_id", "gte run_date", "lte run_date", "in question_id", "order id"]);
+  assert.ok(db.calls.slice(1).every((c) => c[0] === `select ${ANSWER_SELECT.cites}` && c.includes("in question_id")), "a later page lost the filter");
+  const all = postgrest(f.data.answers, f.client.id);
+  const whole = await readAnswers(all.table, answerPlan({})!, null, { clientId: f.client.id, from: r.from, to: r.to });
+  assert.ok(whole.length > PAGE, `${whole.length} rows is one page, so the paging went untested`);
+  assert.ok(all.calls.length > 2 && all.calls.every((c) => !c.includes("in question_id")));
+  const none = postgrest(f.data.answers, f.client.id);
+  assert.deepEqual(await readAnswers(none.table, plan, [], { clientId: f.client.id, from: r.from, to: r.to }), []);
+  assert.equal(none.calls.length, 0, "a cluster with no prompts asks for nothing");
+});
+
+test("census: loadOverview takes its plan, prompts and read from read-shape.ts, and the fixture repo its shapeRead", () => {
+  const data = src("./overview-data.ts");
+  const at = data.indexOf("export async function loadOverview(");
+  const load = data.slice(at, data.indexOf("\n}\n", at));
+  assert.ok(at >= 0 && load.length > 500, "loadOverview not found");
+  for (const line of [
+    "const plan = answerPlan(opts);",
+    "readAnswers(answersTable, p, ids, { clientId, from: earliest, to: range.to })",
+    'db.from("tracking_answers")) as unknown as AnswersTable',
+    "plan === null ? Promise.resolve([]) : plan.cluster === null ? answersRead(plan, null) : structureP.then((s) => answersRead(plan, planPrompts(plan, s)))",
+  ]) {
+    assert.ok(load.includes(line), `loadOverview: "${line}" is gone - hold its read to shapeRead again before updating this census`);
+  }
+  // One copy: the decisions are not taken again beside the plan.
+  for (const second of ["ANSWER_SELECT", "clusterQuestionIds"]) assert.ok(!data.includes(second), `overview-data.ts shapes the answers itself again: ${second}`);
+  for (const second of ['"question_id"', "brands", "citations"]) assert.ok(!load.includes(second), `loadOverview filters or maps the answers itself again: ${second}`);
+  assert.match(src("./repo.ts"), /shapeRead\(fixture\(\)\.data, opts\)/);
 });
 
 test("Reports reads from the oldest month's own comparison, not the whole span's", () => {

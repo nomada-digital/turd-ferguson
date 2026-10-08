@@ -6,7 +6,7 @@ import { selectAllCounted } from "@/lib/supabase/page";
 import { trackingDay } from "./decide.ts";
 import type { LatestAnswers, LatestRow } from "./latest-answers.ts";
 import type { Angle } from "./limits.ts";
-import { ANSWER_SELECT, type ReadOpts, type Structure, boundStated, clusterQuestionIds } from "./read-shape.ts";
+import { type AnswerPlan, type AnswersTable, type ReadOpts, type Structure, answerPlan, boundStated, planPrompts, readAnswers } from "./read-shape.ts";
 import { type AnswerRow, type CitationRow, type Day, type Range, type SerpRow, addDays, comparisonRange } from "./figures.ts";
 
 /**
@@ -166,23 +166,20 @@ export async function loadStructure(clientId: string): Promise<Structure> {
 export async function loadOverview(clientId: string, range: Range, compare: Compare, opts: ReadOpts = {}): Promise<OverviewData> {
   const db = supabaseAdmin();
   const earliest = comparisonRange(range, compare)?.from ?? range.from;
-  const cols = opts.answers ?? "full";
-  const columns = cols === "none" ? null : ANSWER_SELECT[cols];
+  // The columns and the prompts are read-shape.ts's decision, the one the fixture's shapeRead takes too.
+  const plan = answerPlan(opts);
 
   // Started together, awaited in turn: each paged read checks its own error.
   const structureP = opts.structure ? Promise.resolve(opts.structure) : loadStructure(clientId);
-  // The column list is chosen at run time, so the rows type as unknown; they are mapped field by field below.
-  const answersRead = (select: string, ids: string[] | null): Promise<unknown[]> =>
-    ids && !ids.length
-      ? Promise.resolve([])
-      : paged<unknown>((lo, hi, count) => {
-          let q = db.from("tracking_answers").select(select, { count }).eq("client_domain_id", clientId).gte("run_date", earliest).lte("run_date", range.to);
-          if (ids) q = q.in("question_id", ids);
-          return q.order("id").range(lo, hi);
-        }, "the answers");
+  // Cast: tsc gives up (TS2589) matching supabase-js's builder generics to AnswersQuery's six calls. The calls are the
+  // ones this read made before; read-shape.test.mts runs readAnswers on a fake PostgREST and holds it equal to shapeRead.
+  const answersTable = (() => db.from("tracking_answers")) as unknown as AnswersTable;
+  const answersRead = (p: AnswerPlan, ids: string[] | null) =>
+    readAnswers(answersTable, p, ids, { clientId, from: earliest, to: range.to }).catch((err: unknown) => {
+      throw new Error(`could not read the answers: ${err instanceof Error ? err.message : String(err)}`);
+    });
   // A one-cluster read waits on the prompts for its ids: one round trip, for a tenth of the rows on a 10-cluster client.
-  const cluster = opts.cluster;
-  const answersP = columns === null ? Promise.resolve([]) : cluster === undefined ? answersRead(columns, null) : structureP.then((s) => answersRead(columns, clusterQuestionIds(s.questions, cluster)));
+  const answersP = plan === null ? Promise.resolve([]) : plan.cluster === null ? answersRead(plan, null) : structureP.then((s) => answersRead(plan, planPrompts(plan, s)));
   const serpP = paged(
     (lo, hi, count) =>
       db.from("tracking_serp").select("run_date, keyword_id, position", { count }).eq("client_domain_id", clientId).gte("run_date", earliest).lte("run_date", range.to).order("id").range(lo, hi),
@@ -197,23 +194,15 @@ export async function loadOverview(clientId: string, range: Range, compare: Comp
   if (runErr) throw new Error(`could not read the runs: ${runErr.message}`);
   if (noteErr) throw new Error(`could not read the notes: ${noteErr.message}`);
   const { clusters, questions, keywords } = await structureP;
-  const answers = (await answersP) as Record<string, unknown>[];
+  // Mapped in readAnswers: a column the plan left out reads as an empty list (read-shape.ts answerRow).
+  const answers = await answersP;
   const serp = await serpP;
 
   return {
     clusters,
     questions,
     keywords,
-    // A column the shape left out reads as an empty list (read-shape.ts).
-    answers: answers.map((a) => ({
-      run_date: a.run_date as Day,
-      question_id: a.question_id as string,
-      engine: a.engine as string,
-      answered: a.answered as boolean,
-      named: a.named as boolean,
-      brands: Array.isArray(a.brands) ? (a.brands as unknown[]).filter((b): b is string => typeof b === "string") : [],
-      citations: Array.isArray(a.citations) ? (a.citations as CitationRow["citations"]) : [],
-    })),
+    answers,
     serp: serp as SerpRow[],
     lastRun: (runRows?.[0] as OverviewData["lastRun"]) ?? null,
     notes: (noteRows ?? []) as OverviewData["notes"],

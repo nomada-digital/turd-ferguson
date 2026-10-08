@@ -1,10 +1,13 @@
-import { type Day, type Range, addDays, comparisonRange } from "./figures.ts";
+import { selectAllCounted } from "../supabase/page.ts";
+
+import { type AnswerRow, type CitationRow, type Day, type Range, addDays, comparisonRange } from "./figures.ts";
 import type { OverviewData } from "./overview-data.ts";
 
 /**
  * What each dashboard page reads, and no more (8 Oct 2026, audit perf-4,
- * perf-9 and perf-1). Pure, so the fixture repo shapes its copy exactly as
- * the Supabase read is shaped, and node --test can hold both.
+ * perf-9 and perf-1). No I/O of its own - readAnswers runs on whatever table
+ * it is handed - so the fixture repo shapes its copy with the same plan as
+ * the Supabase read, and node --test can run both.
  *
  * Every page used to read every answer of the range with its `brands` and
  * `citations` jsonb - most of each row's bytes, citation titles included -
@@ -65,20 +68,90 @@ export function clusterQuestionIds(questions: readonly { id: string; cluster_id:
 }
 
 /**
- * The fixture's copy of a shaped read: the same columns emptied and the same
- * prompts kept as the Supabase read selects, so a page that needs what it
- * did not ask for shows it on the fixture, in specs and in parity, too.
+ * What one shaped read asks tracking_answers for: the columns to select, and
+ * the cluster whose prompts it is held to (null for every prompt). null when
+ * it reads no answer at all.
+ *
+ * One decision, taken here for both reads (review, 8 Oct 2026). loadOverview
+ * made it in its own lines and shapeRead in its own, and only shapeRead ran
+ * under node --test - overview-data.ts imports server-only - so a dropped
+ * `.in("question_id", ...)` or a wrong column list would have read
+ * differently in production and left every equality test here green.
+ */
+export type AnswerPlan = { select: string; cluster: string | null };
+
+export function answerPlan(opts: ReadOpts): AnswerPlan | null {
+  const cols = opts.answers ?? "full";
+  return cols === "none" ? null : { select: ANSWER_SELECT[cols], cluster: opts.cluster ?? null };
+}
+
+/** The prompt ids a plan reads, from the structure: null for every prompt; an empty list reads nothing. */
+export function planPrompts(plan: AnswerPlan, structure: Pick<Structure, "questions">): string[] | null {
+  return plan.cluster === null ? null : clusterQuestionIds(structure.questions, plan.cluster);
+}
+
+/** A row cut to a select's columns, as PostgREST returns it: what the fixture stands in for, and the test's fake server. */
+export function selectColumns(row: object, select: string): Record<string, unknown> {
+  const r = row as Record<string, unknown>;
+  return Object.fromEntries(select.split(",").map((c) => [c.trim(), r[c.trim()]]));
+}
+
+/** One answer as the dashboard holds it, from a row as a select returned it: a column the select left out reads as an empty list. */
+export function answerRow(a: Record<string, unknown>): AnswerRow & CitationRow {
+  return {
+    run_date: a.run_date as Day,
+    question_id: a.question_id as string,
+    engine: a.engine as string,
+    answered: a.answered as boolean,
+    named: a.named as boolean,
+    brands: Array.isArray(a.brands) ? (a.brands as unknown[]).filter((b): b is string => typeof b === "string") : [],
+    citations: Array.isArray(a.citations) ? (a.citations as CitationRow["citations"]) : [],
+  };
+}
+
+/** The query-builder calls the answers read makes: supabase-js's, or the fake PostgREST in read-shape.test.mts. */
+export type AnswersQuery = PromiseLike<{ data: unknown[] | null; error: { message: string } | null; count?: number | null }> & {
+  eq(column: string, value: string): AnswersQuery;
+  gte(column: string, value: string): AnswersQuery;
+  lte(column: string, value: string): AnswersQuery;
+  in(column: string, values: readonly string[]): AnswersQuery;
+  order(column: string): AnswersQuery;
+  range(from: number, to: number): AnswersQuery;
+};
+export type AnswersTable = () => { select(columns: string, options: { count?: "exact" }): AnswersQuery };
+
+/**
+ * The answers read itself, on a plan: its columns, one client's days, its
+ * prompts, ordered by id and paged (selectAllCounted). loadOverview runs it
+ * on tracking_answers; read-shape.test.mts runs the same function on a fake
+ * PostgREST serving the fixture and holds it equal to shapeRead.
+ */
+export async function readAnswers(table: AnswersTable, plan: AnswerPlan, ids: string[] | null, where: { clientId: string; from: Day; to: Day }): Promise<(AnswerRow & CitationRow)[]> {
+  if (ids && !ids.length) return [];
+  const rows = await selectAllCounted<unknown>((lo, hi, count) => {
+    let q = table()
+      .select(plan.select, count ? { count: "exact" } : {})
+      .eq("client_domain_id", where.clientId)
+      .gte("run_date", where.from)
+      .lte("run_date", where.to);
+    if (ids) q = q.in("question_id", ids);
+    return q.order("id").range(lo, hi);
+  });
+  return rows.map((a) => answerRow(a as Record<string, unknown>));
+}
+
+/**
+ * The fixture's copy of a shaped read: the plan's prompts kept and each row
+ * cut to the plan's columns and mapped as the Supabase read maps it, so a
+ * page that needs what it did not ask for shows it on the fixture, in specs
+ * and in parity, too.
  */
 export function shapeRead(data: OverviewData, opts: ReadOpts = {}): OverviewData {
-  const cols = opts.answers ?? "full";
+  const plan = answerPlan(opts);
   const s = opts.structure ?? data;
-  const keep = opts.cluster === undefined ? null : new Set(clusterQuestionIds(s.questions, opts.cluster));
-  const answers =
-    cols === "none"
-      ? []
-      : data.answers
-          .filter((a) => keep === null || keep.has(a.question_id))
-          .map((a) => (cols === "full" ? a : cols === "cites" ? { ...a, brands: [] } : { ...a, brands: [], citations: [] }));
+  const ids = plan && planPrompts(plan, s);
+  const keep = ids && new Set(ids);
+  const answers = plan === null ? [] : data.answers.filter((a) => keep === null || keep.has(a.question_id)).map((a) => answerRow(selectColumns(a, plan.select)));
   return { ...data, clusters: s.clusters, questions: s.questions, keywords: s.keywords, answers };
 }
 
