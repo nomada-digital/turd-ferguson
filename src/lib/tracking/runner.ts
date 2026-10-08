@@ -12,12 +12,16 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import { selectAll } from "@/lib/supabase/page";
 
 import {
+  type BrandGap,
   TRACKING_STALL_MS,
   liveOn,
   readTrackingSettings,
   billedCost,
+  extractWithRetry,
+  extractionWindowMs,
   failureSummary,
   keywordOutcome,
+  missingColumn,
   readFailureReason,
   readRetryDelay,
   refuseRun,
@@ -364,24 +368,36 @@ export async function runTrackingDay(runId: string): Promise<{ status: string; s
     // Who else is named: one extraction per engine over that engine's answers,
     // as the scan does it, then attributed back to each answer with the same
     // matcher that decides "named". Never fatal - the reads are already paid for.
+    //
+    // Never silent either (8 Oct 2026, audit reliability-1 / data-6). This
+    // read only the brands, so a batch that failed stored its answers as
+    // naming no other brand, on a run marked complete. A failed batch is now
+    // retried once while the budget allows; an answer still unread is stored
+    // brands_ok=false, which every brand figure leaves out, and its engine is
+    // a BrandGap, so the run is partial and its error line says which. One
+    // deadline bounds both passes (decide.ts extractionWindowMs).
     const subject = subjectKeys(brand, domain);
     const others = new Map<Engine, string[]>();
+    const unread = new Set<AnswerRow>();
+    const gaps: BrandGap[] = [];
+    const context = { topic: (client.topic as string | null) ?? "", brand };
+    const signal = AbortSignal.timeout(extractionWindowMs(remainingMs()));
     await Promise.all(
       engines.map(async (engine) => {
-        const blocks = answers.filter((a) => a.engine === engine && a.answered && a.response_text).map((a) => a.response_text!);
-        if (!blocks.length) return;
-        try {
-          const out = await extractBrands(blocks, { topic: (client.topic as string | null) ?? "", brand });
-          spend.calls += out.calls;
-          const seen = new Map<string, string>();
-          for (const b of out.brands) {
-            const key = brandKey(b.brand.trim());
-            if (key && !subject.has(key) && !seen.has(key)) seen.set(key, b.brand.trim());
-          }
-          others.set(engine, [...seen.values()]);
-        } catch (err) {
-          console.warn(`[track] ${runId} ${engine} brand extraction failed: ${message(err)}`);
+        const read = answers.filter((a) => a.engine === engine && a.answered && a.response_text);
+        if (!read.length) return;
+        const out = await extractWithRetry(read.map((a) => a.response_text!), (blocks) => extractBrands(blocks, context, { signal }), remainingMs);
+        spend.calls += out.calls;
+        const seen = new Map<string, string>();
+        for (const name of out.names) {
+          const key = brandKey(name.trim());
+          if (key && !subject.has(key) && !seen.has(key)) seen.set(key, name.trim());
         }
+        others.set(engine, [...seen.values()]);
+        if (!out.unread.length) return;
+        for (const i of out.unread) unread.add(read[i]!);
+        gaps.push({ engine, unread: out.unread.length, answered: read.length, reason: out.reason });
+        console.warn(`[track] ${runId} ${engine} brand extraction: other brands not read in ${out.unread.length} of ${read.length} answers (${out.reason})`);
       }),
     );
 
@@ -399,8 +415,19 @@ export async function runTrackingDay(runId: string): Promise<{ status: string; s
       cost: Number(a.cost.toFixed(4)),
     }));
     if (answerRows.length) {
-      const { error } = await db.from("tracking_answers").upsert(answerRows, { onConflict: "run_id,question_id,engine" });
-      if (error) throw new Error(`could not store the answers: ${error.message}`);
+      // brands_ok is 20261008020000's column. A deploy landing before that
+      // migration names a column the table lacks, so the reads are stored
+      // without it rather than lost; the run's error line still names any gap.
+      const withOk = answerRows.map((r, i) => ({ ...r, brands_ok: !unread.has(answers[i]!) }));
+      for (const rows of [withOk, answerRows]) {
+        const { error } = await db.from("tracking_answers").upsert(rows, { onConflict: "run_id,question_id,engine" });
+        if (!error) break;
+        if (rows === withOk && missingColumn(error, "brands_ok")) {
+          console.warn(`[track] ${runId} tracking_answers has no brands_ok yet; answers stored without it`);
+          continue;
+        }
+        throw new Error(`could not store the answers: ${error.message}`);
+      }
     }
 
     const serpRows = serp
@@ -452,8 +479,8 @@ export async function runTrackingDay(runId: string): Promise<{ status: string; s
       ...answers.flatMap((a) => (a.failed ? [{ engine: a.engine as string, reason: a.reason ?? "unknown" }] : [])),
       ...serp.flatMap((x) => (x.failed ? [{ engine: "keyword", reason: x.reason ?? "unknown" }] : [])),
     ];
-    const status = runOutcome(reads, failures.length);
-    await close({ status, error: failureSummary(reads, failures) });
+    const status = runOutcome(reads, failures.length, gaps.length);
+    await close({ status, error: failureSummary(reads, failures, gaps) });
     if (status !== "failed") {
       const range = { from: day, to: day };
       await mailFirstReading(db, runId, client.id as string, domain, {

@@ -125,8 +125,20 @@ export function runnerFaults(source: string): { failedMarks: number; silentNull:
 
 test("census: runner marks a read failed only after its retry loop, keeps billed cost, and never nulls an empty SERP", () => {
   assert.deepEqual(runnerFaults(runner), { failedMarks: 2, silentNull: false, zeroCostFailure: false });
-  assert.match(runner, /failureSummary\(reads, failures\)/, "the run's error line is the grouped summary");
+  // 8 Oct 2026 (audit reliability-1 / data-6): the call was failureSummary(reads, failures). The
+  // error line now also carries the brand extraction gaps, and they make the run partial.
+  assert.match(runner, /failureSummary\(reads, failures, gaps\)/, "the run's error line is the grouped summary, brand gaps included");
+  assert.match(runner, /runOutcome\(reads, failures\.length, gaps\.length\)/, "a brand gap makes the run partial");
   assert.match(runner, /readRetryDelay\(err, attempt, remainingMs\(\)\)/);
+});
+
+test("census: runner reads which answers brand extraction missed and stores them brands_ok=false (8 Oct 2026, audit reliability-1)", () => {
+  // It read only the brands, so a failed batch was stored as naming no other brand on a complete run.
+  // extractWithRetry (decide.ts, tested in decide.test.mts) reads failedBlocks and retries them.
+  assert.match(runner, /await extractWithRetry\(.*extractBrands\(blocks, context, \{ signal \}\)/, "every extraction goes through the retry and the deadline");
+  assert.equal([...runner.matchAll(/extractBrands\(/g)].length, 1, "no extraction around it");
+  assert.match(runner, /for \(const i of out\.unread\) unread\.add\(read\[i\]!\);/, "its unread answers are the engine's");
+  assert.match(runner, /brands_ok: !unread\.has\(answers\[i\]!\)/, "an unread answer is stored brands_ok=false");
 });
 
 test("census probe: an extra failure mark, the old silent null and a zero-cost failure each fire", () => {

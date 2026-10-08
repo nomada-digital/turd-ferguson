@@ -620,33 +620,43 @@ const PROSE_BATCH_CHARS = 60_000;
  * Duplicate names across batches are not merged here - the caller already
  * merges on brandKey, which folds case and punctuation, and two normalisers
  * that disagree is how a leaderboard grows a second row for one company.
+ *
+ * `failedBlocks` (8 Oct 2026, audit reliability-1 / data-6): the indices into
+ * `blocks` whose batch failed, so a caller can retry those answers and mark
+ * the ones still unread rather than store them as naming no one - the daily
+ * tracking runner read only `brands` and `calls`, so a 529 on one engine's
+ * batch shortened every rival's count and raised the client's share of voice
+ * on a run marked complete. `error` is the first failure's reason, for the
+ * caller's error line. `options.signal` bounds every request, SDK retries
+ * included: an aborted batch fails like any other and costs no request.
  */
 export async function extractBrands(
   blocks: string[],
   context: { topic: string; brand: string } = { topic: "", brand: "" },
-): Promise<{ brands: { brand: string; mentions: number }[]; calls: number; failedBatches: number }> {
+  options: { signal?: AbortSignal } = {},
+): Promise<{ brands: { brand: string; mentions: number }[]; calls: number; failedBatches: number; failedBlocks: number[]; error?: string }> {
   // One answer is clamped to a whole batch rather than to some smaller share
   // of one, so nothing is cut tighter here than the old 120,000-character cut
   // would have cut it. 60,000 characters is some 15,000 words from a single
   // engine answer; the clamp is a bound on the pathological case, not a size
   // any answer in this pipeline is expected to reach.
   const usable = blocks
-    .map((b) => b.trim())
-    .filter(Boolean)
-    .map((b) => (b.length > PROSE_BATCH_CHARS ? b.slice(0, PROSE_BATCH_CHARS) : b));
-  if (!usable.length) return { brands: [], calls: 0, failedBatches: 0 };
+    .map((b, at) => ({ at, text: b.trim() }))
+    .filter((b) => b.text)
+    .map((b) => (b.text.length > PROSE_BATCH_CHARS ? { at: b.at, text: b.text.slice(0, PROSE_BATCH_CHARS) } : b));
+  if (!usable.length) return { brands: [], calls: 0, failedBatches: 0, failedBlocks: [] };
 
-  const batches: string[][] = [];
-  let current: string[] = [];
+  const batches: { at: number; text: string }[][] = [];
+  let current: { at: number; text: string }[] = [];
   let size = 0;
   for (const block of usable) {
-    if (current.length && size + block.length > PROSE_BATCH_CHARS) {
+    if (current.length && size + block.text.length > PROSE_BATCH_CHARS) {
       batches.push(current);
       current = [];
       size = 0;
     }
     current.push(block);
-    size += block.length;
+    size += block.text.length;
   }
   if (current.length) batches.push(current);
 
@@ -655,24 +665,29 @@ export async function extractBrands(
   // three requests on the bill and was one on this counter.
   const billed = { calls: 0 };
   let failedBatches = 0;
+  const failedBlocks: number[] = [];
+  let error: string | undefined;
   for (const batch of batches) {
     try {
-      brands.push(...(await extractBrandBatch(batch, context, billed)));
+      brands.push(...(await extractBrandBatch(batch.map((b) => b.text), context, billed, options.signal)));
     } catch (err) {
       // One bad batch must not cost the scan its leaderboard, and must not
       // cost it the engine reads already paid for. Counted and returned so
       // the caller can say a leaderboard is partial rather than assume it.
       failedBatches += 1;
+      failedBlocks.push(...batch.map((b) => b.at));
+      error ??= options.signal?.aborted ? "out of time" : describeAnthropicError(err).slice(0, 80);
       console.warn("[scan] a prose batch failed to extract:", err instanceof Error ? err.message : err);
     }
   }
-  return { brands, calls: billed.calls, failedBatches };
+  return { brands, calls: billed.calls, failedBatches, failedBlocks, ...(error ? { error } : {}) };
 }
 
 async function extractBrandBatch(
   batch: string[],
   context: { topic: string; brand: string },
   billed: { calls: number },
+  signal?: AbortSignal,
 ): Promise<{ brand: string; mentions: number }[]> {
   const res = await withRetry(() => anthropic(billed).messages.parse({
     model: MODEL,
@@ -710,7 +725,7 @@ async function extractBrandBatch(
           .join("\n\n"),
       },
     ],
-  }));
+  }, { signal }));
 
   return res.parsed_output?.brands ?? [];
 }
