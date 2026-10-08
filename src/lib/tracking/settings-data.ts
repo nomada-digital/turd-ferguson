@@ -8,7 +8,12 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
  * here and used for the member read only; it never reaches the page.
  */
 export type Member = { email: string; name: string | null; role: string; last_login_at: string | null };
-export type SettingsData = { aliases: string[]; members: Member[] };
+/**
+ * accountClients (8 Oct 2026, audit security-2): a member sees every client on
+ * the account, so a team of an account with several clients sees them all.
+ * Settings says so where invites are made, until members can be scoped.
+ */
+export type SettingsData = { aliases: string[]; members: Member[]; accountClients: number };
 
 export async function loadSettings(clientId: string): Promise<SettingsData> {
   const db = supabaseAdmin();
@@ -21,7 +26,10 @@ export async function loadSettings(clientId: string): Promise<SettingsData> {
     .is("removed_at", null)
     .order("created_at", { ascending: true });
   if (mErr) throw new Error(`could not read the team: ${mErr.message}`);
+  const { count, error: nErr } = await db.from("client_domains").select("id", { count: "exact", head: true }).eq("account_id", client.account_id as string);
+  if (nErr) throw new Error(`could not count the account's clients: ${nErr.message}`);
   return {
+    accountClients: count ?? 1,
     aliases: ((client.brand_aliases as string[] | null) ?? []).filter(Boolean),
     members: (rows ?? []).map((r) => ({ email: r.email as string, name: (r.name as string | null) ?? null, role: r.role as string, last_login_at: (r.last_login_at as string | null) ?? null })),
   };

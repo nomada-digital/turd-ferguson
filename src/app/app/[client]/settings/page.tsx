@@ -83,6 +83,7 @@ export default async function ClientSettings({ params, searchParams }: { params:
           trialCancelledAt={client.trial_cancelled_at ?? null}
           ended={client.status === "ended"}
           livePrompts={(data.questions ?? []).filter((q) => q.stopped_on === null).length}
+          accountClients={settings.accountClients}
         />
       </div>
     </div>

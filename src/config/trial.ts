@@ -44,8 +44,10 @@ export function trialApplies(p: { tier: string; packs: number; repeat: TrialRepe
 export function noTrialLine(p: { tier: string; packs: number; repeat: TrialRepeat }, enabled: boolean = TRIAL.enabled): string | null {
   if (!enabled || p.tier !== "tracked") return null;
   if (p.packs > 0) return "No free trial with extra tracking packs, so the first charge is today.";
-  if (p.repeat === "email") return "This email has used alwayscited before, so there is no free trial and the first charge is today.";
-  if (p.repeat === "domain") return "This website has used alwayscited before, so there is no free trial and the first charge is today.";
+  // One sentence for either match (8 Oct 2026, audit security-3): naming which
+  // one matched told anyone typing a rival's website or email into checkout
+  // whether it was an alwayscited customer.
+  if (p.repeat) return "The free trial is for first-time customers, so this order starts paid and the first charge is today.";
   return null;
 }
 

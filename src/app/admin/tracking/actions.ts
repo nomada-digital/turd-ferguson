@@ -71,7 +71,8 @@ export async function createClientFromScan(_prev: AdminResult | null, form: Form
   if (scan.market !== "UK" && scan.market !== "US") return { ok: false, message: "That scan has no market." };
 
   // The account: found by email, or made.
-  const { data: found, error: aErr } = await db.from("accounts").select("id").ilike("email", email).maybeSingle();
+  // Exact, never ilike (8 Oct 2026, audit security-1): `email` is trimmed and lowercased above.
+  const { data: found, error: aErr } = await db.from("accounts").select("id").eq("email", email).maybeSingle();
   if (aErr) return { ok: false, message: `Could not read accounts: ${aErr.message}` };
   let accountId = found?.id as string | undefined;
   if (!accountId) {

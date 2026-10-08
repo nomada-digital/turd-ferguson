@@ -78,7 +78,10 @@ async function clientFromOrder(db: SupabaseClient, o: CompletedOrder): Promise<{
     };
   }
 
-  const { data: found, error: aErr } = await db.from("accounts").select("id").ilike("email", o.email).maybeSingle();
+  // Exact, never ilike (8 Oct 2026, audit security-1): ILIKE reads `_` and `%`
+  // as wildcards, so a buyer could be made owner of a stranger's account.
+  // o.email is lowercased in completedOrder, and stored emails are lowercase.
+  const { data: found, error: aErr } = await db.from("accounts").select("id").eq("email", o.email).maybeSingle();
   if (aErr) return { ok: false, outcome: `could not read accounts: ${aErr.message}` };
   let accountId = found?.id as string | undefined;
   if (!accountId) {

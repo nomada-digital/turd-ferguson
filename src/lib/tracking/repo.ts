@@ -140,9 +140,9 @@ const fixtureRepo: TrackingRepo = {
   },
   async settings(clientId) {
     const f = fixture();
-    if (clientId !== f.client.id) return { aliases: [], members: [] };
+    if (clientId !== f.client.id) return { aliases: [], members: [], accountClients: 1 };
     // Removed members stay in the file, as the table keeps them, and are skipped as every read skips them.
-    return { aliases: f.aliases, members: f.members.filter((m) => !m.removed_at).map((m) => ({ email: m.email, name: m.name, role: m.role, last_login_at: m.last_login_at })) };
+    return { accountClients: 1, aliases: f.aliases, members: f.members.filter((m) => !m.removed_at).map((m) => ({ email: m.email, name: m.name, role: m.role, last_login_at: m.last_login_at })) };
   },
   today() {
     return fixture().today;

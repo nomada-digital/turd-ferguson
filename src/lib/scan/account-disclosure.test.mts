@@ -575,3 +575,28 @@ test(`no live SQL function names ${COLUMN}`, () => {
       offenders.join("\n  "),
   );
 });
+
+/**
+ * 8 Oct 2026, audit security-1 (critical): the same ILIKE defect this file's
+ * header records as fixed in the unlock route was still live in three other
+ * places - checkout signup made a buyer owner of whatever account an ILIKE on
+ * their address matched, so an underscore could hand them a stranger's
+ * clients. Every stored email is lowercased, so an address is matched with
+ * .eq on its normalised form, never with a pattern.
+ */
+const ILIKE_ON_EMAIL = /\.ilike\(\s*["'`][a-z_]*email["'`]/;
+
+test("no query matches an email column with ilike", () => {
+  const root = fileURLToPath(new URL("../../../", import.meta.url));
+  const files = sourceFiles(root);
+  assert.ok(files.length > 200, `only ${files.length} source files walked`);
+  assert.ok(files.some((f) => f.endsWith("lib/checkout/signup.ts")), "the walk cannot see signup.ts, the file this is about");
+  const hits = files.filter((f) => ILIKE_ON_EMAIL.test(code(readFileSync(join(root, f), "utf8"))));
+  assert.deepEqual(hits, [], "match an email with .eq on its lowercased form - ilike reads _ and % as wildcards");
+});
+
+test("the ilike probe still recognises the shape it bans", () => {
+  for (const s of ['db.from("accounts").select("id").ilike("email", email)', "x.ilike('member_email', e)", "q.ilike(`report_email`, e)"]) assert.match(s, ILIKE_ON_EMAIL, s);
+  assert.doesNotMatch('db.from("accounts").select("id").eq("email", email)', ILIKE_ON_EMAIL);
+  assert.doesNotMatch('q.ilike("domain", d)', ILIKE_ON_EMAIL);
+});

@@ -72,7 +72,10 @@ export default function Settings({
   trialCancelledAt = null,
   ended = false,
   livePrompts = 1,
+  accountClients = 1,
 }: {
+  /** Clients on this account: every member sees all of them (audit security-2). */
+  accountClients?: number;
   /** client_domains.status is ended, and how many prompts are live: neither gets "Tomorrow at 06:00" (8 Oct 2026, audit activation-4/5). */
   ended?: boolean;
   livePrompts?: number;
@@ -163,6 +166,12 @@ export default function Settings({
 
       <section aria-labelledby="set-team" style={SECTION}>
         <h2 id="set-team" style={HEAD}>Team</h2>
+        {/* 8 Oct 2026 (audit security-2): membership is per account, so say who sees what before anyone is invited. */}
+        {accountClients > 1 ? (
+          <p style={{ margin: 0, borderTop: `1px solid ${T.line}`, padding: "14px 24px", fontSize: "14px", lineHeight: 1.5, color: T.ink }}>
+            {`Everyone on this team sees all ${accountClients} clients on this account, not only ${domain}.`}
+          </p>
+        ) : null}
         {members.length === 0 ? (
           <p style={{ margin: 0, padding: "18px 24px", fontSize: "14px", color: T.soft }}>No members to show.</p>
         ) : (
@@ -197,7 +206,7 @@ export default function Settings({
                       <form method="post" action={action} style={{ margin: "8px 0 0", display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "8px", textAlign: "right" }}>
                         <input type="hidden" id={`tm-rm-op-${i}`} name="op" value="remove" />
                         <input type="hidden" id={`tm-rm-email-${i}`} name="email" value={m.email} />
-                        <span style={{ fontSize: "13px", color: T.soft, maxWidth: "260px" }}>They lose access to this dashboard at once.</span>
+                        <span style={{ fontSize: "13px", color: T.soft, maxWidth: "260px" }}>{accountClients > 1 ? `They lose access to all ${accountClients} clients on this account at once.` : "They lose access to this dashboard at once."}</span>
                         <SubmitButton busy="Removing..." style={DARK}>Remove {m.name ?? m.email}</SubmitButton>
                       </form>
                     </details>

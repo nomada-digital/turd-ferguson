@@ -67,7 +67,10 @@ test("a repeat email or domain is never refused - it gets the paid order, with a
     if (r.kind !== "session") continue;
     assert.equal(r.trial, false);
     for (const k of TRIAL_KEYS) assert.equal(r.form.get(k), null, k);
-    assert.match(r.form.get("custom_text[submit][message]") ?? "", /no free trial and the first charge is today/);
+    const line = r.form.get("custom_text[submit][message]") ?? "";
+    assert.match(line, /first-time customers.*the first charge is today/);
+    // Audit security-3: the line never says which matched, so checkout cannot be used to ask who is a customer.
+    assert.doesNotMatch(line, /email|website|domain/i);
   }
 });
 

@@ -19,7 +19,8 @@ export async function readTrialRepeat(p: { email: string; website: string; scan:
   const db = supabaseAdmin();
   const email = p.email.trim().toLowerCase();
 
-  const { data: order, error: oErr } = await db.from("orders").select("stripe_session_id").ilike("email", email).limit(1);
+  // Exact (audit security-1/-3): ilike let `%@rival.com` ask whether anyone at a company had ordered.
+  const { data: order, error: oErr } = await db.from("orders").select("stripe_session_id").eq("email", email).limit(1);
   if (oErr) throw new Error(`could not read orders: ${oErr.message}`);
   if (order?.length) return "email";
 
