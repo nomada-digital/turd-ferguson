@@ -101,6 +101,83 @@ export function comparisonRange(r: Range, compare: "prev" | "month" | "none"): R
   return { from: back(r.from), to: back(r.to) };
 }
 
+/** The first week of tracking: the comparison a client too young for the previous period gets (8 Oct 2026, audit data-10). */
+export const FIRST_WEEK_DAYS = 7;
+
+export function firstWeek(startedOn: Day): Range {
+  return { from: startedOn, to: addDays(startedOn, FIRST_WEEK_DAYS - 1) };
+}
+
+export type ComparisonKind = "prev" | "month" | "start";
+
+/**
+ * The day the first week starts (8 Oct 2026, review of audit data-10): the
+ * first day a check had a prompt to ask - started_on, or the day the first
+ * prompt was added when that came later (a signup with no scan adds none, so
+ * a client can start days before anything is asked). Read from started_on
+ * and the prompts alone, which every page and the date picker hold whatever
+ * the range. It used to be the first day an answer came back, which only a
+ * page whose comparison reached back had loaded, so the picker named one
+ * first week and the page another. A first check that failed stays in the
+ * week: it is still the first week of checks.
+ */
+export function firstCheckDay(startedOn: Day | null, questions: readonly Pick<QuestionRow, "added_on" | "stopped_on">[]): Day | null {
+  if (!startedOn) return null;
+  let first: Day | null = null;
+  for (const q of questions) {
+    if (q.stopped_on !== null && q.stopped_on <= q.added_on) continue; // stopped before it was ever asked
+    const d = q.added_on > startedOn ? q.added_on : startedOn;
+    if (first === null || d < first) first = d;
+  }
+  return first ?? startedOn;
+}
+
+/**
+ * The comparison every page reads (8 Oct 2026, audit data-10). The previous
+ * period or the month before, as picked; when that reaches back before the
+ * first check (firstCheckDay, else started_on), the client's first week
+ * instead - before this, a client saw no change at all for its first 55
+ * days, the whole 14-day trial included. A range that ends inside the first
+ * week has nothing to compare yet, and says when it will. The first week may
+ * overlap the range: the change is then this period against its first seven
+ * days, which is what "vs your first week" says. Pages and the date picker
+ * (date-range.ts compareText) both call this, with the same firstCheck.
+ */
+export function resolveComparison(
+  range: Range,
+  compare: "prev" | "month" | "none",
+  startedOn: Day | null,
+  firstCheck?: Day | null,
+): { range: Range | null; kind: ComparisonKind | null; hidden: string | null } {
+  const c = comparisonRange(range, compare);
+  if (!c || compare === "none") return { range: null, kind: null, hidden: null };
+  const start = startedOn && firstCheck && firstCheck > startedOn ? firstCheck : startedOn;
+  if (!startedOn || !start || c.from >= start) return { range: c, kind: compare, hidden: null };
+  const first = firstWeek(start);
+  if (first.to < range.to) return { range: first, kind: "start", hidden: null };
+  return {
+    range: null,
+    kind: null,
+    hidden: `Tracking began ${formatDay(startedOn)}, so there is no earlier period to compare with yet. From ${formatDay(addDays(first.to, 1))} the changes are against your first week.`,
+  };
+}
+
+/**
+ * "45% this period, 43% the one before" under a figure (8 Oct 2026, review of
+ * audit data-10): against the first week the second rate is "in your first
+ * week" - that week can sit inside this period, so "the one before" called
+ * seven of its own days an earlier period.
+ */
+export function periodPair(now: Rate, before: Rate | null, kind: ComparisonKind | null): string {
+  const p = (r: Rate) => (r.pct === null ? "-" : `${r.pct}%`);
+  return before ? `${p(now)} this period, ${p(before)} ${kind === "start" ? "in your first week" : "the one before"}` : `${p(now)} this period`;
+}
+
+/** "vs 5 Aug - 1 Sep", or "vs your first week, 20 Sep - 26 Sep" - the comparison as a chip or a date face says it. */
+export function comparisonLabel(c: Range, kind: ComparisonKind | null): string {
+  return `vs ${kind === "start" ? "your first week, " : ""}${formatDay(c.from)} - ${formatDay(c.to)}`;
+}
+
 const within = (d: Day, r: Range) => d >= r.from && d <= r.to;
 
 /** A question is live on a day from `added_on` up to the day before `stopped_on`. */
@@ -133,11 +210,11 @@ export function ungroupedRead(questions: readonly { id: string; cluster_id?: str
 }
 
 /** Questions with at least one named answer, of the questions with any answer in the range. */
-export function questionsNamed(rows: AnswerRow[], r: Range): Rate {
+export function questionsNamed(rows: AnswerRow[], r: Range, only?: Set<string>): Rate {
   const asked = new Set<string>();
   const named = new Set<string>();
   for (const a of rows) {
-    if (!a.answered || !within(a.run_date, r)) continue;
+    if (!a.answered || !within(a.run_date, r) || (only && !only.has(a.question_id))) continue;
     asked.add(a.question_id);
     if (a.named) named.add(a.question_id);
   }
@@ -150,11 +227,11 @@ export function questionsNamed(rows: AnswerRow[], r: Range): Rate {
  * mention, the same unit as one other brand in one answer. An answer whose
  * other brands were not read counts on neither side (brandsRead).
  */
-export function shareOfVoice(rows: AnswerRow[], r: Range): Rate & { rank: number | null; brands: number } {
+export function shareOfVoice(rows: AnswerRow[], r: Range, only?: Set<string>): Rate & { rank: number | null; brands: number } {
   const counts = new Map<string, number>();
   let mine = 0;
   for (const a of rows) {
-    if (!a.answered || !brandsRead(a) || !within(a.run_date, r)) continue;
+    if (!a.answered || !brandsRead(a) || !within(a.run_date, r) || (only && !only.has(a.question_id))) continue;
     if (a.named) mine++;
     // R143 (1 Oct 2026): spellings fold by the scan's brandKey, as brandBoard's rows do.
     for (const b of a.brands) counts.set(brandKey(b), (counts.get(brandKey(b)) ?? 0) + 1);
@@ -165,17 +242,37 @@ export function shareOfVoice(rows: AnswerRow[], r: Range): Rate & { rank: number
   return { ...rate(mine, total), rank, brands: others.length + (mine ? 1 : 0) };
 }
 
-/** Keywords whose latest reading in the range is on page 1 (position 1-10), and their average position. */
-export function keywordsOnPage1(rows: SerpRow[], r: Range, keywords: number): Rate & { avg: number | null } {
+/**
+ * Where a keyword outside the top 20 counts in an average position (8 Oct
+ * 2026, audit data-7): one place below the deepest read (SERP_DEPTH, 20 -
+ * figures.test.mts holds the two together; not imported, as this file is in
+ * the date picker's client bundle), so a keyword dropping out makes the
+ * average worse. Averaging the ranked ones only made a drop from #13 to
+ * unranked read as an improvement.
+ */
+export const UNRANKED_AS = 21;
+
+/** The average of keyword positions with an unranked one counted as UNRANKED_AS, to one decimal; null with none read. */
+export function averagePosition(positions: readonly (number | null)[]): number | null {
+  if (!positions.length) return null;
+  return Math.round((positions.reduce<number>((s, p) => s + (p ?? UNRANKED_AS), 0) / positions.length) * 10) / 10;
+}
+
+/**
+ * Keywords whose latest reading in the range is on page 1 (position 1-10), and
+ * the average position of every keyword read, an unranked one counted as
+ * UNRANKED_AS (`unranked` says how many). `only` narrows to those keyword ids.
+ */
+export function keywordsOnPage1(rows: SerpRow[], r: Range, keywords: number, only?: Set<string>): Rate & { avg: number | null; ranked: number; unranked: number } {
   const latest = new Map<string, SerpRow>();
   for (const s of rows) {
-    if (!within(s.run_date, r)) continue;
+    if (!within(s.run_date, r) || (only && !only.has(s.keyword_id))) continue;
     const prev = latest.get(s.keyword_id);
     if (!prev || s.run_date > prev.run_date) latest.set(s.keyword_id, s);
   }
-  const ranked = [...latest.values()].map((s) => s.position).filter((p): p is number => p !== null);
-  const avg = ranked.length ? Math.round((ranked.reduce((s, p) => s + p, 0) / ranked.length) * 10) / 10 : null;
-  return { ...rate(ranked.filter((p) => p <= 10).length, keywords), avg };
+  const positions = [...latest.values()].map((s) => s.position);
+  const ranked = positions.filter((p): p is number => p !== null);
+  return { ...rate(ranked.filter((p) => p <= 10).length, keywords), avg: averagePosition(positions), ranked: ranked.length, unranked: positions.length - ranked.length };
 }
 
 /** Every daily check by engine: per day, the share of that engine's answered questions that named the client. Null where no check ran. */
@@ -198,6 +295,8 @@ export function checkGrid(rows: AnswerRow[], r: Range, engines: readonly string[
 export type Overview = {
   range: Range;
   compare: Range | null;
+  /** What `compare` is: the period picked, or "start", the first week standing in for one before tracking began. */
+  compareKind: ComparisonKind | null;
   /** Why the comparison is hidden, when it reaches before tracking began. */
   compareHidden: string | null;
   named: Rate;
@@ -210,6 +309,21 @@ export type Overview = {
   sovBefore: Rate | null;
   keywords: ReturnType<typeof keywordsOnPage1>;
   keywordsBefore: Rate | null;
+  /**
+   * Every key figure's change, like-for-like (8 Oct 2026, audit data-4): the
+   * figure itself counts everything in the range, but its change counts only
+   * prompts (or keywords) tracked all of both periods, so a prompt added
+   * mid-range never reads as a gain. "40 of 45, was 37 of 40" was really
+   * no change. Null without a comparison.
+   */
+  change: {
+    named: number | null;
+    /** Prompts named in, on the like-for-like prompts, now and before. */
+    questions: { now: Rate; before: Rate } | null;
+    sov: number | null;
+    /** Keywords on page 1, on the keywords tracked all of both periods; null without keyword rows. */
+    keywords: { now: number; before: number; of: number } | null;
+  } | null;
   grid: Record<string, (Rate | null)[]>;
 };
 
@@ -222,30 +336,49 @@ export function overview(input: {
   answers: AnswerRow[];
   serp: SerpRow[];
   keywordCount: number;
+  /** The keyword rows, for the page-1 change like-for-like; without them that change is not given. */
+  keywords?: readonly { id: string; added_on: Day; stopped_on: Day | null }[];
 }): Overview {
   const { range, answers, serp } = input;
-  let compare = comparisonRange(range, input.compare);
-  let compareHidden: string | null = null;
-  if (compare && input.startedOn && compare.from < input.startedOn) {
-    compareHidden = `Tracking began ${formatDay(input.startedOn)}, so there is no earlier period to compare with.`;
-    compare = null;
-  }
-  const lflIds = compare
-    ? new Set(input.questions.filter((q) => liveThroughout(q, { from: compare!.from, to: range.to })).map((q) => q.id))
+  const resolved = resolveComparison(range, input.compare, input.startedOn, firstCheckDay(input.startedOn, input.questions));
+  const compare = resolved.range;
+  const compareHidden = resolved.hidden;
+  // Like-for-like: live from the comparison's first day to the range's last (BRIEF decision 8).
+  const lflFrom = compare ? compare.from : null;
+  const lflIds = compare && lflFrom
+    ? new Set(input.questions.filter((q) => liveThroughout(q, { from: lflFrom, to: range.to })).map((q) => q.id))
     : null;
+  const lflKw = compare && lflFrom && input.keywords ? new Set(input.keywords.filter((k) => liveThroughout(k, { from: lflFrom, to: range.to })).map((k) => k.id)) : null;
+  const lfl = compare && lflIds ? { questions: lflIds.size, now: namedRate(answers, range, lflIds), before: namedRate(answers, compare, lflIds) } : null;
+  let change: Overview["change"] = null;
+  if (compare && lflIds && lfl) {
+    const qNow = questionsNamed(answers, range, lflIds);
+    const qBefore = questionsNamed(answers, compare, lflIds);
+    const kNow = lflKw ? keywordsOnPage1(serp, range, lflKw.size, lflKw) : null;
+    const kBefore = lflKw ? keywordsOnPage1(serp, compare, lflKw.size, lflKw) : null;
+    const read = (k: ReturnType<typeof keywordsOnPage1> | null) => !!k && k.ranked + k.unranked > 0;
+    change = {
+      named: pointsDelta(lfl.now, lfl.before),
+      questions: qNow.den && qBefore.den ? { now: qNow, before: qBefore } : null,
+      sov: pointsDelta(shareOfVoice(answers, range, lflIds), shareOfVoice(answers, compare, lflIds)),
+      keywords: lflKw && read(kNow) && read(kBefore) ? { now: kNow!.num, before: kBefore!.num, of: lflKw.size } : null,
+    };
+  }
   return {
     range,
     compare,
+    compareKind: resolved.kind,
     compareHidden,
     named: namedRate(answers, range),
     namedBefore: compare ? namedRate(answers, compare) : null,
-    lfl: compare && lflIds ? { questions: lflIds.size, now: namedRate(answers, range, lflIds), before: namedRate(answers, compare, lflIds) } : null,
+    lfl,
     questions: questionsNamed(answers, range),
     questionsBefore: compare ? questionsNamed(answers, compare) : null,
     sov: shareOfVoice(answers, range),
     sovBefore: compare ? shareOfVoice(answers, compare) : null,
     keywords: keywordsOnPage1(serp, range, input.keywordCount),
     keywordsBefore: compare ? keywordsOnPage1(serp, compare, input.keywordCount) : null,
+    change,
     grid: checkGrid(answers, range, input.engines),
   };
 }

@@ -10,13 +10,15 @@ import {
   type Day,
   type Range,
   type Rate,
+  UNRANKED_AS,
   addDays,
   basis as basisLine,
-  brandBoard,
   brandGaps,
   citedPages,
+  comparisonLabel,
   dailySeries,
   daysIn,
+  firstCheckDay,
   formatDay,
   keywordRows,
   movers,
@@ -26,11 +28,12 @@ import {
   sparkPoints,
   ungroupedRead,
 } from "@/lib/tracking/figures";
-import { type ClusterCard, clusterCards, clusterChart, clusterSummary, pendingBasis } from "@/lib/tracking/cluster-figures";
+import { type ClusterCard, clusterCards, clusterChart, clusterSummary, keyFigureChanges, pendingBasis } from "@/lib/tracking/cluster-figures";
 import { rangeLabel } from "@/lib/tracking/date-range";
+import { whoIsNamedCard } from "@/lib/tracking/named-figures";
 import type { Compare, OverviewData } from "@/lib/tracking/overview-data";
 import { type PlacementRow, chartMarkers } from "@/lib/tracking/placement-figures";
-import { MISSING_READS, brandGapNote, lostReads } from "@/lib/tracking/run-note";
+import { MISSING_READS, brandGapNote, failedTodayNote, lostReads, runNote, todayRun } from "@/lib/tracking/run-note";
 
 import ClusterChart from "./ClusterChart";
 import DatePicker from "./DatePicker";
@@ -162,7 +165,10 @@ export default function Overview({
   clusterLimit?: number;
 }) {
   const where = market === "UK" ? "the United Kingdom" : "the United States";
-  const o = overview({ range, compare: compareMode, startedOn, engines, questions: data.questions, answers: data.answers, serp: data.serp, keywordCount: keywordsIn(data.keywords, range) });
+  const o = overview({ range, compare: compareMode, startedOn, engines, questions: data.questions, answers: data.answers, serp: data.serp, keywordCount: keywordsIn(data.keywords, range), keywords: data.keywords });
+  // 8 Oct 2026 (audit data-10): a young client's comparison is its first week, and the charts draw no dashed
+  // "same day last period" line for it - a week laid over the range's first seven days would read as a period it is not.
+  const chartBefore = o.compareKind === "start" ? null : o.compare;
   // BRIEF-3 T4b part 3 (30 Sep 2026): the headline, heat map and four figures
   // read by cluster (boards-3/Main.dc.html). A client with no cluster rows yet
   // keeps the flat T4 reading rather than print 0 of 0. `?.` because
@@ -175,7 +181,8 @@ export default function Overview({
   const cs = cards ? clusterSummary(cards) : null;
   // T4b part 5b: the picked card (?cluster=) sets the chart; the first card by default, as the board opens on c1.
   const picked = cards ? (cards.find((c) => c.id === selected) ?? cards[0]!) : null;
-  const pickedChart = clusterInput && picked ? clusterChart(clusterInput, picked.id) : null;
+  const drawn = clusterInput && picked ? clusterChart(clusterInput, picked.id) : null;
+  const pickedChart = drawn && !chartBefore ? { ...drawn, namedBefore: null, googleBefore: null } : drawn;
   const rangeQuery = { from: range.from, to: range.to, ...(compareMode === "prev" ? {} : { compare: compareMode }) };
   const clusterHref = (id: string) => `?${new URLSearchParams({ ...rangeQuery, cluster: id })}`;
   // R132 (Danny, 30 Sep 2026, danny.md 121): a cluster card opens its one-cluster page (T7) and a
@@ -199,7 +206,7 @@ export default function Overview({
     : picked.status === "pending"
       ? "First check tomorrow at 06:00."
       : `${pct(picked.now)} named, ${picked.position === null ? (picked.keyword ? "no Google position" : "no keyword yet") : `#${picked.position} on Google`}.` +
-        (pickedHasPrev && o.compare ? ` Dashed: ${span(o.compare)}` : ` Tracked from ${formatDay(picked.started_on)}.`);
+        (pickedHasPrev && chartBefore ? ` Dashed: ${span(chartBefore)}` : ` Tracked from ${formatDay(picked.started_on)}.`);
   const heatRows = cards ? cards.filter((c) => c.status !== "pending") : [];
   const pendingKeywords = cards ? cards.filter((c) => c.status === "pending" && c.keyword).length : 0;
   // R148 pass 7 (1 Oct 2026): "set up" includes prompts whose first check is tomorrow - on day zero that is all of them.
@@ -232,7 +239,7 @@ export default function Overview({
         </a>
       ) : null}
       {/* T5 (30 Sep 2026): the face is drawn here, on the server, so JS off still shows the range; DatePicker opens boards/DatePicker.dc.html on it. */}
-      <DatePicker range={range} compare={compareMode} today={today} startedOn={startedOn}>
+      <DatePicker range={range} compare={compareMode} today={today} startedOn={startedOn} firstCheck={firstCheckDay(startedOn, data.questions)}>
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={T.ink} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <rect x="3" y="5" width="18" height="16" rx="2" />
           <path d="M3 10h18M8 3v4M16 3v4" />
@@ -248,7 +255,7 @@ export default function Overview({
           <span style={{ fontSize: "14px", fontWeight: 700 }}>{rangeLabel(range, today, startedOn)}</span>
           <span style={{ fontSize: "12px", color: T.soft }}>
             {span(range, true)}
-            {o.compare ? `, vs ${span(o.compare)}` : ""}
+            {o.compare ? `, ${comparisonLabel(o.compare, o.compareKind)}` : ""}
           </span>
         </span>
       </DatePicker>
@@ -265,20 +272,33 @@ export default function Overview({
     </header>
   );
 
+  // 8 Oct 2026 (audit data-3 / reliability-3): today's run of any status. A failed one read "Nothing from
+  // today's check yet", and one still queued or running read the same as one not yet started.
+  const todays = todayRun(data.runs, today);
+  // The range's lost checks - partial or failed days, whose reads every figure leaves out - in one note under
+  // the line; a failed today is the line's own, so the note leaves it out.
+  // Review of audit data-3 (8 Oct 2026): the failed-today line says where the figures run to, so only on a
+  // range that ends today - an earlier range gets an aside after "Last checked". A failed run can have stored
+  // its answers first (runner.ts), which every figure then counts; run-note.ts reads which it was.
+  const failed = failedTodayNote(data, range, today);
+  const lostNote = runNote(data, range, today, { skipToday: !!failed?.line });
   // R151 (1 Oct 2026): a partial run (decide.ts runOutcome - some reads failed after the retry)
-  // said "Checked today" like a whole one. The figures skip an unanswered read, so say so.
+  // said "Checked today" like a whole one. The figures skip an unanswered read, so say so - in the note when there is one.
   // 8 Oct 2026: not for a run partial only because brand extraction failed - no read was lost;
-  // the Who is named instead panel says what was (brandGapNote).
-  const missing = lostReads(data.lastRun) ? ` ${MISSING_READS}` : "";
-  const checked = data.lastRun?.finished_at
-    ? data.lastRun.run_date === today
-      ? `Checked today at ${londonTime(data.lastRun.finished_at)}.${missing} ${ended ? "Tracking has ended, so this was the last check." : liveQuestions ? "Next check tomorrow at 06:00." : "No more checks until a cluster has prompts."}`
-      : `Last checked ${formatDay(data.lastRun.run_date)} at ${londonTime(data.lastRun.finished_at)}.${missing} ${ended ? "Tracking has ended, so no more checks run." : !liveQuestions ? "No more checks until a cluster has prompts." : range.to === today ? "Nothing from today's check yet, so today is blank." : "Next check at 06:00."}`
-    : firstCheckLine;
+  // the Who is named instead panel says what was (brandGapNote), and runNote leaves it out too (runLostReads).
+  const missing = lostReads(data.lastRun) && !lostNote ? ` ${MISSING_READS}` : "";
+  const nextLine = ended ? "Tracking has ended, so no more checks run." : liveQuestions ? "Next check tomorrow at 06:00." : "No more checks until a cluster has prompts.";
+  const checked = failed?.line
+    ? `${failed.line} ${nextLine}`
+    : data.lastRun?.finished_at
+      ? data.lastRun.run_date === today
+        ? `Checked today at ${londonTime(data.lastRun.finished_at)}.${missing} ${ended ? "Tracking has ended, so this was the last check." : liveQuestions ? "Next check tomorrow at 06:00." : "No more checks until a cluster has prompts."}`
+        : `Last checked ${formatDay(data.lastRun.run_date)} at ${londonTime(data.lastRun.finished_at)}.${missing} ${ended ? "Tracking has ended, so no more checks run." : !liveQuestions ? "No more checks until a cluster has prompts." : range.to === today ? (todays && todays.status !== "complete" && todays.status !== "partial" ? "Today's check has not finished yet, so today is blank." : "Nothing from today's check yet, so today is blank.") : failed?.aside ? `${failed.aside} Next check tomorrow at 06:00.` : "Next check at 06:00."}`
+      : firstCheckLine;
   // Mobile.dc.html: "Checked today at 06:10", nothing after it. DS8 (2 Oct 2026, R172 pass 1): a
   // partial run is not on the board, and "some reads missing" alone left the phone guessing what
   // it meant for the figures, so the phone says the same sentence the desktop line does.
-  const checkedShort = data.lastRun?.finished_at && data.lastRun.run_date === today ? `Checked today at ${londonTime(data.lastRun.finished_at)}${missing ? `.${missing}` : ""}` : null;
+  const checkedShort = failed?.line ? failed.line : data.lastRun?.finished_at && data.lastRun.run_date === today ? `Checked today at ${londonTime(data.lastRun.finished_at)}${missing ? `.${missing}` : ""}` : null;
 
   if (!hasData) {
     // R148 pass 7 (1 Oct 2026): only a start that has happened "began" - on day zero it starts tomorrow, and said "Tracking began" with tomorrow's date.
@@ -321,7 +341,20 @@ export default function Overview({
   const fig = byCluster
     ? { now: byCluster.now, promptsNamed: byCluster.promptsNamed, promptsNamedBefore: byCluster.promptsNamedBefore, never: byCluster.never.length }
     : { now: o.named, promptsNamed: o.questions, promptsNamedBefore: o.questionsBefore && o.questionsBefore.den ? o.questionsBefore : null, never: o.questions.den - o.questions.num };
-  const lflDelta = byCluster ? byCluster.lflDelta : o.lfl ? pointsDelta(o.lfl.now, o.lfl.before) : null;
+  // 8 Oct 2026 (audit data-4): every key figure's chip is its like-for-like change, as the headline's is
+  // (cluster-figures.ts keyFigureChanges, where the rule and its tests live).
+  const chg = keyFigureChanges(o, cs, byCluster);
+  const lflDelta = chg.named;
+  const promptsChange = chg.promptsLine;
+  const lflWhat = byCluster ? "clusters" : "prompts";
+  const changeCaption = o.compare
+    ? o.compareKind === "start"
+      ? `Every change is like-for-like, against your first week (${span(o.compare)}): it counts only the ${lflWhat} tracked since then.`
+      : `Every change is like-for-like: it counts only the ${lflWhat} tracked all of this period and ${span(o.compare)}.`
+    : null;
+  // An average position counts a keyword outside the top 20 as #21 (audit data-7), and says so.
+  const avgLine = (k: { avg: number | null; ranked: number; unranked: number }) =>
+    !k.ranked ? "No keyword in the top 20 yet" : `Average position ${k.avg}${k.unranked ? `; the ${k.unranked} outside the top 20 count${k.unranked === 1 ? "s" : ""} as #${UNRANKED_AS}` : ""}`;
   const gridDays = daysIn(range).slice(-28);
   const gridFrom = daysIn(range).length - gridDays.length;
   // DS77 (2 Oct 2026, R173 pass 13, failed cold read): a day with no reading after a cluster started
@@ -335,18 +368,33 @@ export default function Overview({
   const subLine = cs
     ? `${fig.now.num.toLocaleString("en-GB")} of ${fig.now.den.toLocaleString("en-GB")} answers across ${across}${loose && !cs.clusters ? "" : `, ${byCluster ? byCluster.prompts : questionsAnswered} prompts`} and ${WORDS[engines.length] ?? engines.length} engines.`
     : `${o.named.num.toLocaleString("en-GB")} of ${o.named.den.toLocaleString("en-GB")} answers across ${questionsAnswered} prompts and ${WORDS[engines.length] ?? engines.length} engines.`;
+  // Audit data-10 (8 Oct 2026): against the first week, "all period" is since tracking began.
+  const allPeriod = o.compareKind === "start" ? "since your first week" : "all period";
+  const inBefore = o.compareKind === "start" ? " in your first week" : "";
   const lflLine = byCluster
     ? byCluster.lflBefore && lflDelta !== null
-      ? ` On the ${byCluster.clustersLfl} cluster${byCluster.clustersLfl === 1 ? "" : "s"} tracked all period that's ${pct(byCluster.lfl)}, ${direction(lflDelta)} ${pct(byCluster.lflBefore)}.`
+      ? ` On the ${byCluster.clustersLfl} cluster${byCluster.clustersLfl === 1 ? "" : "s"} tracked ${allPeriod} that's ${pct(byCluster.lfl)}, ${direction(lflDelta)} ${pct(byCluster.lflBefore)}${inBefore}.`
       : ""
     : o.lfl && lflDelta !== null
-      ? ` On the ${o.lfl.questions} prompts tracked all period that's ${pct(o.lfl.now)}, ${direction(lflDelta)} ${pct(o.lfl.before)}.`
+      ? ` On the ${o.lfl.questions} prompts tracked ${allPeriod} that's ${pct(o.lfl.now)}, ${direction(lflDelta)} ${pct(o.lfl.before)}${inBefore}.`
       : "";
+  // The prompts tracked from the comparison's first day to the range's last: like-for-like when not by cluster.
+  const lflIds = o.compare ? new Set(data.questions.filter((q) => q.added_on <= o.compare!.from && (q.stopped_on === null || q.stopped_on > range.to)).map((q) => q.id)) : null;
+  // Audit ia-3 (8 Oct 2026): the brand named in most of the headline's own answers, on the headline's basis.
+  // Review of audit ia-3 (8 Oct 2026): the card below and this line read the headline's own answers - by
+  // cluster, the prompts of the clusters with readings - and the card's change the headline's like-for-like ones.
+  const who = whoIsNamedCard({ answers: data.answers, range, before: o.compare, you: brand, only: byCluster ? byCluster.ids : null, lfl: byCluster ? byCluster.lflIds : lflIds });
+  const leader = [...who.page.rows].sort((x, y) => y.answers - x.answers)[0];
+  // Merge of audit packages A and B (8 Oct 2026): the card is a brand figure, so on a range whose other brands
+  // were not all read (figures.ts brandsRead) the leader's share is of the answers that were, and says so.
+  const leaderOf = who.page.answers === fig.now.den ? "the same answers" : `the ${who.page.answers.toLocaleString("en-GB")} of them whose other brands were read`;
+  const leaderLine = !leader || !leader.answers ? "" : leader.you ? " No other brand was named in more of them." : ` ${leader.name} was named in ${pct(leader.reach)} of ${leaderOf}.`;
 
   // ---- 3. chart ----
   const toChart = (days: ReturnType<typeof dailySeries>): ChartDay[] => days.map((d) => ({ label: formatDay(d.day), all: d.all, by: d.by }));
-  const lflIds = o.compare ? new Set(data.questions.filter((q) => q.added_on <= o.compare!.from && (q.stopped_on === null || q.stopped_on > range.to)).map((q) => q.id)) : null;
-  const addedMid = data.questions.filter((q) => q.added_on > range.from && q.added_on <= range.to);
+  // Left out of like-for-like: added after the comparison began (audit data-10: for a young client that is its
+  // first day, so the prompts it began with are not "added mid-range").
+  const addedMid = data.questions.filter((q) => q.added_on > (o.compare ? o.compare.from : range.from) && q.added_on <= range.to);
   const lflNote =
     o.lfl && addedMid.length
       ? `Like-for-like leaves out the ${addedMid.length === 1 ? "prompt" : `${addedMid.length} prompts`} added on ${[...new Set(addedMid.map((q) => formatDay(q.added_on)))].join(", ")}.`
@@ -363,15 +411,20 @@ export default function Overview({
 
   // ---- 4 and 5 ----
   const moved = movers(data.answers, range, o.compare);
-  const board = brandBoard(data.answers, range, o.compare, brand);
-  // 8 Oct 2026 (audit data-6): answers whose other brands were not read are out of the board and share of voice.
-  const gaps = brandGaps(data.answers, range);
+  // Audit ia-3 (8 Oct 2026): "Who is named instead" on the headline's basis - answers naming each brand, of
+  // the headline's answers - from Who is named's own rows (named-figures.ts whoIsNamedCard), so the two pages
+  // cannot drift. Its share of every brand mention set a trailing client's 10% beside a leader's 22%, under a
+  // headline of 27%. The change is like-for-like, as every chip on the page.
+  const whoPage = who.page;
+  const whoLfl = who.change;
+  const board = [...whoPage.rows].filter((r) => r.answers > 0).sort((x, y) => y.answers - x.answers);
+  // 8 Oct 2026 (audit data-6): answers whose other brands were not read are out of the card and share of voice.
+  // Merge of audit packages A and B (8 Oct 2026): counted on the card's own answers - the headline's prompts -
+  // so the card's answers and the note's add up to the headline's.
+  const gaps = brandGaps(byCluster ? data.answers.filter((a) => byCluster.ids.has(a.question_id)) : data.answers, range);
   const gapNote = brandGapNote(gaps);
-  const brandAnswers = o.named.den - gaps.reduce((s, g) => s + g.answers, 0);
   const top = board.slice(0, 5);
   const rest = board.slice(5);
-  const restShare = rest.reduce((s, b) => s + b.share.num, 0);
-  const brandTotal = board.reduce((s, b) => s + b.share.num, 0);
   const kwRows = keywordRows(data.serp, { from: addDays(range.to, -27) < range.from ? range.from : addDays(range.to, -27), to: range.to });
   const pages = citedPages(data.answers, range, domain);
 
@@ -385,8 +438,11 @@ export default function Overview({
     const mine = cards ? data.questions.filter((q) => (q.cluster_id ?? null) === null) : data.questions;
     const ids = cards ? new Set(mine.map((q) => q.id)) : undefined;
     const rateNow = cards ? namedRate(data.answers, range, ids) : o.named;
-    const looseBefore = cards && o.compare ? namedRate(data.answers, o.compare, ids) : null;
-    const rateBefore = cards ? (looseBefore?.den ? looseBefore : null) : o.namedBefore;
+    // Audit data-4 (8 Oct 2026): the chip is like-for-like, on these prompts tracked all of both periods.
+    const same = lflIds ? (ids ? new Set([...ids].filter((id) => lflIds.has(id))) : lflIds) : null;
+    const sameNow = same && o.compare ? namedRate(data.answers, range, same) : null;
+    const sameBefore = same && o.compare ? namedRate(data.answers, o.compare, same) : null;
+    const change = sameNow && sameBefore?.den ? pointsDelta(sameNow, sameBefore) : null;
     const live = mine.filter((q) => q.stopped_on === null && q.added_on <= today);
     // R151 (3 Oct 2026): Clusters lists these too ("Ungrouped prompts 50"), so a card saying
     // 45 read as five prompts gone missing between the two pages.
@@ -408,7 +464,7 @@ export default function Overview({
             <Fig style={{ fontSize: "20px", fontWeight: 700, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" }} def={basisLine(rateNow, "answers")}>
               {pct(rateNow)}
             </Fig>
-            <Chip value={pointsDelta(rateNow, rateBefore)} unit=" pts" none="New" />
+            <Chip value={change} unit=" pts" none={o.compare ? "New" : ""} />
           </div>
         </div>
         <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: "4px" }}>
@@ -462,38 +518,37 @@ export default function Overview({
               </h2>
               <SeeAll card="Who is named instead" clientPath={clientPath} keep={new URLSearchParams(rangeQuery).toString()} />
             </div>
-            <p style={{ margin: 0, fontSize: "14px", color: T.soft }}>Share of every brand mention across your prompts.</p>
+            <p style={{ margin: 0, fontSize: "14px", color: T.soft }}>{`The share of the ${whoPage.answers.toLocaleString("en-GB")} answers to your prompts that name each brand.`}</p>
             {gapNote ? <p style={{ margin: 0, fontSize: "13px", lineHeight: 1.5, color: T.soft }}>{gapNote}</p> : null}
           </div>
           <ol style={{ listStyle: "none", margin: 0, padding: "0 0 8px" }}>
             {top.map((b, i) => (
-              <li key={b.name} className="app-brand" style={{ display: "grid", gridTemplateColumns: "20px minmax(0, 1fr) 72px 40px 78px", gap: "12px", alignItems: "center", padding: "10px 24px", background: b.you ? T.wash : undefined }}>
+              <li key={b.key} className="app-brand" style={{ display: "grid", gridTemplateColumns: "20px minmax(0, 1fr) 72px 40px 78px", gap: "12px", alignItems: "center", padding: "10px 24px", background: b.you ? T.wash : undefined }}>
                 <span style={{ fontSize: "13px", color: T.soft, fontVariantNumeric: "tabular-nums" }}>{i + 1}</span>
                 <span style={{ fontSize: "14px", fontWeight: b.you ? 700 : 500, color: b.you ? T.accent : T.ink, overflowWrap: "anywhere" }}>{b.name}</span>
                 <span aria-hidden="true" className="app-hide-sm" style={{ height: "6px", borderRadius: "999px", background: T.hair }}>
-                  <span style={{ display: "block", height: "100%", width: `${Math.round(((b.share.num || 0) / (top[0]!.share.num || 1)) * 100)}%`, borderRadius: "999px", background: b.you ? T.accent : T.faint }} />
+                  <span style={{ display: "block", height: "100%", width: `${Math.round(((b.answers || 0) / (top[0]!.answers || 1)) * 100)}%`, borderRadius: "999px", background: b.you ? T.accent : T.faint }} />
                 </span>
-                <Fig style={{ fontSize: "14px", fontWeight: 600, fontVariantNumeric: "tabular-nums", textAlign: "right" }} def={basisLine(b.share, "mentions")}>
-                  {pct(b.share)}
+                <Fig style={{ fontSize: "14px", fontWeight: 600, fontVariantNumeric: "tabular-nums", textAlign: "right" }} def={basisLine(b.reach, "answers")}>
+                  {pct(b.reach)}
                 </Fig>
                 <span style={{ display: "flex", justifyContent: "flex-end" }}>
-                  <Delta value={b.delta} />
+                  <Delta value={whoLfl?.get(b.key) ?? null} />
                 </span>
               </li>
             ))}
             {rest.length ? (
               <li className="app-brand" style={{ display: "grid", gridTemplateColumns: "20px minmax(0, 1fr) 72px 40px 78px", gap: "12px", alignItems: "center", padding: "10px 24px" }}>
                 <span />
-                <span style={{ fontSize: "14px", color: T.soft }}>{`${rest.length} other${rest.length === 1 ? "" : "s"}`}</span>
-                <span aria-hidden="true" className="app-hide-sm" style={{ height: "6px", borderRadius: "999px", background: T.hair }}>
-                  <span style={{ display: "block", height: "100%", width: `${Math.min(100, Math.round((restShare / (top[0]!.share.num || 1)) * 100))}%`, borderRadius: "999px", background: T.faint }} />
-                </span>
-                <span style={{ fontSize: "14px", fontWeight: 600, fontVariantNumeric: "tabular-nums", textAlign: "right" }}>{brandTotal ? `${Math.round((restShare / brandTotal) * 100)}%` : "-"}</span>
+                {/* One answer can name several brands, so the others' shares do not add up to a share of their own. */}
+                <span style={{ fontSize: "14px", color: T.soft }}>{`${rest.length} other${rest.length === 1 ? "" : "s"}, each named in ${pct(rest[0]!.reach)} or fewer`}</span>
+                <span />
+                <span />
                 <span />
               </li>
             ) : null}
           </ol>
-          <p style={{ margin: 0, padding: "4px 24px 20px", fontSize: "13px", color: T.soft }}>{`${board.length} brand${board.length === 1 ? " was" : "s were"} named across ${brandAnswers.toLocaleString("en-GB")} answers.`}</p>
+          <p style={{ margin: 0, padding: "4px 24px 20px", fontSize: "13px", color: T.soft }}>{`${board.length} brand${board.length === 1 ? " was" : "s were"} named across ${whoPage.answers.toLocaleString("en-GB")} answers.${whoLfl ? " Changes are like-for-like." : ""}`}</p>
         </section>
   );
   const keywordsCard = (
@@ -593,6 +648,8 @@ export default function Overview({
               checked
             )}
           </div>
+          {/* Audit data-3 (8 Oct 2026): earlier partial or failed checks in the range, whose reads every figure below leaves out. */}
+          {lostNote ? <p style={{ margin: 0, fontSize: "13px", lineHeight: 1.5, color: D.cardHead, maxWidth: "520px" }}>{lostNote}</p> : null}
           <h2 style={{ margin: 0, fontSize: cs ? "36px" : "40px", lineHeight: 1.12, fontWeight: 700, letterSpacing: "-0.03em", maxWidth: "520px" }} className={cs ? "app-headline-h app-hide-sm" : "app-headline-h"}>
             {brand} was named in <span data-figure="headline-named">{pct(headlineRate)}</span> of AI answers
           </h2>
@@ -604,13 +661,14 @@ export default function Overview({
           ) : null}
           <p className={cs ? "app-hide-sm" : undefined} style={{ margin: 0, fontSize: cs ? "15px" : "16px", lineHeight: 1.55, color: D.cardHead, maxWidth: "500px" }}>
             {subLine}
+            {leaderLine}
             {lflLine}
             {o.compareHidden ? ` ${o.compareHidden}` : ""}
           </p>
           {cs ? (
             <p className="app-show-sm" style={{ margin: 0, fontSize: "14px", lineHeight: 1.5, color: D.cardHead }}>
               {`${fig.now.num.toLocaleString("en-GB")} of ${fig.now.den.toLocaleString("en-GB")} answers across ${across}.`}
-              {byCluster ? (byCluster.lflBefore && lflDelta !== null ? ` Like-for-like ${pct(byCluster.lfl)}, ${direction(lflDelta)} ${pct(byCluster.lflBefore)}.` : "") : o.lfl && lflDelta !== null ? ` Like-for-like ${pct(o.lfl.now)}, ${direction(lflDelta)} ${pct(o.lfl.before)}.` : ""}
+              {byCluster ? (byCluster.lflBefore && lflDelta !== null ? ` Like-for-like ${pct(byCluster.lfl)}, ${direction(lflDelta)} ${pct(byCluster.lflBefore)}${inBefore}.` : "") : o.lfl && lflDelta !== null ? ` Like-for-like ${pct(o.lfl.now)}, ${direction(lflDelta)} ${pct(o.lfl.before)}${inBefore}.` : ""}
             </p>
           ) : null}
           {o.compare ? (
@@ -620,7 +678,7 @@ export default function Overview({
                   {lflDelta === 0 ? "No change" : `${lflDelta > 0 ? "+" : "−"}${Math.abs(lflDelta)} pts`} like-for-like
                 </span>
               ) : null}
-              <span style={{ display: "inline-flex", alignItems: "center", padding: "4px 10px", borderRadius: "999px", background: D.fieldLine, color: D.cardHead, fontSize: "13px", fontWeight: 500 }}>vs {span(o.compare)}</span>
+              <span style={{ display: "inline-flex", alignItems: "center", padding: "4px 10px", borderRadius: "999px", background: D.fieldLine, color: D.cardHead, fontSize: "13px", fontWeight: 500 }}>{comparisonLabel(o.compare, o.compareKind)}</span>
             </div>
           ) : null}
         </div>
@@ -755,21 +813,21 @@ export default function Overview({
                 figure: "named",
                 label: "Answers naming you",
                 value: pct(fig.now),
-                delta: <Delta value={lflDelta} />,
-                foot: <span style={{ fontSize: "13px", color: T.soft }}>{`${fig.now.num.toLocaleString("en-GB")} of ${fig.now.den.toLocaleString("en-GB")} answers${loose ? ` across ${across}` : ""}${lflDelta !== null ? ". Change is like-for-like" : ""}`}</span>,
+                delta: <Delta value={chg.named} />,
+                foot: <span style={{ fontSize: "13px", color: T.soft }}>{`${fig.now.num.toLocaleString("en-GB")} of ${fig.now.den.toLocaleString("en-GB")} answers${loose ? ` across ${across}` : ""}`}</span>,
               },
               {
                 figure: "questions",
                 label: "Prompts you are named in",
                 value: `${fig.promptsNamed.num} of ${fig.promptsNamed.den}`,
-                delta: fig.promptsNamedBefore ? <span style={{ fontSize: "13px", color: T.soft }}>{`was ${fig.promptsNamedBefore.num} of ${fig.promptsNamedBefore.den}`}</span> : null,
+                delta: promptsChange ? <span style={{ fontSize: "13px", color: T.soft }}>{promptsChange}</span> : null,
                 foot: <span style={{ fontSize: "13px", color: T.soft }}>{`${fig.never ? `${fig.never} never name you` : "Named in every prompt"}${loose ? `, ${looseWords} counted` : ""}`}</span>,
               },
               {
                 figure: "sov",
                 label: "Share of voice",
                 value: pct(o.sov),
-                delta: <Delta value={pointsDelta(o.sov, o.sovBefore)} />,
+                delta: <Delta value={chg.sov} />,
                 foot: <span style={{ fontSize: "13px", color: T.soft }}>{o.sov.rank ? `${ordinal(o.sov.rank)} of ${o.sov.brands} brands named` : `Not named; ${o.sov.brands} other brands were`}</span>,
               },
               {
@@ -777,11 +835,11 @@ export default function Overview({
                 label: "Cluster keywords on page 1",
                 // DS57 (2 Oct 2026, R173 pass 6): no cluster keyword read in the range is "-", not "0 of 0", as OneCluster's count.
                 value: cs.page1.den ? `${cs.page1.num} of ${cs.page1.den}` : "-",
-                delta: cs.page1Before !== null ? <Delta value={cs.page1.num - cs.page1Before} unit="" /> : null,
+                delta: chg.page1 !== null ? <Delta value={chg.page1} unit="" /> : null,
                 foot: (
                   <span style={{ fontSize: "13px", color: T.soft }}>
                     {cs.page1.den
-                      ? `${cs.page1.avg === null ? "No keyword in the top 20 yet" : `Average position ${cs.page1.avg}`}${pendingKeywords ? `. ${pendingKeywords} more from tomorrow` : ""}`
+                      ? `${avgLine(cs.page1)}${pendingKeywords ? `. ${pendingKeywords} more from tomorrow` : ""}`
                       : pendingKeywords
                         ? "First check tomorrow at 06:00"
                         : "No cluster keyword checked in this range"}
@@ -794,29 +852,29 @@ export default function Overview({
             figure: "named",
             label: "Answers naming you",
             value: pct(o.named),
-            delta: <Delta value={pointsDelta(o.named, o.namedBefore)} />,
+            delta: <Delta value={chg.named} />,
             foot: <span style={{ fontSize: "13px", color: T.soft }}>{`${o.named.num.toLocaleString("en-GB")} of ${o.named.den.toLocaleString("en-GB")} answers`}</span>,
           },
           {
             figure: "questions",
             label: "Prompts you are named in",
             value: `${o.questions.num} of ${o.questions.den}`,
-            delta: o.questionsBefore && o.questionsBefore.den ? <span style={{ fontSize: "13px", color: T.soft }}>{`was ${o.questionsBefore.num} of ${o.questionsBefore.den}`}</span> : null,
+            delta: promptsChange ? <span style={{ fontSize: "13px", color: T.soft }}>{promptsChange}</span> : null,
             foot: o.questions.den - o.questions.num ? <span style={{ fontSize: "13px", color: T.soft }}>{`${o.questions.den - o.questions.num} never name you`}</span> : <span style={{ fontSize: "13px", color: T.soft }}>Named in every prompt</span>,
           },
           {
             figure: "sov",
             label: "Share of voice",
             value: pct(o.sov),
-            delta: <Delta value={pointsDelta(o.sov, o.sovBefore)} />,
+            delta: <Delta value={chg.sov} />,
             foot: <span style={{ fontSize: "13px", color: T.soft }}>{o.sov.rank ? `${ordinal(o.sov.rank)} of ${o.sov.brands} brands named` : `Not named; ${o.sov.brands} other brands were`}</span>,
           },
           {
             figure: "keywords",
             label: "Google keywords on page 1",
             value: `${o.keywords.num} of ${o.keywords.den}`,
-            delta: o.keywordsBefore && o.keywordsBefore.den ? <Delta value={o.keywords.num - o.keywordsBefore.num} unit="" /> : null,
-            foot: <span style={{ fontSize: "13px", color: T.soft }}>{o.keywords.avg === null ? "No keyword in the top 20 yet" : `Average position ${o.keywords.avg}`}</span>,
+            delta: chg.page1 !== null ? <Delta value={chg.page1} unit="" /> : null,
+            foot: <span style={{ fontSize: "13px", color: T.soft }}>{avgLine(o.keywords)}</span>,
           },
         ]).map((f, i) => (
           <div key={f.label} style={{ display: "flex", flexDirection: "column", gap: "8px", padding: "22px 24px", minWidth: 0, borderLeft: i ? `1px solid ${T.line}` : undefined, marginLeft: i ? "-1px" : undefined }}>
@@ -828,6 +886,7 @@ export default function Overview({
             {f.foot}
           </div>
         ))}
+        {changeCaption ? <p style={{ gridColumn: "1 / -1", margin: 0, padding: "12px 24px 14px", borderTop: `1px solid ${T.line}`, fontSize: "13px", lineHeight: 1.5, color: T.soft }}>{changeCaption}</p> : null}
       </section>
 
       {/* Mobile.dc.html's four figure cards (T4b mobile, 30 Sep 2026): the headline already says the named share, so the phone trades it for rank among brands. Same figures as above. */}
@@ -835,9 +894,9 @@ export default function Overview({
         <section aria-label="Key figures" className="app-show-sm">
           <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "10px" }}>
             {[
-              { label: "Prompts named in", value: `${fig.promptsNamed.num} of ${fig.promptsNamed.den}`, foot: fig.promptsNamedBefore ? <span style={{ fontSize: "12px", color: T.soft }}>{`was ${fig.promptsNamedBefore.num} of ${fig.promptsNamedBefore.den}`}</span> : loose ? <span style={{ fontSize: "12px", color: T.soft }}>{`With ${looseWords}`}</span> : null },
-              { label: "Share of voice", value: pct(o.sov), foot: <Delta value={pointsDelta(o.sov, o.sovBefore)} /> },
-              { label: "Keywords on page 1", value: cs.page1.den ? `${cs.page1.num} of ${cs.page1.den}` : "-", foot: cs.page1Before !== null ? <Delta value={cs.page1.num - cs.page1Before} unit="" /> : !cs.page1.den && pendingKeywords ? <span style={{ fontSize: "12px", color: T.soft }}>From tomorrow</span> : null },
+              { label: "Prompts named in", value: `${fig.promptsNamed.num} of ${fig.promptsNamed.den}`, foot: promptsChange ? <span style={{ fontSize: "12px", color: T.soft }}>{promptsChange}</span> : loose ? <span style={{ fontSize: "12px", color: T.soft }}>{`With ${looseWords}`}</span> : null },
+              { label: "Share of voice", value: pct(o.sov), foot: <Delta value={chg.sov} /> },
+              { label: "Keywords on page 1", value: cs.page1.den ? `${cs.page1.num} of ${cs.page1.den}` : "-", foot: chg.page1 !== null ? <Delta value={chg.page1} unit="" /> : !cs.page1.den && pendingKeywords ? <span style={{ fontSize: "12px", color: T.soft }}>From tomorrow</span> : null },
               {
                 label: "Rank among brands",
                 value: o.sov.rank ? `${ordinal(o.sov.rank)} of ${o.sov.brands}` : "-",
@@ -851,6 +910,7 @@ export default function Overview({
               </div>
             ))}
           </div>
+          {changeCaption ? <p style={{ margin: "10px 0 0", fontSize: "12px", lineHeight: 1.5, color: T.soft }}>{changeCaption}</p> : null}
         </section>
       ) : null}
 
@@ -869,13 +929,18 @@ export default function Overview({
             dayLabels: pickedChart.days.map((d) => formatDay(d, true)),
             named: pickedChart.named,
             google: pickedChart.google,
-            prevLabels: o.compare ? daysIn(o.compare).map((d) => formatDay(d)) : null,
+            prevLabels: chartBefore ? daysIn(chartBefore).map((d) => formatDay(d)) : null,
             namedBefore: pickedChart.namedBefore,
             googleBefore: pickedChart.googleBefore,
-            beforeLabel: o.compare ? span(o.compare) : null,
+            beforeLabel: chartBefore ? span(chartBefore) : null,
             answersPerDay: picked.prompts.length * engines.length,
             pending: picked.status === "pending",
-            note: picked.status !== "pending" && !pickedHasPrev ? `Tracked from ${formatDay(picked.started_on)}. No earlier period to compare yet.` : null,
+            note:
+              picked.status !== "pending" && !pickedHasPrev
+                ? o.compareKind === "start" && o.compare
+                  ? `Tracked from ${formatDay(picked.started_on)}. Its changes are against your first week, ${span(o.compare)}.`
+                  : `Tracked from ${formatDay(picked.started_on)}. No earlier period to compare yet.`
+                : null,
             phoneLine,
             placements: placements ? chartMarkers(pickedChart.days, placements, picked.id) : null,
             // T7 part 2b: the phone board's "Open this cluster" goes to QuestionDetail, the one-cluster page.
@@ -887,10 +952,10 @@ export default function Overview({
         data={{
           engines: [...engines],
           now: toChart(dailySeries(data.answers, range, engines)),
-          before: o.compare ? toChart(dailySeries(data.answers, o.compare, engines)).slice(0, daysIn(range).length) : null,
+          before: chartBefore ? toChart(dailySeries(data.answers, chartBefore, engines)).slice(0, daysIn(range).length) : null,
           lflNow: lflIds ? toChart(dailySeries(data.answers, range, engines, lflIds)) : null,
-          lflBefore: lflIds && o.compare ? toChart(dailySeries(data.answers, o.compare, engines, lflIds)).slice(0, daysIn(range).length) : null,
-          beforeLabel: o.compare ? span(o.compare) : null,
+          lflBefore: lflIds && chartBefore ? toChart(dailySeries(data.answers, chartBefore, engines, lflIds)).slice(0, daysIn(range).length) : null,
+          beforeLabel: chartBefore ? span(chartBefore) : null,
           lflNote,
           notes,
           brand,
@@ -922,18 +987,55 @@ const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 /** A change chip in the cards' 12px size, or the grey word when there is no change to show. */
 export function Chip({ value, unit, none, size = 12 }: { value: number | null; unit: string; none: string; size?: number }) {
   if (value === null || value === 0) return <span style={{ fontSize: `${size}px`, fontWeight: 600, color: T.soft, whiteSpace: "nowrap" }}>{value === 0 ? "No change" : none}</span>;
-  const up = value > 0;
+  return (
+    <Pill up={value > 0} size={size}>
+      {value > 0 ? "+" : "−"}
+      {Math.abs(value)}
+      {unit}
+    </Pill>
+  );
+}
+
+function Pill({ up, size, title, children }: { up: boolean; size: number; title?: string; children: React.ReactNode }) {
   const fg = up ? T.goodFg : T.badFg;
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: "2px", padding: "2px 8px 2px 5px", borderRadius: "999px", background: up ? T.goodBg : T.badBg, color: fg, fontSize: `${size}px`, fontWeight: 600, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
+    <span title={title} style={{ display: "inline-flex", alignItems: "center", gap: "2px", padding: "2px 8px 2px 5px", borderRadius: "999px", background: up ? T.goodBg : T.badBg, color: fg, fontSize: `${size}px`, fontWeight: 600, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={fg} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
         <path d={up ? "M6 15l6-6 6 6" : "M6 9l6 6 6-6"} />
       </svg>
-      {up ? "+" : "−"}
-      {Math.abs(value)}
-      {unit}
+      {children}
     </span>
   );
+}
+
+/**
+ * The grey word beside a cluster's rate when it has no change (8 Oct 2026,
+ * audit data-7): "Tomorrow" before its first check, "New" for one begun
+ * inside the period - never for a cluster tracked throughout, which with
+ * "Compare: Nothing" read "New" on every card.
+ */
+export const noChange = (c: Pick<ClusterCard, "status">) => (c.status === "pending" ? "Tomorrow" : c.status === "added" ? "New" : "");
+
+/**
+ * A cluster keyword's Google change (8 Oct 2026, audit data-7): places
+ * gained, or leaving or entering the top 20. A keyword gone from #13 to
+ * outside the top 20 read "New", as a keyword never read does.
+ */
+export function PositionChip({ c, size = 12 }: { c: Pick<ClusterCard, "status" | "keyword" | "positionChange" | "positionEvent">; size?: number }) {
+  // One word each, so the pill fits the cards' 108px Google box (82px inside); the title says it in full.
+  if (c.positionEvent === "dropped")
+    return (
+      <Pill up={false} size={size} title="Dropped out of the top 20">
+        Dropped
+      </Pill>
+    );
+  if (c.positionEvent === "entered")
+    return (
+      <Pill up size={size} title="Entered the top 20">
+        Entered
+      </Pill>
+    );
+  return <Chip value={c.positionEvent === "unranked" ? 0 : c.positionChange} unit="" none={c.keyword === null ? "No keyword" : noChange(c)} size={size} />;
 }
 
 /**
@@ -1017,7 +1119,7 @@ function ClusterCards({
                   <span style={{ fontSize: "20px", fontWeight: 700, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" }} title={pending ? (basis ?? undefined) : basisLine(c.now, "answers")}>
                     {pct(c.now)}
                   </span>
-                  <Chip value={c.delta} unit=" pts" none={pending ? "Tomorrow" : "New"} />
+                  <Chip value={c.delta} unit=" pts" none={noChange(c)} />
                 </div>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
@@ -1079,7 +1181,7 @@ function ClusterCards({
                 <div style={{ width: "108px", flexShrink: 0, boxSizing: "border-box", padding: "10px 12px", borderRadius: "12px", border: `1px solid ${on ? T.washLine : T.line}`, background: T.bg, display: "flex", flexDirection: "column", gap: "4px", alignItems: "flex-start" }}>
                   <span style={{ fontSize: "11px", fontWeight: 600, color: T.soft }}>Google</span>
                   <span style={{ fontSize: "24px", fontWeight: 700, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" }}>{c.position === null ? "-" : `#${c.position}`}</span>
-                  <Chip value={c.positionChange} unit="" none={c.keyword === null ? "No keyword" : pending ? "Tomorrow" : "New"} />
+                  <PositionChip c={c} />
                 </div>
               </div>
               {detail ? (
@@ -1177,7 +1279,7 @@ function ClusterRows({ cards, picked, href, opens, manage }: { cards: ClusterCar
                 <span style={{ fontSize: "16px", fontWeight: 700, fontVariantNumeric: "tabular-nums" }} title={basisLine(c.now, "answers")}>
                   {pct(c.now)}
                 </span>
-                <Chip value={c.delta} unit=" pts" none="New" size={11} />
+                <Chip value={c.delta} unit=" pts" none={noChange(c)} size={11} />
               </span>
             )}
           </Link>

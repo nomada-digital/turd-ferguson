@@ -38,7 +38,10 @@ export default function Reports({
   reportPath,
   placed,
   months,
+  note = null,
 }: {
+  /** Audit reliability-3 (8 Oct 2026): partial or failed checks in the picked range (run-note.ts), whose reads its CSVs leave unanswered. */
+  note?: string | null;
   today: Day;
   range: Range;
   compareMode: Compare;
@@ -58,6 +61,7 @@ export default function Reports({
       <header style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
         <h1 style={{ margin: 0, fontSize: "28px", fontWeight: 700, letterSpacing: "-0.03em", color: T.ink }}>Reports</h1>
         <p style={{ margin: 0, fontSize: "14px", lineHeight: 1.5, color: T.soft, maxWidth: "680px" }}>Download any range as CSV, or a month at a time.</p>
+        {note ? <p style={{ margin: 0, fontSize: "14px", lineHeight: 1.5, color: T.soft, maxWidth: "680px" }}>{note}</p> : null}
       </header>
 
       <section aria-labelledby="rp-range-h" style={{ ...CARD, padding: "20px 24px", display: "flex", flexDirection: "column", gap: "16px" }}>
@@ -138,7 +142,7 @@ export default function Reports({
                       </dd>
                       <dd style={{ margin: 0, fontSize: "13px", color: T.soft }}>
                         {`${f.named.num.toLocaleString("en-GB")} of ${f.named.den.toLocaleString("en-GB")} answers`}
-                        {f.lfl ? `. Like-for-like ${pct(f.lfl.now)}, ${f.lfl.delta === 0 ? "level with" : f.lfl.delta > 0 ? "up from" : "down from"} ${pct(f.lfl.before)}` : ""}
+                        {f.lfl ? `. Like-for-like ${pct(f.lfl.now)}, ${f.lfl.delta === 0 ? "level with" : f.lfl.delta > 0 ? "up from" : "down from"} ${pct(f.lfl.before)}${f.lfl.firstWeek ? " in the first week" : ""}` : ""}
                       </dd>
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", gap: "4px", minWidth: 0 }}>

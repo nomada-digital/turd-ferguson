@@ -6,10 +6,10 @@ import { T } from "@/config/tokens";
 import { ENGINE_SPECS, type Engine } from "@/lib/scan/engines";
 import { clusterCards } from "@/lib/tracking/cluster-figures";
 import { rangeLabel } from "@/lib/tracking/date-range";
-import { type CitedPageRow, type Day, type Range, type Rate, basis as basisLine, brandGaps, comparisonRange, formatDay, ungroupedRead } from "@/lib/tracking/figures";
+import { type CitedPageRow, type Day, type Range, type Rate, basis as basisLine, brandGaps, comparisonLabel, firstCheckDay, formatDay, resolveComparison, ungroupedRead } from "@/lib/tracking/figures";
 import { NAMED_TOP, citedWithBrand, namedPage } from "@/lib/tracking/named-figures";
 import type { Compare, OverviewData } from "@/lib/tracking/overview-data";
-import { brandGapNote, partialRunNote } from "@/lib/tracking/run-note";
+import { brandGapNote, runNote } from "@/lib/tracking/run-note";
 
 import ChipRow from "./ChipRow";
 import DatePicker from "./DatePicker";
@@ -68,8 +68,13 @@ export default function Named({
   /** DS21: the search, already cut to APP_LIMITS.search; matches the brand's name. */
   q: string;
 }) {
-  const before = comparisonRange(range, compareMode);
-  const partial = partialRunNote(data.lastRun, range, today);
+  // 8 Oct 2026 (audit data-10): the comparison the Overview reads - the first week for a young client.
+  // The first week's first day, from started_on and the prompts - the date picker is handed the same day.
+  const firstCheck = firstCheckDay(startedOn, data.questions);
+  const cmp = resolveComparison(range, compareMode, startedOn, firstCheck);
+  const before = cmp.range;
+  // Audit data-3 (8 Oct 2026): every partial or failed check in the range, not only the last.
+  const partial = runNote(data, range, today);
   const cards = clusterCards({ clusters: data.clusters ?? [], questions: data.questions, keywords: data.keywords, answers: data.answers, serp: data.serp, range, before, today, engines });
   const picked = cluster ? cards.find((c) => c.id === cluster) ?? null : null;
   const only = picked ? new Set(picked.prompts.map((p) => p.id)) : null;
@@ -118,7 +123,7 @@ export default function Named({
           {partial ? <p style={{ margin: 0, fontSize: "14px", lineHeight: 1.5, color: T.soft, maxWidth: "680px" }}>{partial}</p> : null}
           {gapNote ? <p style={{ margin: 0, fontSize: "14px", lineHeight: 1.5, color: T.soft, maxWidth: "680px" }}>{gapNote}</p> : null}
         </div>
-        <DatePicker range={range} compare={compareMode} today={today} startedOn={startedOn} grow={false}>
+        <DatePicker range={range} compare={compareMode} today={today} startedOn={startedOn} firstCheck={firstCheck} grow={false}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={T.ink} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <rect x="3" y="5" width="18" height="16" rx="2" />
             <path d="M3 10h18M8 3v4M16 3v4" />
@@ -127,7 +132,7 @@ export default function Named({
             <span style={{ fontSize: "14px", fontWeight: 700 }}>{rangeLabel(range, today, startedOn)}</span>
             <span style={{ fontSize: "12px", color: T.soft }}>
               {formatDay(range.from)} - {formatDay(range.to, true)}
-              {before ? `, vs ${formatDay(before.from)} - ${formatDay(before.to)}` : ""}
+              {before ? `, ${comparisonLabel(before, cmp.kind)}` : ""}
             </span>
           </span>
         </DatePicker>
@@ -189,7 +194,7 @@ export default function Named({
               <span style={HEAD}>Brand</span>
               <span style={{ ...HEAD, textAlign: "right" }}>Answers</span>
               <span style={{ ...HEAD, textAlign: "right" }}>Share</span>
-              <span style={{ ...HEAD, textAlign: "right" }}>{before ? "Vs last period" : "Change"}</span>
+              <span style={{ ...HEAD, textAlign: "right" }}>{before ? (cmp.kind === "start" ? "Vs first week" : "Vs last period") : "Change"}</span>
               <span style={HEAD}>Engines</span>
               <span style={{ ...HEAD, textAlign: "right" }}>Prompts</span>
             </div>

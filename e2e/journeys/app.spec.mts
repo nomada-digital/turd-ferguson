@@ -154,18 +154,23 @@ for (const width of [1280, 390]) {
         const page = await ctx.newPage();
         await page.goto(BASE + HOME, { waitUntil: "load" });
         const t = await page.evaluate(() => document.querySelector("main")?.innerText ?? document.body.innerText, null);
-        if (errorState === "partial") assert.match(t, width === 1280 ? /Some reads did not come back; they are left out of the figures/ : /some reads missing/);
-        else (assert.match(t, /Last checked .+ Next check at 06:00\./), assert.doesNotMatch(t, /Checked today/));
+        // 8 Oct 2026 (audit data-3 / reliability-3): the partial state's note lists both its lost checks at
+        // every width; a failed run says so, where it read "Nothing from today's check yet".
+        if (errorState === "partial") assert.match(t, /2 checks in this range lost reads \(Google AI Overviews\): .+ and today \(partial\)\. Some reads did not come back; they are left out of the figures/);
+        else {
+          assert.match(t, /Today's check failed, so the figures run to \d+ \w+\./);
+          assert.doesNotMatch(t, /Checked today|Nothing from today's check yet/);
+        }
         await ctx.close();
       });
-      for (const route of [`${HOME}/clusters`, `${HOME}/clusters/c1`, `${HOME}/named`, `${HOME}/cited`])
-        test(`${route} ${errorState === "partial" ? "says" : "does not say"} today's check was partial`, async () => {
+      for (const route of [`${HOME}/clusters`, `${HOME}/clusters/c1`, `${HOME}/named`, `${HOME}/cited`, `${HOME}/reports`])
+        test(`${route} says which checks in the range lost reads`, async () => {
           const ctx = await browser.newContext({ viewport: { width, height: 900 } });
           const page = await ctx.newPage();
           await page.goto(BASE + route, { waitUntil: "load" });
           const t = await page.evaluate(() => document.querySelector("main")?.innerText ?? document.body.innerText, null);
-          if (errorState === "partial") assert.match(t, /Today's check was partial\. Some reads did not come back/);
-          else assert.doesNotMatch(t, /was partial/);
+          if (errorState === "partial") assert.match(t, /2 checks in this range lost reads \(Google AI Overviews\): \d+ \w+ \(partial\) and today \(partial\)\. Some reads did not come back/);
+          else assert.match(t, /Today's check failed: none of its reads came back, so they are left out of the figures, not counted as misses\./);
           await ctx.close();
         });
       test("a cluster's Google AI Overview tab does not say the engine gave no answer", async () => {
@@ -173,7 +178,12 @@ for (const width of [1280, 390]) {
         const page = await ctx.newPage();
         await page.goto(`${BASE}${HOME}/clusters/c1?engine=google_aio`, { waitUntil: "load" });
         const t = await page.evaluate(() => document.querySelector("main")?.innerText ?? document.body.innerText, null);
-        assert.match(t, /No answer came back from Google AI Overviews at this check\./);
+        // A failed check shows the last check's answers and says why (audit data-3); it showed four blank tabs.
+        if (errorState === "partial") assert.match(t, /No answer came back from Google AI Overviews at this check\./);
+        else {
+          assert.match(t, /Today's check failed, so these are the answers from \d+ \w+\./);
+          assert.doesNotMatch(t, /No answer came back/);
+        }
         assert.doesNotMatch(t, /Google AI Overviews gave no answer/);
         await ctx.close();
       });

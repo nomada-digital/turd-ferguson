@@ -96,7 +96,10 @@ test("the compare line in the board's words, flagging a period before tracking b
   assert.equal(compareText(r, "prev", BEGAN), "Compared with 5 Aug - 1 Sep, the 28 days before.");
   assert.equal(compareText(r, "month", BEGAN), "Compared with 2 Aug - 29 Aug.");
   assert.equal(compareText(r, "none", BEGAN), "No comparison. The chart shows this period only.");
-  assert.equal(compareText({ from: "2026-07-20", to: TODAY }, "prev", BEGAN), "Compared with 9 May - 19 Jul. Tracking began 4 Jul, so part of that period has no data.");
+  // 8 Oct 2026 (audit data-10): a period reaching back before tracking began is replaced by the first week, as every
+  // page now reads it - it used to be compared with and then hidden, so a client saw no change for 55 days.
+  assert.equal(compareText({ from: "2026-07-20", to: TODAY }, "prev", BEGAN), "Tracking began 4 Jul, so this compares with your first week, 4 Jul - 10 Jul.");
+  assert.equal(compareText({ from: "2026-07-04", to: "2026-07-09" }, "prev", BEGAN), "Tracking began 4 Jul, so there is no earlier period to compare with yet.");
 });
 
 test("the hint, and the query Apply writes - the shape rangeFrom reads", () => {

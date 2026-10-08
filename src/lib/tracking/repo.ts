@@ -112,7 +112,7 @@ const fixtureRepo: TrackingRepo = {
   async loadOverview(clientId, _range, _compare, opts) {
     fixtureUnreadable();
     // The fixture holds both periods whole; the figures cut the range. The shape is the Supabase read's (read-shape.ts).
-    return clientId === fixture().client.id ? shapeRead(fixture().data, opts) : { clusters: [], questions: [], keywords: [], answers: [], serp: [], lastRun: null, notes: [] };
+    return clientId === fixture().client.id ? shapeRead(fixture().data, opts) : { clusters: [], questions: [], keywords: [], answers: [], serp: [], lastRun: null, runs: [], notes: [] };
   },
   async structure(clientId) {
     fixtureUnreadable();
@@ -123,14 +123,15 @@ const fixtureRepo: TrackingRepo = {
     const f = fixture();
     if (clientId !== f.client.id) return { day: null, rows: [] };
     const mine = f.data.answers.filter((a) => a.question_id === questionId && a.run_date <= to);
-    const day = mine.reduce<Day | null>((d, a) => (d === null || a.run_date > d ? a.run_date : d), null);
-    // The words exist for today's check only; an earlier day shows its verdicts without them.
+    // As loadLatestAnswers picks it (audit data-3): the latest day with an answer, so a failed day's blank rows never stand in.
+    const day = mine.reduce<Day | null>((d, a) => (a.answered && (d === null || a.run_date > d) ? a.run_date : d), null);
+    // The words exist for one check only (today's, or textsOn); an earlier day shows its verdicts without them.
     const at = ["05:10", "05:11", "05:12", "05:12"];
     return {
       day,
       rows: mine
         .filter((a) => a.run_date === day)
-        .map((a, i) => ({ ...a, text: day === f.today ? (f.texts[`${questionId} ${a.engine}`] ?? null) : null, at: `${day}T${at[i % 4]}:00Z` })),
+        .map((a, i) => ({ ...a, text: day === (f.textsOn ?? f.today) ? (f.texts[`${questionId} ${a.engine}`] ?? null) : null, at: `${day}T${at[i % 4]}:00Z` })),
     };
   },
   async clusterNotes(clientId, questionIds) {

@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
-import { clusterCards, clusterChart, clusterDetail, daysOfLine, clusterSearch, clusterSummary, filterClusters, pendingBasis, promptBrands, promptIndex, promptStrip, searchPrompts } from "./cluster-figures.ts";
-import { addDays, comparisonRange, keywordsIn } from "./figures.ts";
+import { clusterCards, clusterChart, clusterDetail, daysOfLine, clusterSearch, clusterSummary, filterClusters, keyFigureChanges, pendingBasis, positionMove, promptBrands, promptIndex, promptStrip, searchPrompts } from "./cluster-figures.ts";
+import { addDays, comparisonRange, keywordsIn, overview, periodPair, pointsDelta, resolveComparison, ungroupedRead } from "./figures.ts";
 import { expandFixture, fixtureState } from "./fixture-mode.ts";
 
 /**
@@ -128,7 +128,8 @@ test("T6 day counts: per engine, the days it named the client for a prompt, of t
 test("DS73: on a partial check each engine's days are of the days it answered, and the row says of up to", () => {
   const p = fixtureState(fx, { TRACKING_FIXTURE_STATE: "partial" });
   const row = clusterCards({ ...p.data, range, before: null, today: fx.today, engines: ["google_aio", "chatgpt", "gemini", "perplexity"] }).find((c) => c.id === "c1")!.prompts[0]!;
-  assert.deepEqual(row.daysNamed.map((d) => d.of), [27, 28, 28, 28], "Google AI Overviews failed today");
+  // 8 Oct 2026 (audit data-3): the partial state also lost one earlier day's Google AI Overview reads, so 26.
+  assert.deepEqual(row.daysNamed.map((d) => d.of), [26, 28, 28, 28], "Google AI Overviews failed today and one earlier day");
   assert.equal(daysOfLine(row), "days named, of up to 28");
   const whole = by("c1").prompts[0]!;
   assert.ok(whole.daysNamed.every((d) => d.of === 28));
@@ -158,8 +159,10 @@ test("the headline and four figures by cluster match dataset.py's summary (T4b p
     { cluster: "accounting software for nonprofits", text: "Which is better for a nonprofit, Ledgerline or Brightbook?" },
   ]);
   assert.deepEqual([s.page1.num, s.page1.den, s.page1Before], [5, 9, 3], "5 of 9 on page 1, was 3");
-  // The board averages 9.7 with c9 at #23; the fixture keeps #23 unranked, so the eight ranked average 8.
-  assert.equal(s.page1.avg, 8);
+  // The board averages 9.7 with c9 at #23; the fixture keeps #23 unranked. 8 Oct 2026 (audit data-7): unranked
+  // counts as #21, so 9.4 (it was the eight ranked alone, 8 - better for every keyword that dropped out).
+  assert.equal(s.page1.avg, 9.4);
+  assert.deepEqual([s.page1.ranked, s.page1.unranked], [8, 1]);
   assert.deepEqual(s.offPage1, ["invoicing software", "bookkeeping software", "cloud accounting software"]);
 });
 
@@ -301,4 +304,115 @@ test("8 Oct 2026 (audit data-1): a prompt added for tomorrow is listed but count
   const s = clusterSummary(cards);
   assert.equal(s.promptsNamed.den, base.promptsNamed.den, "the headline denominator does not move for tomorrow's prompt");
   assert.deepEqual(s.promptsNamedBefore, base.promptsNamedBefore, "the 'was' line is kept");
+});
+
+test("8 Oct 2026 (audit data-4): prompts named and page 1 change like-for-like - 37 of 40 both periods is no change, and page 1 is 8 clusters on both sides", () => {
+  const s = clusterSummary(cards);
+  // The strip read "40 of 45, was 37 of 40": the 3 were c9's prompts, added 16 Sep.
+  assert.deepEqual([s.promptsNamed.num, s.promptsNamed.den], [40, 45], "the figure counts every prompt read");
+  assert.deepEqual([s.promptsNamedLfl?.num, s.promptsNamedLfl?.den], [37, 40]);
+  assert.deepEqual([s.promptsNamedBefore?.num, s.promptsNamedBefore?.den], [37, 40]);
+  assert.equal(s.promptsNamedLfl!.num - s.promptsNamedBefore!.num, 0, "no change");
+  assert.deepEqual([s.page1Lfl, s.page1Before], [5, 3]);
+  // c9 (added 16 Sep) put on page 1: the figure gains it, the change does not - it took 'now' over 9 and 'before' over 8.
+  const k9 = fx.data.clusters.find((c) => c.id === "c9")!.keyword_id!;
+  const serp = [...fx.data.serp.filter((x) => x.keyword_id !== k9), ...fx.data.serp.filter((x) => x.keyword_id === k9).map((x) => ({ ...x, position: 6 }))];
+  const up = clusterSummary(clusterCards({ ...fx.data, serp, range, before: comparisonRange(range, "prev"), today: fx.today, engines: [] }));
+  assert.equal(up.page1.num, 6);
+  assert.equal(up.page1Lfl! - up.page1Before!, 2, "a cluster added on page 1 is not a gain");
+  // Without a comparison there is no like-for-like count either.
+  assert.equal(clusterSummary(clusterCards({ ...fx.data, range, before: null, today: fx.today, engines: [] })).promptsNamedLfl, null);
+});
+
+/** The fixture with one keyword's readings from `from` on replaced by `position`. */
+const serpWith = (keywordId: string, from: string, position: number | null) => fx.data.serp.map((x) => (x.keyword_id === keywordId && x.run_date >= from ? { ...x, position } : x));
+
+test("8 Oct 2026 (audit data-7): a keyword leaving the top 20 is 'dropped', never 'New' or 'same as', and makes the average worse", () => {
+  const before = comparisonRange(range, "prev");
+  // k8, cloud accounting software, #13 on 1 Sep, unranked from 27 Sep.
+  const serp = serpWith("k8", "2026-09-27", null);
+  const dropped = clusterCards({ ...fx.data, serp, range, before, today: fx.today, engines: [] });
+  const c8 = dropped.find((c) => c.id === "c8")!;
+  assert.deepEqual([c8.status, c8.position, c8.positionRead, c8.positionBefore, c8.positionChange, c8.positionEvent], ["live", null, true, 13, null, "dropped"]);
+  const detail = clusterDetail({ ...fx.data, serp, range, before, today: fx.today, engines: [] }, "c8")!;
+  assert.equal(positionMove(detail.card, detail.positionBeforeOn), ", down from #13 on 1 Sep");
+  // The average counted only the ranked: 8 with k8 at #14, 7.1 with it gone. Unranked counts as #21 now.
+  const base = clusterSummary(cards).page1.avg!;
+  const worse = clusterSummary(dropped).page1.avg!;
+  assert.ok(worse > base, `average ${base} -> ${worse} when #14 drops out`);
+  assert.equal(worse, 10.2);
+  // A keyword drop from #11 (k3) is worse too, not better.
+  assert.ok(clusterSummary(clusterCards({ ...fx.data, serp: serpWith("k3", "2026-09-27", null), range, before, today: fx.today, engines: [] })).page1.avg! > base);
+});
+
+test("8 Oct 2026 (audit data-7): a keyword entering the top 20 is 'entered'; one out of it both periods is 'unranked'; positionMove never says 'same as'", () => {
+  const before = comparisonRange(range, "prev")!;
+  // k3, invoicing software, unranked through the previous period, ranked now.
+  const entered = clusterDetail({ ...fx.data, serp: fx.data.serp.map((x) => (x.keyword_id === "k3" && x.run_date <= before.to ? { ...x, position: null } : x)), range, before, today: fx.today, engines: [] }, "c3")!;
+  assert.deepEqual([entered.card.positionBefore, entered.card.positionEvent], [null, "entered"]);
+  assert.equal(positionMove(entered.card, entered.positionBeforeOn), ", up from outside the top 20 on 1 Sep");
+  const out = clusterCards({ ...fx.data, serp: serpWith("k3", "2026-01-01", null), range, before, today: fx.today, engines: [] }).find((c) => c.id === "c3")!;
+  assert.equal(out.positionEvent, "unranked");
+  // Every card's line, and a null change of every kind: "unchanged from" only at 0, never "same as".
+  for (const c of cards) assert.doesNotMatch(positionMove(c, "2026-09-01"), /same as/, c.id);
+  assert.equal(positionMove(by("c5"), "2026-09-01"), ", unchanged from #3 on 1 Sep", "c5 held #3");
+  assert.equal(positionMove({ positionEvent: null, positionChange: null, positionBefore: 13 }, "2026-09-01"), "");
+  assert.equal(positionMove({ positionEvent: "dropped", positionChange: null, positionBefore: 13 }, null), "", "no comparison reading, no line");
+  assert.equal(by("c1").positionEvent, null, "a ranked keyword's change is places");
+});
+
+test("8 Oct 2026 (audit data-10): a young client's clusters change against its first week", () => {
+  const y = fixtureState(fx, { TRACKING_FIXTURE_STATE: "young" });
+  const r = { from: addDays(y.today, -27), to: y.today };
+  const cmp = resolveComparison(r, "prev", y.client.started_on);
+  assert.equal(cmp.kind, "start");
+  const young = clusterCards({ ...y.data, range: r, before: cmp.range, today: y.today, engines: [] });
+  const live = young.filter((c) => c.status === "live");
+  assert.ok(live.length >= 8, `${live.length} clusters tracked since the first week`);
+  assert.ok(live.every((c) => c.delta !== null), "every one has a change against its first week (it read 'New' on every card)");
+  const s = clusterSummary(young);
+  assert.ok(s.lflDelta !== null && s.promptsNamedLfl && s.page1Lfl !== null);
+  // Review of data-10 (8 Oct 2026): the one-cluster page's line under "Answers naming you" said "43% the one
+  // before" of a first week seven days inside this period. Against the first week it says so.
+  const c1 = clusterDetail({ ...y.data, range: r, before: cmp.range, today: y.today, engines: ["google_aio", "chatgpt", "gemini", "perplexity"] }, "c1")!.card;
+  assert.equal(periodPair(c1.now, c1.before, cmp.kind), "45% this period, 43% in your first week");
+  assert.equal(periodPair(c1.now, c1.before, "prev"), "45% this period, 43% the one before", "an earlier period keeps its words");
+  assert.equal(periodPair(c1.now, null, null), "45% this period");
+  const page = readFileSync(new URL("../../components/app/OneCluster.tsx", import.meta.url), "utf8");
+  assert.match(page, /periodPair\(c\.now, c\.before, cmp\.kind\)/, "the page says it with the comparison's kind");
+  assert.ok(!page.includes("the one before"), "no second wording of its own");
+});
+
+test("8 Oct 2026 (review of audit data-4): the key-figure chips the Overview prints, by cluster and flat", () => {
+  const r = { from: addDays(fx.today, -27), to: fx.today };
+  const strip = (data: typeof fx.data) => {
+    const o = overview({ range: r, compare: "prev", startedOn: fx.client.started_on, engines: [], questions: data.questions, answers: data.answers, serp: data.serp, keywordCount: keywordsIn(data.keywords, r), keywords: data.keywords });
+    const grouped = !!data.clusters?.length && data.questions.some((q) => q.cluster_id);
+    const cs = grouped ? clusterSummary(clusterCards({ ...data, range: r, before: o.compare, today: fx.today, engines: [] })) : null;
+    const byCluster = cs && !ungroupedRead(data.questions, data.answers, r) ? cs : null;
+    return { o, cs, byCluster, chg: keyFigureChanges(o, cs, byCluster) };
+  };
+  // By cluster: "40 of 45" with the like-for-like 37 of 40 in both periods - no change, where it read "was 37 of 40".
+  const d = strip(fx.data);
+  assert.ok(d.byCluster);
+  assert.deepEqual({ ...d.chg, prompts: null }, { named: 3, prompts: null, promptsLine: "like-for-like 37 of 40, no change", sov: 2, page1: 2 });
+  assert.equal(d.chg.named, d.byCluster.lflDelta, "the headline's chip");
+  assert.equal(d.chg.page1, d.cs!.page1Lfl! - d.cs!.page1Before!, "page 1 on the clusters tracked all period");
+  // Flat (no prompt grouped): the chip is the headline's +3; it read +2, the all-prompts change, under a +3 headline.
+  const u = strip(fixtureState(fx, { TRACKING_FIXTURE_STATE: "ungrouped" }).data);
+  assert.equal(u.cs, null);
+  assert.equal(u.chg.named, 3);
+  assert.equal(u.chg.named, pointsDelta(u.o.lfl!.now, u.o.lfl!.before));
+  assert.notEqual(pointsDelta(u.o.named, u.o.namedBefore!), u.chg.named, "the all-prompts change it read before");
+  assert.equal(u.chg.page1, u.o.change!.keywords!.now - u.o.change!.keywords!.before);
+  // The prompts line's other wordings.
+  const line = (now: [number, number], before: [number, number]) =>
+    keyFigureChanges({ lfl: null, change: null }, null, { ...d.byCluster!, promptsNamedLfl: { num: now[0], den: now[1], pct: null }, promptsNamedBefore: { num: before[0], den: before[1], pct: null } }).promptsLine;
+  assert.equal(line([38, 40], [37, 40]), "like-for-like 38 of 40, was 37");
+  assert.equal(line([38, 40], [37, 41]), "like-for-like 38 of 40, was 37 of 41");
+  // The Overview prints these, not a copy of its own.
+  const src = readFileSync(new URL("../../components/app/Overview.tsx", import.meta.url), "utf8");
+  assert.match(src, /const chg = keyFigureChanges\(o, cs, byCluster\);/);
+  assert.match(src, /const promptsChange = chg\.promptsLine;/);
+  assert.ok(!src.includes("like-for-like ${"), "no second wording of the prompts line");
 });

@@ -32,6 +32,8 @@ export type Fixture = {
   data: OverviewData;
   /** T7 part 3b: the answer text of each prompt on each engine at today's check, keyed "promptId engine" (docs/parity/T7/add-texts.py). */
   texts: Record<string, string>;
+  /** The check `texts` are from when it is not today's: the failed state's last good day (8 Oct 2026, audit data-3). */
+  textsOn?: Day;
   /** T7 part 4a: notes on prompts, as the board's "Notes on this cluster" draws them. */
   clusterNotes: ClusterNote[];
   /** T13 (R97 part 3): placements on cluster c1, after boards-3/Placements.dc.html (docs/parity/T13/add-placements.py). */
@@ -90,7 +92,7 @@ export function fixtureUnreadable(env: Record<string, string | undefined> = proc
  * swept - the default names 5 brands, cites 6 pages and has 6 placements.
  */
 /** Every TRACKING_FIXTURE_STATE, unset being `default`. Anything else serves the default. */
-export const FIXTURE_STATES = ["default", "signup", "signup-typed", "new", "partial", "failed", "unreadable", "stopped", "ungrouped", "pilot-mixed", "uncited", "long", "trial", "trial-ending", "trial-cancelled", "ended", "brands-unread"] as const;
+export const FIXTURE_STATES = ["default", "signup", "signup-typed", "new", "young", "partial", "failed", "unreadable", "stopped", "ungrouped", "pilot-mixed", "uncited", "long", "trial", "trial-ending", "trial-cancelled", "ended", "brands-unread"] as const;
 
 /**
  * The alwaystracked trial and its end (8 Oct 2026, audit activation-14): the
@@ -151,6 +153,7 @@ export function fixtureState(f: Fixture, env: Record<string, string | undefined>
   const as = fixtureAs(f, env);
   if (env.TRACKING_FIXTURE_STATE === "pilot-mixed") return pilotMixed(as);
   if (env.TRACKING_FIXTURE_STATE === "new") return dayZero(as);
+  if (env.TRACKING_FIXTURE_STATE === "young") return young(as);
   if (env.TRACKING_FIXTURE_STATE === "signup") return signupNoKeyword(dayZero(as));
   if (env.TRACKING_FIXTURE_STATE === "signup-typed") {
     const s = signupNoKeyword(dayZero(as));
@@ -191,7 +194,40 @@ function dayZero(f: Fixture): Fixture {
       answers: [],
       serp: [],
       lastRun: null,
+      runs: [],
       notes: [],
+    },
+  };
+}
+
+/**
+ * 8 Oct 2026 (audit data-10): `TRACKING_FIXTURE_STATE=young` is a client
+ * that began tracking nine days ago - inside the 14-day trial - with every
+ * day since read, ten checks.
+ * The previous period reaches back before tracking began, so its changes are
+ * against its first week. Everything live began on its start day (or later),
+ * nothing stopped earlier is kept, and only readings from that day on remain.
+ */
+export const YOUNG_DAYS = 9;
+
+function young(f: Fixture): Fixture {
+  const start = addDays(f.today, -YOUNG_DAYS);
+  const kept = <T extends { stopped_on: Day | null }>(rows: T[]) => rows.filter((r) => r.stopped_on === null || r.stopped_on > start);
+  const from = (d: Day) => (d < start ? start : d);
+  return {
+    ...f,
+    client: { ...f.client, started_on: start },
+    clusterNotes: f.clusterNotes.filter((n) => n.note_date >= start),
+    placements: f.placements.filter((p) => !p.live_on || p.live_on >= start),
+    data: {
+      ...f.data,
+      clusters: kept(f.data.clusters).map((c) => ({ ...c, started_on: from(c.started_on) })),
+      questions: kept(f.data.questions).map((q) => ({ ...q, added_on: from(q.added_on) })),
+      keywords: kept(f.data.keywords).map((k) => ({ ...k, added_on: from(k.added_on) })),
+      answers: f.data.answers.filter((a) => a.run_date >= start),
+      serp: f.data.serp.filter((x) => x.run_date >= start),
+      runs: f.data.runs?.filter((r) => r.run_date >= start),
+      notes: f.data.notes.filter((n) => n.note_date >= start),
     },
   };
 }
@@ -288,17 +324,41 @@ function stoppedPrompt(f: Fixture): Fixture {
  * `partial`. `failed` is a run where no read landed: every row today is
  * unanswered, and since overview-data.ts reads only complete or partial runs,
  * the last check shown is the day before's.
+ *
+ * 8 Oct 2026 (audit data-3 / reliability-3): each state now has its run rows
+ * as the runner leaves them, error line included. `partial` also loses the
+ * Google AI Overview reads of one earlier day in the range
+ * (PARTIAL_EARLIER_DAYS back), so the range note's list is swept; `failed`'s
+ * today is a failed run, and its last good day carries the answer words
+ * (textsOn) - that day's verdicts are the default's today's, so the words and
+ * the verdicts agree.
  */
 const FAILED_ENGINE = "google_aio";
+export const PARTIAL_EARLIER_DAYS = 9;
 
 function failedReads(f: Fixture, outcome: "partial" | "failed"): Fixture {
-  const hit = (a: OverviewData["answers"][number]) => a.run_date === f.today && (outcome === "failed" || a.engine === FAILED_ENGINE);
-  const lastRun = outcome === "partial" ? { run_date: f.today, status: "partial", finished_at: `${f.today}T06:10:00Z` } : { run_date: addDays(f.today, -1), status: "complete", finished_at: `${addDays(f.today, -1)}T06:10:00Z` };
-  const texts = Object.fromEntries(Object.entries(f.texts).filter(([k]) => outcome === "partial" && !k.endsWith(` ${FAILED_ENGINE}`)));
+  const yesterday = addDays(f.today, -1);
+  const earlier = addDays(f.today, -PARTIAL_EARLIER_DAYS);
+  const lostDays = outcome === "partial" ? [f.today, earlier] : [f.today];
+  const hit = (a: OverviewData["answers"][number]) => lostDays.includes(a.run_date) && (outcome === "failed" || a.engine === FAILED_ENGINE);
+  const lastRun = outcome === "partial" ? { run_date: f.today, status: "partial", finished_at: `${f.today}T06:10:00Z` } : { run_date: yesterday, status: "complete", finished_at: `${yesterday}T06:10:00Z` };
+  const texts = Object.fromEntries(Object.entries(f.texts).filter(([k]) => outcome === "failed" || !k.endsWith(` ${FAILED_ENGINE}`)));
+  // failed: yesterday reads what the default reads today, so the words kept for it match its verdicts.
+  const todays = new Map(f.data.answers.filter((a) => a.run_date === f.today).map((a) => [`${a.question_id} ${a.engine}`, a]));
+  const moved = (a: OverviewData["answers"][number]) => {
+    const t = outcome === "failed" && a.run_date === yesterday ? todays.get(`${a.question_id} ${a.engine}`) : undefined;
+    return t ? { ...t, run_date: yesterday } : a;
+  };
+  const answers = f.data.answers.map(moved).map((a) => (hit(a) ? { ...a, answered: false, named: false, brands: [], citations: [] } : a));
+  const reads = (day: Day) => f.data.answers.filter((a) => a.run_date === day).length;
+  const lost = (day: Day) => answers.filter((a) => a.run_date === day && !a.answered).length;
+  const error = (day: Day) => `${lost(day)} of ${reads(day)} reads failed - ${FAILED_ENGINE}: ${lost(day)} x HTTP 500`;
+  const runs = (f.data.runs ?? []).map((r) => (lostDays.includes(r.run_date) ? { ...r, status: outcome, error: error(r.run_date) } : r));
   return {
     ...f,
     texts,
-    data: { ...f.data, lastRun, answers: f.data.answers.map((a) => (hit(a) ? { ...a, answered: false, named: false, brands: [], citations: [] } : a)) },
+    textsOn: outcome === "failed" ? yesterday : undefined,
+    data: { ...f.data, lastRun, runs, answers },
   };
 }
 
@@ -317,7 +377,9 @@ function brandsUnread(f: Fixture): Fixture {
   const reads = f.data.answers.filter((a) => a.run_date === f.today).length;
   const error = failureSummary(reads, [], [{ engine: UNREAD_ENGINE, unread: n, answered: n, reason: "language model error 529: Overloaded" }]);
   const lastRun = { run_date: f.today, status: "partial", finished_at: `${f.today}T06:10:00Z`, error };
-  return { ...f, data: { ...f.data, lastRun, answers: f.data.answers.map((a) => (hit(a) ? { ...a, brands: [], brands_ok: false } : a)) } };
+  // Merge of audit packages A and B (8 Oct 2026): today's run row says the same as lastRun, as tracking_runs would.
+  const runs = f.data.runs?.map((r) => (r.run_date === f.today ? { ...r, status: "partial", error } : r));
+  return { ...f, data: { ...f.data, lastRun, runs, answers: f.data.answers.map((a) => (hit(a) ? { ...a, brands: [], brands_ok: false } : a)) } };
 }
 
 /**
@@ -360,6 +422,8 @@ export function expandFixture(raw: {
   members?: FixtureMember[];
 }): Fixture {
   const subject = subjectKeys(raw.client.brand, raw.client.domain);
+  // 8 Oct 2026 (audit data-3): one complete run per day read, newest first, as tracking_runs holds them; the states break some.
+  const runDays = [...new Set(raw.data.answers.map(([d]) => d))].sort().reverse();
   return {
     client: { ...raw.client, id: "fixture" },
     member: raw.member,
@@ -371,6 +435,7 @@ export function expandFixture(raw: {
     members: raw.members ?? [{ ...raw.member, name: null, last_login_at: null }],
     data: {
       ...raw.data,
+      runs: raw.data.runs ?? runDays.map((run_date) => ({ run_date, status: "complete", error: null })),
       answers: raw.data.answers.map(([run_date, question_id, engine, named, brands, urls]) => ({
         run_date,
         question_id,

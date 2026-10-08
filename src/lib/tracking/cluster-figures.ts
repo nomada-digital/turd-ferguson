@@ -1,4 +1,4 @@
-import { type AnswerRow, type Day, type Range, type Rate, type SerpRow, brandsRead, daysIn, pointsDelta, rate } from "./figures.ts";
+import { type AnswerRow, type Day, type Overview, type Range, type Rate, type SerpRow, averagePosition, brandsRead, daysIn, formatDay, pointsDelta, rate } from "./figures.ts";
 import { APP_LIMITS } from "../../config/contact.ts";
 import type { Angle } from "./limits.ts";
 
@@ -72,9 +72,18 @@ export type ClusterCard = {
   /** Prompts with at least one named answer in the range, of the cluster's prompts. */
   promptsNamed: Rate;
   position: number | null;
+  /** The keyword had a Google reading in the range - so a null position is "outside the top 20", not "not read". */
+  positionRead: boolean;
   positionBefore: number | null;
   /** Places gained: #7 to #4 is +3. */
   positionChange: number | null;
+  /**
+   * 8 Oct 2026 (audit data-7): a live cluster's keyword that left the top 20
+   * ("dropped": ranked in the comparison, read and unranked now) or came into
+   * it ("entered"), or stayed out of it ("unranked"). positionChange is null
+   * for all three, and they read "New" and "same as from #13" before.
+   */
+  positionEvent: "dropped" | "entered" | "unranked" | null;
   prompts: ClusterPrompt[];
   /** One cell a day in the range: that day's share of the cluster's answers naming the client, null before its first check. */
   heat: (Rate | null)[];
@@ -82,8 +91,9 @@ export type ClusterCard = {
 
 const within = (d: Day, r: Range) => d >= r.from && d <= r.to;
 
-function latestPosition(serp: SerpRow[], keywordId: string | null, r: Range | null): number | null {
-  if (!keywordId || !r) return null;
+/** The keyword's latest Google reading in the range: its position (null outside the top 20) and its day, or no day when it was not read. */
+function latestReading(serp: SerpRow[], keywordId: string | null, r: Range | null): { at: Day | null; position: number | null } {
+  if (!keywordId || !r) return { at: null, position: null };
   let at: Day | null = null;
   let pos: number | null = null;
   for (const s of serp) {
@@ -93,7 +103,7 @@ function latestPosition(serp: SerpRow[], keywordId: string | null, r: Range | nu
       pos = s.position;
     }
   }
-  return pos;
+  return { at, position: pos };
 }
 
 function tally(answers: AnswerRow[], ids: Set<string>, r: Range): Rate {
@@ -118,15 +128,38 @@ export type ClusterSummary = {
   clustersLfl: number;
   prompts: number;
   promptsLfl: number;
-  /** "40 of 45", then "was 37 of 40" on the like-for-like prompts. */
+  /** "40 of 45": every prompt read in the range. */
   promptsNamed: Rate;
+  /**
+   * 8 Oct 2026 (audit data-4): the like-for-like prompts named in now and
+   * before - "37 of 40, was 37 of 40", no change. The strip used to set "40
+   * of 45" against "was 37 of 40", a gain made of the prompts added since.
+   */
+  promptsNamedLfl: Rate | null;
   promptsNamedBefore: Rate | null;
   never: { cluster: string; text: string }[];
-  /** Cluster keywords whose latest position is 1-10, of the keywords of clusters with readings, and their average. */
-  page1: Rate & { avg: number | null };
+  /**
+   * Cluster keywords whose latest position is 1-10, of the keywords of
+   * clusters with readings, and the average position of those read, one
+   * outside the top 20 counted as UNRANKED_AS (`unranked` of them; audit
+   * data-7, 8 Oct 2026).
+   */
+  page1: Rate & { avg: number | null; ranked: number; unranked: number };
+  /** On page 1 at the comparison's latest reading, and now, both on the clusters tracked all period (audit data-4). */
   page1Before: number | null;
+  page1Lfl: number | null;
   /** Keywords at #11-#20: the ones a push would put on page 1. */
   offPage1: string[];
+  /**
+   * The prompts behind `now` - every prompt of a cluster with readings - and
+   * behind `lfl`, those of the clusters tracked all period (review of audit
+   * ia-3, 8 Oct 2026). The Overview's "Who is named instead" card counts
+   * these, so it reads the headline's answers: counting every answer, a
+   * pending cluster holding moved prompts set the client at 27% under a
+   * headline of 25%.
+   */
+  ids: ReadonlySet<string>;
+  lflIds: ReadonlySet<string>;
 };
 
 /**
@@ -146,8 +179,10 @@ export function clusterSummary(cards: ClusterCard[]): ClusterSummary {
   // A prompt not yet asked counts in no denominator (audit data-1).
   const prompts = read.flatMap((c) => c.prompts.filter((p) => !p.pending));
   const promptsLfl = lfl.flatMap((c) => c.prompts.filter((p) => !p.pending));
-  const ranked = read.map((c) => c.position).filter((p): p is number => p !== null);
+  const readKw = read.filter((c) => c.positionRead);
+  const ranked = readKw.map((c) => c.position).filter((p): p is number => p !== null);
   const hasBefore = lfl.length > 0 && lfl.some((c) => c.positionBefore !== null);
+  const promptsNamedBefore = promptsLfl.every((p) => p.before) && promptsLfl.length ? rate(promptsLfl.filter((p) => p.before!.num > 0).length, promptsLfl.length) : null;
   return {
     now: sum(read, (c) => c.now) ?? rate(0, 0),
     lfl: lflNow,
@@ -158,11 +193,55 @@ export function clusterSummary(cards: ClusterCard[]): ClusterSummary {
     prompts: prompts.length,
     promptsLfl: promptsLfl.length,
     promptsNamed: rate(prompts.filter((p) => p.now.num > 0).length, prompts.length),
-    promptsNamedBefore: promptsLfl.every((p) => p.before) && promptsLfl.length ? rate(promptsLfl.filter((p) => p.before!.num > 0).length, promptsLfl.length) : null,
+    promptsNamedLfl: promptsNamedBefore ? rate(promptsLfl.filter((p) => p.now.num > 0).length, promptsLfl.length) : null,
+    promptsNamedBefore,
     never: read.flatMap((c) => c.prompts.filter((p) => !p.pending && p.now.den > 0 && p.now.num === 0).map((p) => ({ cluster: c.keyword ?? c.name, text: p.text }))),
-    page1: { ...rate(ranked.filter((p) => p <= 10).length, read.length), avg: ranked.length ? Math.round((ranked.reduce((s, p) => s + p, 0) / ranked.length) * 10) / 10 : null },
+    page1: { ...rate(ranked.filter((p) => p <= 10).length, read.length), avg: averagePosition(readKw.map((c) => c.position)), ranked: ranked.length, unranked: readKw.length - ranked.length },
     page1Before: hasBefore ? lfl.filter((c) => c.positionBefore !== null && c.positionBefore <= 10).length : null,
+    page1Lfl: hasBefore ? lfl.filter((c) => c.position !== null && c.position <= 10).length : null,
     offPage1: read.filter((c) => c.position !== null && c.position >= 11 && c.position <= 20).map((c) => c.keyword ?? c.name),
+    ids: new Set(read.flatMap((c) => c.prompts.map((p) => p.id))),
+    lflIds: new Set(lfl.flatMap((c) => c.prompts.map((p) => p.id))),
+  };
+}
+
+export type KeyFigureChanges = {
+  /** The headline's and the first figure's change, in points. */
+  named: number | null;
+  /** Prompts named in, like-for-like now and before. */
+  prompts: { now: Rate; before: Rate } | null;
+  /** "like-for-like 37 of 40, no change" - the prompts figure's foot. */
+  promptsLine: string | null;
+  sov: number | null;
+  /** Keywords on page 1, in keywords. */
+  page1: number | null;
+};
+
+/**
+ * The Overview's key-figure chips (8 Oct 2026, audit data-4): every one is
+ * its like-for-like change, as the headline's is. The figure counts
+ * everything in the range; the chip only what was tracked all of both
+ * periods, so "40 of 45, was 37 of 40" - really no change - and a cluster
+ * added on page 1 no longer read as gains. `byCluster` is the summary when
+ * the headline reads by cluster (every prompt grouped), else null; `cs` the
+ * summary whenever there are clusters, for page 1.
+ */
+export function keyFigureChanges(o: Pick<Overview, "lfl" | "change">, cs: ClusterSummary | null, byCluster: ClusterSummary | null): KeyFigureChanges {
+  const prompts = byCluster
+    ? byCluster.promptsNamedLfl && byCluster.promptsNamedBefore
+      ? { now: byCluster.promptsNamedLfl, before: byCluster.promptsNamedBefore }
+      : null
+    : (o.change?.questions ?? null);
+  return {
+    named: byCluster ? byCluster.lflDelta : o.lfl ? pointsDelta(o.lfl.now, o.lfl.before) : null,
+    prompts,
+    promptsLine: prompts
+      ? `like-for-like ${prompts.now.num} of ${prompts.now.den}, ${
+          prompts.now.den !== prompts.before.den ? `was ${prompts.before.num} of ${prompts.before.den}` : prompts.now.num === prompts.before.num ? "no change" : `was ${prompts.before.num}`
+        }`
+      : null,
+    sov: o.change?.sov ?? null,
+    page1: cs ? (cs.page1Lfl !== null && cs.page1Before !== null ? cs.page1Lfl - cs.page1Before : null) : o.change?.keywords ? o.change.keywords.now - o.change.keywords.before : null,
   };
 }
 
@@ -197,7 +276,8 @@ export function clusterChart(input: ClusterInput, clusterId: string): ClusterCha
       const s = c.keyword_id ? input.serp.find((x) => x.keyword_id === c.keyword_id && x.run_date === d) : undefined;
       return s?.position ?? null;
     });
-  const earliest = input.before && input.before.from < input.range.from ? input.before.from : input.range.from;
+  // 8 Oct 2026 (audit data-10): the comparison's first day, even when it is the first week inside the range.
+  const earliest = input.before ? input.before.from : input.range.from;
   const live = c.started_on <= earliest;
   return {
     days: daysIn(input.range),
@@ -222,7 +302,10 @@ export function pendingBasis(c: ClusterCard): string | null {
 export function clusterCards(input: ClusterInput): ClusterCard[] {
   const { range, before, today, engines } = input;
   const days = daysIn(range);
-  const earliest = before && before.from < range.from ? before.from : range.from;
+  // Like-for-like runs from the comparison's first day (figures.ts overview). That is
+  // before the range for the previous period; for a young client's first week
+  // (audit data-10, 8 Oct 2026) it can be after the range's first, untracked, day.
+  const earliest = before ? before.from : range.from;
 
   // 8 Oct 2026 (audit data-1): a past range counted clusters and prompts that
   // started after it ended - August read "37 of 45" when there were 40. Only a
@@ -237,8 +320,8 @@ export function clusterCards(input: ClusterInput): ClusterCard[] {
       const status: ClusterStatus = c.started_on > today ? "pending" : c.started_on > earliest ? "added" : "live";
 
       const now = tally(input.answers, ids, range);
-      const was = before && status === "live" ? tally(input.answers, ids, before) : null;
-      const wasRate = was && was.den ? was : null;
+      const then = before && status === "live" ? tally(input.answers, ids, before) : null;
+      const wasRate = then && then.den ? then : null;
 
       const cells = new Map<Day, { num: number; den: number }>();
       const byPrompt = new Map<string, { engines: Set<string> }>();
@@ -269,8 +352,12 @@ export function clusterCards(input: ClusterInput): ClusterCard[] {
         cells.set(a.run_date, cell);
       }
 
-      const position = latestPosition(input.serp, c.keyword_id, range);
-      const positionBefore = status === "live" ? latestPosition(input.serp, c.keyword_id, before) : null;
+      const reading = latestReading(input.serp, c.keyword_id, range);
+      const was = status === "live" ? latestReading(input.serp, c.keyword_id, before) : { at: null, position: null };
+      const position = reading.position;
+      const positionBefore = was.position;
+      const positionEvent =
+        reading.at === null || was.at === null ? null : positionBefore !== null && position === null ? "dropped" : positionBefore === null && position !== null ? "entered" : positionBefore === null && position === null ? "unranked" : null;
 
       return {
         id: c.id,
@@ -287,8 +374,10 @@ export function clusterCards(input: ClusterInput): ClusterCard[] {
         delta: pointsDelta(now, wasRate),
         promptsNamed: rate(byPrompt.size, prompts.filter((q) => q.added_on <= range.to).length),
         position,
+        positionRead: reading.at !== null,
         positionBefore,
         positionChange: position !== null && positionBefore !== null ? positionBefore - position : null,
+        positionEvent,
         prompts: prompts.map((q) => {
           const one = new Set([q.id]);
           const p = tally(input.answers, one, range);
@@ -347,10 +436,27 @@ export function clusterDetail(input: ClusterInput, clusterId: string): ClusterDe
     .reduce<{ engine: string; rate: Rate } | null>((best, e) => (e.rate.num > 0 && (!best || e.rate.num > best.rate.num) ? e : best), null);
   const keywordId = input.clusters.find((c) => c.id === clusterId)?.keyword_id ?? null;
   let positionBeforeOn: Day | null = null;
-  if (card.positionBefore !== null && keywordId && input.before) {
+  // The day of the comparison's reading - a ranked one, or the unranked one a keyword entered the top 20 from (audit data-7).
+  if ((card.positionBefore !== null || card.positionEvent === "entered") && keywordId && input.before) {
     for (const s of input.serp) if (s.keyword_id === keywordId && within(s.run_date, input.before) && (positionBeforeOn === null || s.run_date > positionBeforeOn)) positionBeforeOn = s.run_date;
   }
   return { card, reliable, positionBeforeOn };
+}
+
+/**
+ * The one-cluster page's Google line after its position (8 Oct 2026, audit
+ * data-7): ", up from #7 on 1 Sep", ", down from #13 on 1 Sep" for a keyword
+ * that left the top 20, ", up from outside the top 20 on 1 Sep" for one that
+ * entered it. "" with no reading to compare. A null change fell through to
+ * "same as" before, so a drop-out read "Not in the top 20, same as from #13".
+ */
+export function positionMove(c: Pick<ClusterCard, "positionEvent" | "positionChange" | "positionBefore">, beforeOn: Day | null): string {
+  if (!beforeOn) return "";
+  const on = formatDay(beforeOn);
+  if (c.positionEvent === "dropped") return `, down from #${c.positionBefore} on ${on}`;
+  if (c.positionEvent === "entered") return `, up from outside the top 20 on ${on}`;
+  if (c.positionChange === null || c.positionBefore === null) return "";
+  return `, ${c.positionChange > 0 ? "up from" : c.positionChange < 0 ? "down from" : "unchanged from"} #${c.positionBefore} on ${on}`;
 }
 
 /** The row's "days named, of N" (DS73, 2 Oct 2026): "of up to N" once any engine answered on fewer of the prompt's days, so no count reads against days it was not read. */

@@ -1,4 +1,4 @@
-import { type Day, type Range, addDays, comparisonRange, daysIn, formatDay } from "./figures.ts";
+import { type Day, type Range, addDays, comparisonRange, daysIn, formatDay, resolveComparison } from "./figures.ts";
 
 /**
  * The date range picker's rules (T5 part 1, 30 Sep 2026; BRIEF T5 against
@@ -157,12 +157,22 @@ export const COMPARE_OPTIONS: { id: Compare; label: string }[] = [
   { id: "none", label: "Nothing" },
 ];
 
-/** The compare control's one-line explanation, in the board's words; the comparison range is `comparisonRange`'s, as the figures read it. */
-export function compareText(r: Range, compare: Compare, startedOn: Day | null): string {
+/**
+ * The compare control's one-line explanation, in the board's words. The
+ * comparison is resolveComparison's with the page's own firstCheck
+ * (figures.ts firstCheckDay), so it names the week the page will read
+ * (8 Oct 2026, review of audit data-10: called without it, the picker's
+ * first week began on started_on while the page's began on the first day
+ * read).
+ */
+export function compareText(r: Range, compare: Compare, startedOn: Day | null, firstCheck: Day | null = null): string {
   const c = comparisonRange(r, compare);
   if (!c) return "No comparison. The chart shows this period only.";
   const span = `${formatDay(c.from)} - ${formatDay(c.to)}`;
-  if (startedOn && c.from < startedOn) return `Compared with ${span}. Tracking began ${formatDay(startedOn)}, so part of that period has no data.`;
+  // 8 Oct 2026 (audit data-10): a period reaching back before tracking began is replaced by the first week, as every page reads it.
+  const res = resolveComparison(r, compare, startedOn, firstCheck);
+  if (startedOn && res.kind === "start" && res.range) return `Tracking began ${formatDay(startedOn)}, so this compares with your first week, ${formatDay(res.range.from)} - ${formatDay(res.range.to)}.`;
+  if (startedOn && !res.range) return `Tracking began ${formatDay(startedOn)}, so there is no earlier period to compare with yet.`;
   return compare === "prev" ? `Compared with ${span}, the ${daysIn(r).length} days before.` : `Compared with ${span}.`;
 }
 

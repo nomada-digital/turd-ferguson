@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import { clusterCards, clusterChart, clusterDetail, promptBrands, promptStrip } from "./cluster-figures.ts";
-import { type Range, addDays, comparisonRange } from "./figures.ts";
+import { type Range, addDays, brandGaps, comparisonRange, firstCheckDay, resolveComparison } from "./figures.ts";
 import { type Fixture, expandFixture, fixtureState } from "./fixture-mode.ts";
 import type { OverviewData } from "./overview-data.ts";
 import { chartSeries, citeRows, placementsView } from "./placement-figures.ts";
@@ -12,6 +12,7 @@ import { presets } from "./date-range.ts";
 import { PAGE } from "../supabase/page.ts";
 import { ANSWER_SELECT, type AnswersQuery, type AnswersTable, type ReadOpts, answerPlan, answerRow, boundStated, clusterQuestionIds, monthSlice, planPrompts, rangeFloor, readAnswers, reportSpan, selectColumns, shapeRead } from "./read-shape.ts";
 import { monthFigures, reportMonths } from "./report-months.ts";
+import { runNote } from "./run-note.ts";
 
 /**
  * The narrow reads (8 Oct 2026, audit perf-4, perf-9, perf-1). Each page on
@@ -24,7 +25,9 @@ import { monthFigures, reportMonths } from "./report-months.ts";
  */
 
 const base = expandFixture(JSON.parse(readFileSync(new URL("./fixture.json", import.meta.url), "utf8")));
-const STATES = ["default", "long", "partial", "failed", "stopped", "uncited", "pilot-mixed", "ungrouped", "new"];
+// young and brands-unread added 8 Oct 2026 (merge of audit packages A, B and C): the first-week comparison
+// (audit data-10) must sit inside the read, and an unread brand answer must read the same on a narrow read.
+const STATES = ["default", "long", "partial", "failed", "stopped", "uncited", "pilot-mixed", "ungrouped", "new", "young", "brands-unread"];
 const fixtures: [string, Fixture][] = STATES.map((s) => [s, fixtureState(base, { TRACKING_FIXTURE_STATE: s })]);
 const engines = [...new Set(base.data.answers.map((a) => a.engine))];
 
@@ -223,6 +226,29 @@ test("every Reports card is the same on the verdicts-only, month-sliced read, on
   assert.ok(cards >= 30, `only ${cards} cards compared`);
 });
 
+/**
+ * Merge of audit packages B and C (8 Oct 2026): Reports shows the picked range's lost checks (runNote, audit
+ * data-3) from its verdicts-only read. runNote reads the runs and, for a failed day, whether it stored an
+ * answer - run_date and answered, which verdicts keep - so the note is the full read's. A day that failed
+ * after storing its answers is added to the states, as the fixture has none.
+ */
+test("Reports' range note is the same on the verdicts-only read as on the whole read", () => {
+  let notes = 0;
+  let said = 0;
+  const stored = (f: Fixture): Fixture => ({ ...f, data: { ...f.data, runs: f.data.runs?.map((r) => (r.run_date === f.today ? { ...r, status: "failed", error: "could not store the keyword positions: timeout" } : r)) } });
+  for (const [state, f] of [...fixtures, ["failed-after-storing", stored(base)] as [string, Fixture]]) {
+    const span = reportSpan(reportMonths(f.client.started_on, f.today), f.today);
+    const narrow = within(shapeRead(f.data, { answers: "verdicts" }), span);
+    for (const range of [{ from: addDays(f.today, -27), to: f.today }, { from: addDays(f.today, -13), to: addDays(f.today, -1) }, { from: span.from, to: f.today }]) {
+      const note = runNote(f.data, range, f.today);
+      assert.equal(runNote(narrow, range, f.today), note, `${state} ${range.from}`);
+      notes++;
+      if (note) said++;
+    }
+  }
+  assert.ok(notes >= 30 && said >= 5, `${notes} notes compared, ${said} of them saying something`);
+});
+
 /** The one-cluster page's figures, as clusters/[cluster]/page.tsx and OneCluster.tsx draw them. */
 function oneCluster(data: OverviewData, f: Fixture, range: Range, before: Range | null, id: string) {
   const input = { clusters: data.clusters, questions: data.questions, keywords: data.keywords, answers: data.answers, serp: data.serp, range, before, today: f.today, engines };
@@ -236,22 +262,32 @@ function oneCluster(data: OverviewData, f: Fixture, range: Range, before: Range 
     chart: clusterChart(input, id),
     strips: prompts.map((p) => promptStrip({ answers: data.answers, range, engines }, p.id)),
     brands: prompts.map((p) => promptBrands({ answers: data.answers, range }, p.id, f.client.brand)),
+    // Merge of audit packages A, B and C (8 Oct 2026): each prompt's unread brand answers (A), and the range's note
+    // (B), asked as OneCluster.tsx asks it - with the days the cluster's prompts were asked.
+    unread: prompts.map((p) => brandGaps(data.answers.filter((a) => a.question_id === p.id), range)),
+    note: runNote(data, range, f.today, { askedOn: (d) => data.questions.some((q) => q.cluster_id === id && q.added_on <= d && (q.stopped_on === null || q.stopped_on > d)) }),
   };
 }
 
 test("the one-cluster page draws the same from its own prompts' answers as from every cluster's", () => {
   let pages = 0;
-  for (const [state, f] of fixtures) {
+  // Merge of audit packages B and C (8 Oct 2026): a check that failed after storing its answers, which the
+  // fixture has none of, so the range note's "did not finish" is compared on the narrow read too.
+  const stored: Fixture = { ...base, data: { ...base.data, runs: base.data.runs?.map((r) => (r.run_date === base.today ? { ...r, status: "failed", error: "could not store the keyword positions: timeout" } : r)) } };
+  for (const [state, f] of [...fixtures, ["failed-after-storing", stored] as [string, Fixture]]) {
     const ranges: [Range, "prev" | "month" | "none"][] = [
       [{ from: addDays(f.today, -27), to: f.today }, "prev"],
       [{ from: "2026-08-10", to: "2026-09-20" }, "month"],
       [{ from: "2026-09-01", to: "2026-09-14" }, "none"],
     ];
     for (const [range, compare] of ranges) {
-      const before = comparisonRange(range, compare);
-      const full = within(f.data, { from: before?.from ?? range.from, to: range.to });
+      // loadOverview reads from the picked comparison's first day; the page compares with resolveComparison's,
+      // the first week for a young client (audit data-10, merged 8 Oct 2026), which lies inside that read.
+      const read = comparisonRange(range, compare);
+      const before = resolveComparison(range, compare, f.client.started_on, firstCheckDay(f.client.started_on, f.data.questions)).range;
+      const full = within(f.data, { from: read?.from ?? range.from, to: range.to });
       for (const c of [...f.data.clusters.map((x) => x.id), "not-a-cluster"]) {
-        const narrow = within(shapeRead(f.data, { cluster: c }), { from: before?.from ?? range.from, to: range.to });
+        const narrow = within(shapeRead(f.data, { cluster: c }), { from: read?.from ?? range.from, to: range.to });
         assert.deepEqual(oneCluster(narrow, f, range, before, c), oneCluster(full, f, range, before, c), `${state} ${c} ${range.from}`);
         pages++;
       }
@@ -297,7 +333,9 @@ const USES: [string, string, RegExp, string[]][] = [
     // 8 Oct 2026 (merge of audit packages A and C): the picked prompt's unread brand answers - its own answers, inside the narrow read.
     "brandGaps(data.answers.filter((a) => a.question_id === P.id), range)"]],
   ["the placements screen", "./placements-screen.ts", /data\.answers/g, ["answers: data.answers, serp: data.serp, range, before: null", "cites: citeRows(data.answers)"]],
-  ["Reports", "../../app/app/[client]/reports/page.tsx", /(?<![-\w])data\b(?!\.clusters)/g, ["monthFigures(monthSlice(data, m.range)"]],
+  ["Reports", "../../app/app/[client]/reports/page.tsx", /(?<![-\w])data\b(?!\.clusters)/g, ["monthFigures(monthSlice(data, m.range)",
+    // 8 Oct 2026 (merge of audit packages B and C): the range's lost checks, compared above on the verdicts read.
+    "note={runNote(data, range, today)}"]],
 ];
 
 test("census: the pages on a narrow read use their answers only where compared above", () => {

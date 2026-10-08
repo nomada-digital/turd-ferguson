@@ -9,7 +9,7 @@ import { enginesFor, trackingPackPrice } from "@/config/pricing";
 import { T } from "@/config/tokens";
 import { CLUSTER_BASE } from "@/lib/tracking/limits";
 import { clusterCards, clusterDetail, promptIndex } from "@/lib/tracking/cluster-figures";
-import { comparisonRange } from "@/lib/tracking/figures";
+import { firstCheckDay, resolveComparison } from "@/lib/tracking/figures";
 import { engineTab } from "@/lib/tracking/latest-answers";
 import { noteState } from "@/lib/tracking/note";
 import { rangeFrom, rangeQuery } from "@/lib/tracking/overview-data";
@@ -51,9 +51,10 @@ export default async function ClientCluster({
   const today = repo.today();
   const sp = await searchParams;
   const { range, compare } = rangeFrom(sp, today, client.started_on);
-  // perf-9 (8 Oct 2026): this cluster's prompts' answers only; every cluster is still read, for "N of M".
+  // perf-9 (8 Oct 2026): this cluster's prompts' answers only; every cluster and prompt is still read, for "N of M"
+  // and for firstCheckDay, which reads every prompt as every other page does (audit data-10).
   const data = await repo.loadOverview(client.id, range, compare, { cluster: id });
-  const input = { clusters: data.clusters ?? [], questions: data.questions, keywords: data.keywords, answers: data.answers, serp: data.serp, range, before: comparisonRange(range, compare), today, engines };
+  const input = { clusters: data.clusters ?? [], questions: data.questions, keywords: data.keywords, answers: data.answers, serp: data.serp, range, before: resolveComparison(range, compare, client.started_on, firstCheckDay(client.started_on, data.questions)).range, today, engines };
   const detail = clusterDetail(input, id);
   if (!detail) notFound();
   const cards = clusterCards(input);
