@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 
-import { blocksOf, headClaims, pageText, schemaClaims, sweptPages, type Page } from "./dynamic-render.mts";
+import { CAPABILITIES } from "../config/capabilities.ts";
+import { gatesIn, withholds } from "./capability-gates.mts";
+import { blocksOf, headClaims, pageText, PRERENDER_DIR, schemaClaims, sweptPages, type Page } from "./dynamic-render.mts";
 
 /**
  * What the site says about where the white-label line sits.
@@ -58,6 +60,20 @@ import { blocksOf, headClaims, pageText, schemaClaims, sweptPages, type Page } f
  * not the noun but the quantifier: an unbounded universal is false whatever it
  * goes on to name. The vocabulary rule is kept for the other direction, where
  * it does fire, and its own injection is what earns it.
+ *
+ * **8 Oct 2026, LB1: the table was the ground truth, and the table was
+ * wrong.** Every rule here checks the site against the table; nothing checked
+ * the table against the product. Two of its three "Yours" rows - "The
+ * visibility dashboard: Your logo and colours" and "Monthly reporting: none
+ * of our marks" - described a white label that is not built (the dashboard
+ * draws our mark in every mode, the sign-in mail says alwaystracked, a report
+ * is a CSV), so this file was enforcing a false line faithfully. Those rows
+ * now sit inside `listIf` with the capability they claim
+ * (`config/capabilities.ts`), and this file reads a row as the table's only
+ * while its gate is open: the rules derive from the LIVE rows, the live rows
+ * must render, and a withheld row must not. `capability-claims.test.mts` is
+ * the check against the product. The fact moved from "three rows are the
+ * agency's" to one - "Placement summaries" - and is recorded below.
  */
 
 const PAGE = "src/app/white-label/page.tsx";
@@ -74,20 +90,31 @@ type Row = { surface: string; brand: string; note: string };
  * missing one of them shortens the result instead of pairing one row's surface
  * with another row's brand.
  */
-function parseRows(source: string): Row[] {
+function parseRows(source: string): (Row & { at: number })[] {
   const re = /\{\s*surface:\s*"([^"]+)",\s*brand:\s*"([^"]+)",\s*note:\s*"([^"]+)"\s*\}/g;
-  return [...source.matchAll(re)].map((m) => ({ surface: m[1]!, brand: m[2]!, note: m[3]! }));
+  return [...source.matchAll(re)].map((m) => ({ surface: m[1]!, brand: m[2]!, note: m[3]!, at: m.index }));
 }
 
 const source = readFileSync(PAGE, "utf8");
 const ROWS = parseRows(source);
 
+/**
+ * Which rows the page draws today. A row inside a gate whose capability is off
+ * is withheld (8 Oct 2026): it is a claim waiting on the product, not part of
+ * the line the page states, so no rule below derives from it.
+ */
+const GATES = gatesIn(source);
+const isWithheld = (at: number) => GATES.some((g) => g.start <= at && at < g.end && withholds(g, CAPABILITIES));
+const LIVE = ROWS.filter((r) => !isWithheld(r.at));
+const WITHHELD = ROWS.filter((r) => isWithheld(r.at));
+
 /** The agency's surfaces, and the ones that are not. "Yours" is the table's
  *  own word for the agency and the only value that means it; "Ours",
  *  "Ours, to you" and "The publisher's" are all not-the-agency's, and the
- *  distinction between those three does not matter to any rule here. */
-const AGENCY = ROWS.filter((r) => r.brand === "Yours");
-const NOT_AGENCY = ROWS.filter((r) => r.brand !== "Yours");
+ *  distinction between those three does not matter to any rule here. Live
+ *  rows only, since 8 Oct 2026. */
+const AGENCY = LIVE.filter((r) => r.brand === "Yours");
+const NOT_AGENCY = LIVE.filter((r) => r.brand !== "Yours");
 
 /**
  * Every swept page, chrome included.
@@ -101,7 +128,9 @@ const NOT_AGENCY = ROWS.filter((r) => r.brand !== "Yours");
  * once and could never have fired, which is the exact trap `price-claims`
  * walked into with the footer's tier list.
  */
-const pages: Page[] = sweptPages();
+// Read only when there is a build, so the source-only rules above still run on
+// an unbuilt tree; the build-required test below fails there either way.
+const pages: Page[] = existsSync(PRERENDER_DIR) ? sweptPages() : [];
 
 /**
  * A page as claims, one block at a time.
@@ -184,6 +213,25 @@ test("the parse reads every row the page declares, so this file cannot go blind"
   assert.equal(new Set(ROWS.map((r) => r.surface)).size, ROWS.length, "two rows parsed with the same surface");
 });
 
+test("the rows the product cannot back are withheld - two, as of 8 Oct 2026", () => {
+  /**
+   * The dated fact. "The visibility dashboard" waits on `dashboardBranding`
+   * (AG-2) and "Monthly reporting" on `reportBranding` (RP-1). When either
+   * ships, its flag flips in `config/capabilities.ts`, the row returns in its
+   * own words, and this list moves with the date - one edit beside the
+   * evidence, not a silent change in what the rules below derive from.
+   */
+  assert.deepEqual(
+    WITHHELD.map((r) => r.surface),
+    ["The visibility dashboard", "Monthly reporting"],
+  );
+  assert.deepEqual(
+    AGENCY.map((r) => r.surface),
+    ["Placement summaries"],
+    "the agency's live rows moved - record it here with the reason and the date",
+  );
+});
+
 test("the pages this checks against were actually built", () => {
   assert.ok(pages.length > 15, "no build to read - run `npm run build` then `npm run capture`");
 });
@@ -219,8 +267,12 @@ test("the table's surfaces are on the rendered page, not only in the source", ()
   const wl = pages.find((p) => p.page.endsWith("white-label.html"));
   assert.ok(wl, "no /white-label in the build, so the table this file derives from reaches no reader");
   const body = pageText(wl.html).replace(/\s+/g, " ");
-  const missing = ROWS.filter((r) => !body.includes(r.surface)).map((r) => r.surface);
+  const missing = LIVE.filter((r) => !body.includes(r.surface)).map((r) => r.surface);
   assert.deepEqual(missing, [], "a row in the source table does not render on /white-label");
+  // And the other way, since 8 Oct 2026: a withheld row is a claim the
+  // product cannot back, so finding it rendered means its gate is not wired.
+  const leaked = WITHHELD.filter((r) => body.includes(r.surface) || body.includes(r.note)).map((r) => r.surface);
+  assert.deepEqual(leaked, [], "a row withheld behind an off capability renders on /white-label");
 });
 
 test("no page claims white labelling covers everything", () => {

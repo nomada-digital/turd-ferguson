@@ -3,6 +3,7 @@ import Link from "next/link";
 import { OG_IMAGE } from "@/config/og";
 
 import TierName from "@/components/TierName";
+import { listIf } from "@/config/capabilities";
 import { TIERS } from "@/config/pricing";
 import { CARD, GRID12, MICRO, SHELL, T } from "@/config/tokens";
 
@@ -39,6 +40,9 @@ export const metadata: Metadata = {
  *
  * The best argument on the board survives untouched: the card saying when a
  * tracking tool is the better purchase. That needs nobody else's facts.
+ *
+ * "White label for agencies: Yes" waits on `dashboardBranding` (LB1, 8 Oct
+ * 2026): no dashboard carries an agency's brand yet.
  */
 
 type Column = { key: string; label: React.ReactNode; emphasis?: boolean };
@@ -55,7 +59,7 @@ const ROWS: { feature: string; values: Record<string, string> }[] = [
   { feature: "Stores what each engine said behind every reading", values: { us: "Yes" } },
   { feature: "Places your brand into those source pages", values: { us: "Yes" } },
   { feature: "Reports the Google position alongside the citation", values: { us: "Yes" } },
-  { feature: "White label for agencies", values: { us: "Yes" } },
+  ...listIf("dashboardBranding", { feature: "White label for agencies", values: { us: "Yes" } }),
   { feature: "Price published without a call", values: { us: "Yes" } },
   { feature: "Entry price", values: { us: entry } },
 ];

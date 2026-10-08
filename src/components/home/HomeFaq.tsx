@@ -1,4 +1,5 @@
 import { ALWAYS_ON, ALWAYS_ON_SUPPORT } from "@/config/always-on";
+import { onlyIf } from "@/config/capabilities";
 import { WAITLIST_LIMITS } from "@/config/contact";
 import { FREE_ENGINE_COUNT, QUESTIONS } from "@/config/scan-shape";
 import { PACK_CLUSTERS, PACK_KEYWORDS, PACK_PROMPTS, TRACKED_CLUSTERS, TRACKED_PROMPTS, TRACKING_PACK_PRICE } from "@/config/pricing";
@@ -27,8 +28,13 @@ export type Faq = { q: string; hint: string; a: string };
 export const FAQS: Faq[] = [
   {
     q: "If I am an agency, will you contact my client?",
-    hint: "No, and it is in the agreement",
-    a: "No. Not for a case study, not for a testimonial, not after the engagement ends. Every surface a client opens carries your branding, and the only place our name appears is on the invoice to you.",
+    // 8 Oct 2026 (LB1): /legal publishes no agreement for "it is in the
+    // agreement" to point at, so the hint says only what is true. The
+    // branding sentence waits on a dashboard in the agency's brand.
+    hint: "No",
+    a:
+      "No. Not for a case study, not for a testimonial, not after the engagement ends." +
+      (onlyIf("dashboardBranding", " Every surface a client opens carries your branding, and the only place our name appears is on the invoice to you.") ?? ""),
   },
   {
     q: "Do I need links, or do mentions count?",

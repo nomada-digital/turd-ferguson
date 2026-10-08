@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { OG_IMAGE } from "@/config/og";
 import PackagePage from "@/components/PackagePage";
+import { listIf } from "@/config/capabilities";
 import { priceProse, TIERS } from "@/config/pricing";
 
 const tier = TIERS.find((t) => t.id === "cited")!;
@@ -29,7 +30,8 @@ export default function Page() {
         "Link insertions inside existing high-authority articles",
         "Insertions agreed with the publisher and with you",
         "Both the AI citation and the Google position worked deliberately",
-        "White-label reporting with your logo",
+        // A report in the agency's brand is not built yet (LB1, 8 Oct 2026).
+        ...listIf("reportBranding", "White-label reporting with your logo"),
       ]}
       notIncluded={{
         text: "One topic, one market. For several markets, several brands, or a dedicated strategist, that is",

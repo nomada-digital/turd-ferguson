@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { OG_IMAGE } from "@/config/og";
 import PackagePage from "@/components/PackagePage";
+import { listIf, onlyIf } from "@/config/capabilities";
 import { priceProse, TIERS } from "@/config/pricing";
 
 const tier = TIERS.find((t) => t.id === "mentioned")!;
@@ -9,7 +10,11 @@ const price = priceProse(tier);
 export const metadata: Metadata = {
   title: "alwaysmentioned | AI citation placements",
   description:
-    "Three placements a month in the sources AI engines already cite for your client's topic, white-labelled." +
+    // "white-labelled" and the reporting line below claim a dashboard and a
+    // report in the agency's brand, neither built yet (LB1, 8 Oct 2026).
+    "Three placements a month in the sources AI engines already cite for your client's topic" +
+    (onlyIf("dashboardBranding", ", white-labelled") ?? "") +
+    "." +
     (price ? ` ${price}, priced per topic.` : ""),
   openGraph: { url: "https://alwayscited.com/alwaysmentioned", images: OG_IMAGE },
   alternates: { canonical: "https://alwayscited.com/alwaysmentioned" },
@@ -29,7 +34,7 @@ export default function Page() {
         "Best-of lists, comparisons and round-ups, approached through editors we work with",
         "Anchor text agreed with you before anything goes live",
         "Everything in alwaystracked, so you can see what each placement did",
-        "White-label reporting with your logo",
+        ...listIf("reportBranding", "White-label reporting with your logo"),
       ]}
       notIncluded={{
         text: "This package wins the mention. It does not do on-page work. For schema and link insertions that go after the Google position directly, that is",

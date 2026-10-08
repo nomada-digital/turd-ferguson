@@ -3,6 +3,7 @@ import Link from "next/link";
 
 import PostShell, { H2, Method, OL, P, UL } from "@/components/PostShell";
 import TierName from "@/components/TierName";
+import { onlyIf } from "@/config/capabilities";
 import { TRACKED_BASIS, TRACKED_PRICE } from "@/config/pricing";
 import { blogPostingSchema, postMetadata, postUrl, requirePost, type PostCopy } from "@/config/posts";
 import { FREE_ANSWERS, FREE_ENGINE_LABELS, QUESTIONS, listOf } from "@/config/scan-shape";
@@ -205,8 +206,9 @@ export default function Post() {
             . Monthly, no minimum term.
           </li>
           <li>
-            <B>Agencies can resell it.</B> <TierName tier="tracked" /> to <TierName tier="cited" /> are
-            white-label.
+            <B>Agencies can resell it.</B>
+            {/* "are white-label" waits on a dashboard in the agency's brand (LB1, 8 Oct 2026). */}
+            {onlyIf("dashboardBranding", <> <TierName tier="tracked" /> to <TierName tier="cited" /> are white-label.</>)}
           </li>
         </UL>
         <P>
