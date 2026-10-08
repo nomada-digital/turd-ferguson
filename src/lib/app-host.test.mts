@@ -3,7 +3,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { APP_PREFIX, appHost, appOrigin, appPath, appUrl, internalPath, isAppHost, passesThrough, stripPrefix } from "./app-host.ts";
+import { APP_PREFIX, SITE_ORIGIN, appHost, appOrigin, appPath, appUrl, internalPath, isAppHost, passesThrough, siteHref, siteHrefAt, siteOrigin, stripPrefix } from "./app-host.ts";
 
 /**
  * M1 of docs/tracked-dashboard-2026-10-05-app/04-migration-brief.md
@@ -166,4 +166,94 @@ test("the dashboard's paths go through the helper, and there are plenty of them"
     if (/\bappPath\s*\(/.test(readFileSync(file, "utf8"))) callers += 1;
   }
   assert.ok(callers >= 24, `only ${callers} files call appPath(); 24 is the recorded floor`);
+});
+
+/* ------------------------------------------------------------------ */
+
+/**
+ * Audit ia-2 (8 Oct 2026): on app.localhost every upgrade, pack and contact
+ * link in the dashboard - the plan card's "Add 5 clusters", Clusters' "Get
+ * cited", the Add panel's pack, setup's "Book a call", the error page's "Tell
+ * us here" - was a relative marketing path. The proxy rewrites every path on
+ * the app host into /app, so each one answered the dashboard's 404.
+ */
+test("a marketing link stays relative on the shared host and leaves the app host for the site", () => {
+  assert.equal(siteHref("/contact?tier=alwaystracked", OFF), "/contact?tier=alwaystracked");
+  assert.equal(siteHref("/alwayscited?from=app", ON), `${SITE_ORIGIN}/alwayscited?from=app`);
+  // Development: the same server under the app. label, so the e2e run can follow it.
+  assert.equal(siteHref("/contact", { APP_HOST: "app.localhost:3108" }), "http://localhost:3108/contact");
+  assert.equal(siteOrigin("app.localhost:3108"), "http://localhost:3108");
+  assert.equal(siteOrigin("app.alwayscited.com"), SITE_ORIGIN);
+});
+
+test("a client component decides from the address it was served at", () => {
+  // Under /app is the main host, where the site is the same origin.
+  assert.equal(siteHrefAt("/contact", { pathname: "/app/tallyroo", host: "alwayscited.com" }), "/contact");
+  assert.equal(siteHrefAt("/contact", { pathname: "/app", host: "localhost:3108" }), "/contact");
+  assert.equal(siteHrefAt("/contact", { pathname: "/tallyroo", host: "app.alwayscited.com" }), `${SITE_ORIGIN}/contact`);
+  assert.equal(siteHrefAt("/contact", { pathname: "/tallyroo/clusters", host: "app.localhost:3108" }), "http://localhost:3108/contact");
+  // Not a prefix match on the string: /application is not the dashboard on the main host.
+  assert.equal(siteHrefAt("/contact", { pathname: "/application", host: "app.localhost:3108" }), "http://localhost:3108/contact");
+});
+
+/** Where a dashboard page's links are written. */
+const DASHBOARD = [join(SRC, "components", "app"), join(SRC, "app", "app")];
+
+/**
+ * A marketing page reached from the dashboard. contactUrlFor and CONTACT_URL
+ * are /contact, a tier's href is its tier page, orderUrlFor is /checkout: none
+ * of them is a dashboard route, so each has to go through siteHref.
+ */
+const MARKETING_SOURCE = /\bcontactUrlFor\(|\bCONTACT_URL\b|\btier\.href\b|\bTIERS\b[^;]*\.href\b|\borderUrlFor\(/;
+/** A root-relative path written straight into an href: the dashboard's own go through appPath. */
+const LITERAL_HREF = /\bhref=(?:"|\{\s*["'`])\/(?!\/|api\/)/;
+const WRAPPED = /\bsiteHref(?:At)?\(/;
+
+function marketingOffenders(line: string): boolean {
+  if (/^\s*import\b/.test(line)) return false;
+  return (MARKETING_SOURCE.test(line) && !WRAPPED.test(line)) || LITERAL_HREF.test(line);
+}
+
+test("the sweep sees an unwrapped marketing link in each spelling", () => {
+  for (const p of [
+    "<a href={contactUrlFor(tier)} style={x}>",
+    "packHref={upgrade ? contactUrlFor(upgrade.tier) : CONTACT_URL}",
+    "<Link href={`${tier.href}?from=app`}>",
+    '<Link href="/contact" style={{ color: T.accent }}>Tell us here</Link>',
+    "<a href={'/pricing'}>",
+  ]) assert.ok(marketingOffenders(p), p);
+  for (const p of [
+    "<a href={siteHref(contactUrlFor(tier))} style={x}>",
+    "<Link href={siteHref(`${tier.href}?from=app`)}>",
+    'useEffect(() => setContact(siteHrefAt("/contact", window.location)), []);',
+    'import { CONTACT_URL, contactUrlFor } from "@/config/pricing";',
+    '<form method="post" action="/api/app/logout">',
+    "<a href={appPath(`/${c.slug}`)}>",
+    '<a href="#app-content">',
+    "<a href={`mailto:${CONTACT_EMAIL}`}>",
+  ]) assert.ok(!marketingOffenders(p), p);
+});
+
+/**
+ * The floor: 6 call sites on 8 Oct 2026 - the plan card (Sidebar), the Add
+ * panel's pack (Clusters), the tier button (UpgradePrompt), setup's Book a
+ * call, login's See the plan and the error page's Tell us here - and 4 lines
+ * that build a marketing href from pricing.ts. A walk that stops matching finds
+ * neither, and would otherwise report a clean dashboard.
+ */
+test("every dashboard link to the marketing site goes through siteHref", () => {
+  const offenders: string[] = [];
+  let sources = 0;
+  let wrapped = 0;
+  for (const file of DASHBOARD.flatMap((d) => walk(d))) {
+    const rel = file.slice(process.cwd().length + 1);
+    for (const line of codeLines(readFileSync(file, "utf8"))) {
+      if (marketingOffenders(line)) offenders.push(`${rel}: ${line.trim().slice(0, 140)}`);
+      if (MARKETING_SOURCE.test(line) && !/^\s*import\b/.test(line)) sources += 1;
+      if (WRAPPED.test(line) && !/^\s*import\b/.test(line)) wrapped += 1;
+    }
+  }
+  assert.deepEqual(offenders, [], `a marketing link that 404s on the app host - wrap it in siteHref() from src/lib/app-host.ts:\n${offenders.join("\n")}`);
+  assert.ok(sources >= 4, `only ${sources} marketing hrefs found in the dashboard; 4 is the recorded floor`);
+  assert.ok(wrapped >= 6, `only ${wrapped} siteHref() call sites in the dashboard; 6 is the recorded floor`);
 });

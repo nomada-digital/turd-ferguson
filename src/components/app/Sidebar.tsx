@@ -11,7 +11,7 @@ import { ENGINE_SPECS, type Engine } from "@/lib/scan/engines";
 import { KEYWORDS_PER_CLUSTER, PROMPTS_PER_CLUSTER } from "@/lib/tracking/limits";
 
 import { CLUSTER_NAV, CLUSTER_TABS, NAV, PLACEMENTS_ITEM, TABS, navHref } from "./nav";
-import { appPath } from "@/lib/app-host";
+import { appPath, siteHref } from "@/lib/app-host";
 
 const WORDS = ["no", "one", "two", "three", "four", "five"];
 
@@ -338,7 +338,7 @@ export default function Sidebar({
           ) : null}
           {upsell && !ended && clusters && packPrice ? (
             // R151 (3 Oct 2026): was bare /contact, so the enquiry arrived with no plan; now "About <their tier>", as every tier's call does.
-            <a href={contactUrlFor(tier)} style={{ fontSize: "13px", fontWeight: 600, color: T.accent }}>
+            <a href={siteHref(contactUrlFor(tier))} style={{ fontSize: "13px", fontWeight: 600, color: T.accent }}>
               {`Add ${PACK_CLUSTERS} clusters for ${packPrice} a month`}
             </a>
           ) : null}

@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { useEffect, useState } from "react";
 
 import BrandMark from "@/components/BrandMark";
 import { NAV, navHref } from "@/components/app/nav";
 import TierName from "@/components/TierName";
 import { CARD, MICRO, T } from "@/config/tokens";
-import { appPath } from "@/lib/app-host";
+import { appPath, siteHrefAt } from "@/lib/app-host";
 
 /**
  * The dashboard's error boundary (R151, 1 Oct 2026). Before it, a read that
@@ -26,6 +27,11 @@ import { appPath } from "@/lib/app-host";
  */
 export default function DashboardError({ error, retry }: { error: Error & { digest?: string }; retry: () => void }) {
   const { client } = useParams<{ client: string }>();
+  // Audit ia-2 (8 Oct 2026): /contact is the marketing site's. On the app host a relative
+  // /contact is rewritten into the dashboard and 404s; this client component cannot read
+  // APP_HOST, so the address it was served at decides, after hydration.
+  const [contact, setContact] = useState("/contact");
+  useEffect(() => setContact(siteHrefAt("/contact", window.location)), []);
   const overview = navHref("Overview", client) ?? appPath("");
   const others = NAV.filter((n) => n !== "Overview").flatMap((item) => {
     const href = navHref(item, client);
@@ -76,7 +82,7 @@ export default function DashboardError({ error, retry }: { error: Error & { dige
             <div style={MICRO}>If you tell us about this, quote this reference</div>
             <p style={{ margin: "7px 0 0", fontSize: "14px", lineHeight: 1.6, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", overflowWrap: "anywhere" }}>{error.digest}</p>
             <p style={{ margin: "7px 0 0", fontSize: "13px", lineHeight: 1.6, color: T.soft }}>
-              It is a hash of the error itself, so it matches our server log and contains nothing you typed. <Link href="/contact" style={{ color: T.accent }}>Tell us here</Link>.
+              It is a hash of the error itself, so it matches our server log and contains nothing you typed. <a href={contact} style={{ color: T.accent }}>Tell us here</a>.
             </p>
           </div>
         ) : null}

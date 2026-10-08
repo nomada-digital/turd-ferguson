@@ -21,7 +21,7 @@ import { writeRole } from "@/lib/tracking/member";
 import { trackingRepo } from "@/lib/tracking/repo";
 import { confirmLabel, setupCards } from "@/lib/tracking/setup-landing";
 import { refuseRole } from "@/lib/tracking/stop";
-import { appPath } from "@/lib/app-host";
+import { appPath, siteHref } from "@/lib/app-host";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -237,7 +237,7 @@ export default async function ClientSetup({
       <div id="help" style={{ ...CARD, borderRadius: "14px", padding: "18px 22px", scrollMarginTop: "24px" }}>
         <div style={MICRO}>Need a hand?</div>
         <p style={{ margin: "4px 0 0", fontSize: "14px", lineHeight: 1.8, display: "flex", flexWrap: "wrap", columnGap: "16px" }}>
-          <a href={contactUrlFor(tier)} style={{ ...HELP_LINK }}>
+          <a href={siteHref(contactUrlFor(tier))} style={{ ...HELP_LINK }}>
             Book a call
           </a>
           <a href={`mailto:${CONTACT_EMAIL}`} style={{ ...HELP_LINK }}>

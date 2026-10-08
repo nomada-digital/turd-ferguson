@@ -28,7 +28,7 @@ import { type Facts, type PromptCta, pickPrompt, promptCopy } from "@/lib/tracki
 
 import { Chip } from "./Overview";
 import UpgradePrompt from "./UpgradePrompt";
-import { appPath } from "@/lib/app-host";
+import { appPath, siteHref } from "@/lib/app-host";
 
 /**
  * The Clusters page (BRIEF-3 T6 part 1, 30 Sep 2026; boards-3/Questions.dc.html):
@@ -256,7 +256,7 @@ export default function Clusters({
         )
       ) : null}
 
-      {canWrite && adding ? <AddPanel slug={slug} adding={adding} full={full} clusterLimit={clusterLimit} packPrice={packPrice} packHref={upgrade ? contactUrlFor(upgrade.tier) : CONTACT_URL} close={href({})} keep={keep} /> : null}
+      {canWrite && adding ? <AddPanel slug={slug} adding={adding} full={full} clusterLimit={clusterLimit} packPrice={packPrice} packHref={siteHref(upgrade ? contactUrlFor(upgrade.tier) : CONTACT_URL)} close={href({})} keep={keep} /> : null}
 
       <section aria-label="Clusters" style={{ background: T.surface, border: `1px solid ${T.line}`, borderRadius: "18px", overflow: "hidden" }}>
         <div className="app-cl-grid app-hide-sm" style={{ display: "grid", gridTemplateColumns: GRID, gap: "16px", padding: "14px 24px 12px" }}>
