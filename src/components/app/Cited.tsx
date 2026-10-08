@@ -7,11 +7,11 @@ import { ENGINE_SPECS, type Engine } from "@/lib/scan/engines";
 import { clusterCards } from "@/lib/tracking/cluster-figures";
 import { APP_LIMITS } from "@/config/contact";
 import { rangeLabel } from "@/lib/tracking/date-range";
-import { type Day, type Range, citedPageRows, comparisonRange, formatDay } from "@/lib/tracking/figures";
+import { type Day, type Range, citedPageRows, formatDay, resolveComparison } from "@/lib/tracking/figures";
 import { NAMED_TOP } from "@/lib/tracking/named-figures";
 import type { Compare, OverviewData } from "@/lib/tracking/overview-data";
 import type { PlacementRow } from "@/lib/tracking/placement-figures";
-import { partialRunNote } from "@/lib/tracking/run-note";
+import { runNote } from "@/lib/tracking/run-note";
 
 import DatePicker from "./DatePicker";
 import { appPath } from "@/lib/app-host";
@@ -71,8 +71,10 @@ export default function Cited({
   /** DS20: the search, already cut to APP_LIMITS.search; matches host and path. */
   q: string;
 }) {
-  const before = comparisonRange(range, compareMode);
-  const partial = partialRunNote(data.lastRun, range, today);
+  // 8 Oct 2026 (audit data-10): the comparison the Overview reads - the first week for a young client.
+  const before = resolveComparison(range, compareMode, startedOn, data.answers).range;
+  // Audit data-3 (8 Oct 2026): every partial or failed check in the range, not only the last.
+  const partial = runNote(data, range, today);
   const cards = clusterCards({ clusters: data.clusters ?? [], questions: data.questions, keywords: data.keywords, answers: data.answers, serp: data.serp, range, before, today, engines });
   const picked = cluster ? (cards.find((c) => c.id === cluster) ?? null) : null;
   const only = picked ? new Set(picked.prompts.map((p) => p.id)) : null;

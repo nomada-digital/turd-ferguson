@@ -9,7 +9,7 @@ import { enginesFor, trackingPackPrice } from "@/config/pricing";
 import { T } from "@/config/tokens";
 import { CLUSTER_BASE } from "@/lib/tracking/limits";
 import { clusterCards, clusterDetail, promptIndex } from "@/lib/tracking/cluster-figures";
-import { comparisonRange } from "@/lib/tracking/figures";
+import { resolveComparison } from "@/lib/tracking/figures";
 import { engineTab } from "@/lib/tracking/latest-answers";
 import { noteState } from "@/lib/tracking/note";
 import { rangeFrom, rangeQuery } from "@/lib/tracking/overview-data";
@@ -52,7 +52,7 @@ export default async function ClientCluster({
   const sp = await searchParams;
   const { range, compare } = rangeFrom(sp, today);
   const data = await repo.loadOverview(client.id, range, compare);
-  const input = { clusters: data.clusters ?? [], questions: data.questions, keywords: data.keywords, answers: data.answers, serp: data.serp, range, before: comparisonRange(range, compare), today, engines };
+  const input = { clusters: data.clusters ?? [], questions: data.questions, keywords: data.keywords, answers: data.answers, serp: data.serp, range, before: resolveComparison(range, compare, client.started_on, data.answers).range, today, engines };
   const detail = clusterDetail(input, id);
   if (!detail) notFound();
   const cards = clusterCards(input);

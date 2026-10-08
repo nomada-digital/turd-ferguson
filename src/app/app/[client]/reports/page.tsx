@@ -11,6 +11,7 @@ import { CLUSTER_BASE } from "@/lib/tracking/limits";
 import { rangeFrom, rangeQuery } from "@/lib/tracking/overview-data";
 import { placedTier } from "@/lib/tracking/placement-figures";
 import { monthFigures, reportMonths } from "@/lib/tracking/report-months";
+import { runNote } from "@/lib/tracking/run-note";
 import { trackingRepo } from "@/lib/tracking/repo";
 import { appPath } from "@/lib/app-host";
 
@@ -60,6 +61,7 @@ export default async function ClientReports({ params, searchParams }: { params: 
           reportPath={`/api/app/${encodeURIComponent(slug)}/report`}
           placed={placed || rows.some((p) => p.status !== "removed")}
           months={months.map((m) => ({ ...m, figures: monthFigures(data, m.range, { startedOn: client.started_on, today, engines }) }))}
+          note={runNote(data, range, today)}
         />
       </div>
     </div>

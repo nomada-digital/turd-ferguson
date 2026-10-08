@@ -124,4 +124,7 @@ test("8 Oct 2026 (audit ia-3): the Overview's card reads answers naming each bra
   assert.deepEqual([row("Ledgerline").share.num, row("Ledgerline").share.pct, row(you).share.pct], [2924, 34, 15], "/named's share of mentions is unchanged");
   // Each row's reach counts the same answers as its Answers column on /named.
   for (const r of page.rows) assert.equal(r.reach.num, r.answers, r.name);
+  const src = readFileSync(new URL("../../components/app/Overview.tsx", import.meta.url), "utf8");
+  assert.match(src, /namedPage\(\{ answers: data\.answers, range, before: o\.compare, you: brand \}\)/, "the card is built from Who is named's rows");
+  assert.ok(!src.includes("brandBoard("), "not a second count of its own");
 });

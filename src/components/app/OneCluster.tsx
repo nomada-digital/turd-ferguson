@@ -9,18 +9,18 @@ import { APP_LIMITS } from "@/config/contact";
 import { T } from "@/config/tokens";
 import { type Inline, parseAnswer } from "@/components/scan/answer-markdown";
 import { ENGINE_SPECS, type Engine } from "@/lib/scan/engines";
-import { type ClusterDetail, type ClusterInput, clusterChart, daysOfLine, promptBrands, promptStrip } from "@/lib/tracking/cluster-figures";
-import { type Day, type Range, type Rate, basis as basisLine, comparisonRange, daysIn, formatDay, pointsDelta } from "@/lib/tracking/figures";
+import { type ClusterDetail, type ClusterInput, clusterChart, daysOfLine, positionMove, promptBrands, promptStrip } from "@/lib/tracking/cluster-figures";
+import { type Day, type Range, type Rate, basis as basisLine, comparisonLabel, daysIn, formatDay, pointsDelta, resolveComparison } from "@/lib/tracking/figures";
 import { type AnswerTab, type LatestAnswers, answerTabs, brandRuns } from "@/lib/tracking/latest-answers";
 import { NOTE_SAID, type NoteState } from "@/lib/tracking/note";
 import type { ClusterNote, Compare, OverviewData } from "@/lib/tracking/overview-data";
-import { partialRunNote } from "@/lib/tracking/run-note";
+import { latestAnswersNote, runNote } from "@/lib/tracking/run-note";
 
 import ClusterChart from "./ClusterChart";
 import Fig from "./Fig";
 import ScrollCue from "./ScrollCue";
 import { PagePath } from "./PagePath";
-import { Chip } from "./Overview";
+import { Chip, PositionChip, noChange } from "./Overview";
 
 /**
  * One cluster (T7 part 2b, 30 Sep 2026; BRIEF-3 T7 against
@@ -99,10 +99,16 @@ export default function OneCluster({
   clustersPath: string;
 }) {
   const c = detail.card;
-  const before = comparisonRange(range, compareMode);
-  const partial = partialRunNote(data.lastRun, range, today);
+  // 8 Oct 2026 (audit data-10): the comparison the Overview reads - the first week for a young client.
+  const cmp = resolveComparison(range, compareMode, startedOn ?? null, data.answers);
+  const before = cmp.range;
+  // Audit data-3 (8 Oct 2026): every partial or failed check in the range, not only the last.
+  const partial = runNote(data, range, today);
   const input: ClusterInput = { clusters: data.clusters ?? [], questions: data.questions, keywords: data.keywords, answers: data.answers, serp: data.serp, range, before, today, engines };
-  const chart = clusterChart(input, c.id);
+  // A first week drawn dashed over the range's first days would read as a period it is not.
+  const drawn = clusterChart(input, c.id);
+  const chart = drawn && cmp.kind === "start" ? { ...drawn, namedBefore: null, googleBefore: null } : drawn;
+  const chartBefore = cmp.kind === "start" ? null : before;
   const hasPrev = !!chart?.namedBefore?.some((p) => p !== null);
   const pending = c.status === "pending";
   const rangeQuery = { from: range.from, to: range.to, ...(compareMode === "prev" ? {} : { compare: compareMode }) };
@@ -119,10 +125,13 @@ export default function OneCluster({
   const top = Math.max(1, ...(brands?.rows.map((b) => b.n) ?? []));
   const tabs = latest?.day ? answerTabs(latest.rows, engines, brand) : [];
   const tab = tabs.find((t) => t.engine === engine) ?? tabs[0] ?? null;
+  const latestNote = latest?.day ? latestAnswersNote(data.runs, latest.day, range, today) : null;
   const kw = c.keyword ?? c.name;
   // DS66 (2 Oct 2026, R173 pass 7): a pending cluster read "Not in the top 20" before its first check; the prompt rows' words.
-  const posLine = c.position === null ? (!c.keyword ? "No keyword yet" : pending ? "Not checked yet" : "Not in the top 20") : domain;
-  const upFrom = c.positionBefore !== null && detail.positionBeforeOn ? `, ${c.positionChange && c.positionChange > 0 ? "up" : c.positionChange && c.positionChange < 0 ? "down" : "same as"} from #${c.positionBefore} on ${formatDay(detail.positionBeforeOn)}` : "";
+  // Audit data-7 (8 Oct 2026): "Not in the top 20" only for a keyword read and unranked, not one with no reading in the range.
+  const posLine = c.position === null ? (!c.keyword ? "No keyword yet" : pending ? "Not checked yet" : c.positionRead ? "Not in the top 20" : "No Google reading in this range") : domain;
+  // 8 Oct 2026 (audit data-7): never "same as" for a keyword that left or entered the top 20 (cluster-figures.ts positionMove).
+  const upFrom = positionMove(c, detail.positionBeforeOn);
   const mid = (c.prompts.length * PITCH - 4) / 2;
 
   const fig = (label: string, figure: string, big: React.ReactNode, extra: React.ReactNode, sub: string, first = false) => (
@@ -177,15 +186,15 @@ export default function OneCluster({
           </svg>
           <span style={{ display: "flex", flexDirection: "column", lineHeight: 1.25 }}>
             <span style={{ fontSize: "14px", fontWeight: 700 }}>{rangeLabel(range, today, startedOn ?? null)}</span>
-            <span style={{ fontSize: "12px", color: T.soft }}>{`${formatDay(range.from)} - ${formatDay(range.to, true)}${before ? `, vs ${span(before)}` : ""}`}</span>
+            <span style={{ fontSize: "12px", color: T.soft }}>{`${formatDay(range.from)} - ${formatDay(range.to, true)}${before ? `, ${comparisonLabel(before, cmp.kind)}` : ""}`}</span>
           </span>
         </DatePicker>
       </header>
 
       <section aria-label="Summary" className="app-cl-sum" style={{ ...CARD, display: "flex", flexWrap: "wrap" }}>
         {/* R148 pass 7 (1 Oct 2026): before the first answer there is no count to give - "-", not "0 of 0" or "0 of 5". */}
-        {fig("Answers naming you", "cl-named", big(c.now.den ? `${c.now.num} of ${c.now.den}` : "-"), <Chip value={c.delta} unit=" pts" none={pending ? "Tomorrow" : "New"} />, !c.now.den ? "No answers yet" : c.before ? `${pct(c.now)} this period, ${pct(c.before)} the one before` : `${pct(c.now)} this period`, true)}
-        {fig("Google position", "cl-google", big(c.position === null ? "-" : `#${c.position}`), <Chip value={c.positionChange} unit="" none={c.keyword === null ? "No keyword" : pending ? "Tomorrow" : "New"} />, `${posLine}${upFrom}`)}
+        {fig("Answers naming you", "cl-named", big(c.now.den ? `${c.now.num} of ${c.now.den}` : "-"), <Chip value={c.delta} unit=" pts" none={noChange(c)} />, !c.now.den ? "No answers yet" : c.before ? `${pct(c.now)} this period, ${pct(c.before)} the one before` : `${pct(c.now)} this period`, true)}
+        {fig("Google position", "cl-google", big(c.position === null ? "-" : `#${c.position}`), <PositionChip c={c} />, `${posLine}${upFrom}`)}
         {fig("Prompts naming you", "cl-prompts", big(c.now.den ? `${c.promptsNamed.num} of ${c.promptsNamed.den}` : "-"), null, c.now.den ? "Each named you on at least one engine" : `${c.promptsNamed.den} prompts, none checked yet`)}
         {fig(
           "Most reliable engine",
@@ -214,16 +223,16 @@ export default function OneCluster({
             dayLabels: chart.days.map((d) => formatDay(d, true)),
             named: chart.named,
             google: chart.google,
-            prevLabels: before ? daysIn(before).map((d) => formatDay(d)) : null,
+            prevLabels: chartBefore ? daysIn(chartBefore).map((d) => formatDay(d)) : null,
             namedBefore: chart.namedBefore,
             googleBefore: chart.googleBefore,
-            beforeLabel: before ? span(before) : null,
+            beforeLabel: chartBefore ? span(chartBefore) : null,
             answersPerDay: c.prompts.length * engines.length,
             pending,
-            note: !pending && !hasPrev ? `Tracked from ${formatDay(c.started_on)}. No earlier period to compare yet.` : null,
+            note: !pending && !hasPrev ? (cmp.kind === "start" && before ? `Tracked from ${formatDay(c.started_on)}. Its changes are against your first week, ${span(before)}.` : `Tracked from ${formatDay(c.started_on)}. No earlier period to compare yet.`) : null,
             phoneLine: pending
               ? "First check tomorrow at 06:00."
-              : `${pct(c.now)} named, ${c.position === null ? (c.keyword ? "no Google position" : "no keyword yet") : `#${c.position} on Google`}.` + (hasPrev && before ? ` Dashed: ${span(before)}` : ` Tracked from ${formatDay(c.started_on)}.`),
+              : `${pct(c.now)} named, ${c.position === null ? (c.keyword ? "no Google position" : "no keyword yet") : `#${c.position} on Google`}.` + (hasPrev && chartBefore ? ` Dashed: ${span(chartBefore)}` : ` Tracked from ${formatDay(c.started_on)}.`),
             openHref: null,
           }}
         />
@@ -281,7 +290,7 @@ export default function OneCluster({
                     {pct(p.now)}
                   </span>
                   <span style={{ display: "flex", justifyContent: "flex-end" }}>
-                    <Chip value={pointsDelta(p.now, p.before)} unit=" pts" none={pending ? "Tomorrow" : "New"} />
+                    <Chip value={pointsDelta(p.now, p.before)} unit=" pts" none={pending ? "Tomorrow" : before ? "New" : ""} />
                   </span>
                 </Link>
               );
@@ -301,7 +310,7 @@ export default function OneCluster({
             <span style={{ fontSize: "16px", fontWeight: 700, lineHeight: 1.3 }}>{kw}</span>
             <span style={{ display: "flex", alignItems: "baseline", gap: "10px", flexWrap: "wrap" }}>
               <span style={{ fontSize: "36px", fontWeight: 700, letterSpacing: "-0.03em", fontVariantNumeric: "tabular-nums" }}>{c.position === null ? "-" : `#${c.position}`}</span>
-              <Chip value={c.positionChange} unit="" none={c.keyword === null ? "No keyword" : pending ? "Tomorrow" : "New"} />
+              <PositionChip c={c} />
             </span>
             {c.positionBefore !== null && detail.positionBeforeOn ? <span style={{ fontSize: "13px", color: T.soft }}>{`was #${c.positionBefore} on ${formatDay(detail.positionBeforeOn)}`}</span> : null}
             <span style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
@@ -406,6 +415,7 @@ export default function OneCluster({
               })}
             </nav>
           </div>
+          {latestNote ? <p style={{ margin: 0, fontSize: "14px", lineHeight: 1.5, color: T.ink }}>{latestNote}</p> : null}
           <Answer tab={tab} brand={brand} day={latest.day} today={today} unsure={!(data.lastRun?.status === "complete" && data.lastRun.run_date === latest.day)} />
           <p style={{ margin: 0, fontSize: "13px", color: T.soft }}>{`What each engine said at ${latest.day === today ? "today's" : `the ${formatDay(latest.day)}`} check, with link addresses taken out of the text.`}</p>
         </section>

@@ -12,13 +12,13 @@ import { CONTACT_URL, PACK_CLUSTERS, PACK_KEYWORDS, PACK_PROMPTS, contactUrlFor 
 import { T } from "@/config/tokens";
 import { ENGINE_SPECS, type Engine } from "@/lib/scan/engines";
 import { type ClusterCard, type ClusterFilter as Filter, clusterCards, daysOfLine, filterClusters, namedCount, neverCount, pendingBasis, searchPrompts } from "@/lib/tracking/cluster-figures";
-import { type Range, addDays, basis as basisLine, comparisonRange, daysIn, formatDay } from "@/lib/tracking/figures";
+import { type Range, addDays, basis as basisLine, comparisonLabel, daysIn, formatDay, resolveComparison } from "@/lib/tracking/figures";
 import { type KeywordCheck, draftPrompts } from "@/lib/tracking/add-cluster";
 import { ANGLES, BRANDED_CHIP, BRANDED_NOTE, PROMPTS_PER_CLUSTER, type Subject, namesBrandIn, refuseEdit } from "@/lib/tracking/limits";
 import type { Compare, OverviewData } from "@/lib/tracking/overview-data";
 import { prefillCard } from "@/lib/tracking/order-keyword";
 import { KEYWORD_FIXED_NOTE } from "@/lib/tracking/rekey";
-import { partialRunNote } from "@/lib/tracking/run-note";
+import { runNote, todayRun } from "@/lib/tracking/run-note";
 import { BULK_ID, type BulkCount } from "@/lib/tracking/stop";
 
 import type { TierKey } from "@/components/TierName";
@@ -26,7 +26,7 @@ import type { UpsellMode } from "@/lib/tracking/ask";
 import { neverNamedFacts, offPageOneFacts } from "@/lib/tracking/upgrade-facts";
 import { type Facts, type PromptCta, pickPrompt, promptCopy } from "@/lib/tracking/upgrade-prompts";
 
-import { Chip } from "./Overview";
+import { Chip, PositionChip, noChange } from "./Overview";
 import UpgradePrompt from "./UpgradePrompt";
 import { appPath } from "@/lib/app-host";
 
@@ -126,8 +126,11 @@ export default function Clusters({
   /** T11: what the never filter's alwaysmentioned prompt is judged on beyond the cards. */
   upgrade?: { tier: TierKey; mode: UpsellMode; hidden: ReadonlySet<PromptCta>; startedOn: string; domain: string } | null;
 }) {
-  const before = comparisonRange(range, compareMode);
-  const partial = partialRunNote(data.lastRun, range, today);
+  // 8 Oct 2026 (audit data-10): the comparison the Overview reads - the first week for a young client.
+  const cmp = resolveComparison(range, compareMode, startedOn ?? null, data.answers);
+  const before = cmp.range;
+  // Audit data-3 (8 Oct 2026): every partial or failed check in the range, not only the last.
+  const partial = runNote(data, range, today);
   const cards = clusterCards({ clusters: data.clusters ?? [], questions: data.questions, keywords: data.keywords, answers: data.answers, serp: data.serp, range, before, today, engines });
   const shown = filterClusters(cards, filter, q);
   const prefill = prefillCard(cards.filter((c) => c.stoppedOn === null), typed);
@@ -148,11 +151,13 @@ export default function Clusters({
     ["never", `With prompts that never name you ${live.filter((c) => neverCount(c) > 0).length}`],
   ];
   const engineNames = engines.map((e) => ENGINE_SPECS[e].label);
-  const since = before ? formatDay(addDaysBack(range.from)) : null;
+  // The comparison's last day, whose Google reading the column compares with: the day before the range for
+  // the previous period, the first week's last for a young client (audit data-10), the month before's last.
+  const since = before ? formatDay(before.to) : null;
   // T11: the never filter carries the alwaysmentioned prompt; the unfiltered list, which is the
   // cluster layout's Google keywords panel (each row's position), carries alwayscited. Each only
   // when its rules allow (upgrade-prompts.ts), and each screen is judged on its own panel's facts.
-  const state = shown.length === 0 ? "empty" : data.lastRun?.status === "partial" ? "partial" : "ok";
+  const state = shown.length === 0 ? "empty" : data.lastRun?.status === "partial" || todayRun(data.runs, today)?.status === "failed" ? "partial" : "ok";
   const facts: Facts | null =
     upgrade && filter === "never"
       ? { ...upgrade, today, state, neverNamed: neverNamedFacts({ cards, answers: data.answers, range, domain: upgrade.domain }) }
@@ -183,7 +188,7 @@ export default function Clusters({
             <span style={{ fontSize: "14px", fontWeight: 700 }}>{rangeLabel(range, today, startedOn ?? null)}</span>
             <span style={{ fontSize: "12px", color: T.soft }}>
               {formatDay(range.from)} - {formatDay(range.to, true)}
-              {before ? `, vs ${formatDay(before.from)} - ${formatDay(before.to)}` : ""}
+              {before ? `, ${comparisonLabel(before, cmp.kind)}` : ""}
             </span>
           </span>
         </DatePicker>
@@ -263,7 +268,7 @@ export default function Clusters({
           <span />
           <span style={HEAD}>Keyword and its prompts</span>
           <span style={HEAD}>Prompts naming you</span>
-          <span style={{ ...HEAD, textAlign: "right" }}>Named, vs last period</span>
+          <span style={{ ...HEAD, textAlign: "right" }}>{cmp.kind === "start" ? "Named, vs first week" : "Named, vs last period"}</span>
           <span style={{ ...HEAD, textAlign: "right" }}>{since ? `Position, vs ${since}` : "Position"}</span>
         </div>
         {shown.map((c) => (
@@ -477,11 +482,6 @@ function AddPanel({ slug, adding, full, clusterLimit, packPrice, packHref, close
       ) : null}
     </section>
   );
-}
-
-/** The day before a range starts - the board's "vs 1 Sep" for a range from 2 Sep. */
-function addDaysBack(d: string): string {
-  return new Date(Date.parse(`${d}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
 }
 
 type Act = { action: string; keep: Record<string, string>; today: string } | null;
@@ -889,14 +889,14 @@ function ClusterRow({
             <span style={{ fontSize: "17px", fontWeight: 700, fontVariantNumeric: "tabular-nums" }} title={pending ? (basis ?? undefined) : basisLine(c.now, "answers")}>
               {pctText(c.now.pct)}
             </span>
-            <Chip value={c.delta} unit=" pts" none={pending ? "Tomorrow" : "New"} />
+            <Chip value={c.delta} unit=" pts" none={noChange(c)} />
           </span>
         </span>
         <span className="app-hide-sm" style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "4px" }}>
           <span style={{ fontSize: "12px", color: T.soft }}>Google</span>
           <span style={{ display: "flex", alignItems: "center", gap: "8px" }}>
             <span style={{ fontSize: "17px", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{c.position === null ? "-" : `#${c.position}`}</span>
-            <Chip value={c.positionChange} unit="" none={c.keyword === null ? "No keyword" : pending ? "Tomorrow" : "New"} />
+            <PositionChip c={c} />
           </span>
         </span>
       </Link>
@@ -954,7 +954,7 @@ function ClusterRow({
                     {pctText(p.now.pct)}
                   </span>
                   <span style={{ display: "flex", justifyContent: "flex-end" }}>
-                    <Chip value={p.before && p.now.pct !== null && p.before.pct !== null ? p.now.pct - p.before.pct : null} unit=" pts" none={pending ? "Tomorrow" : "New"} />
+                    <Chip value={p.before && p.now.pct !== null && p.before.pct !== null ? p.now.pct - p.before.pct : null} unit=" pts" none={pending ? "Tomorrow" : since ? "New" : ""} />
                   </span>
                   {act ? (
                     !stopped && p.stoppedOn === null ? (
@@ -986,7 +986,7 @@ function ClusterRow({
               <span style={{ fontSize: "16px", fontWeight: 700, lineHeight: 1.3 }}>{c.keyword ?? "Needs a keyword"}</span>
               <span style={{ display: "flex", alignItems: "baseline", gap: "10px" }}>
                 <span style={{ fontSize: "36px", fontWeight: 700, letterSpacing: "-0.03em", fontVariantNumeric: "tabular-nums" }}>{c.position === null ? "-" : `#${c.position}`}</span>
-                <Chip value={c.positionChange} unit="" none={c.keyword === null ? "No keyword" : pending ? "Tomorrow" : "New"} />
+                <PositionChip c={c} />
               </span>
               <span style={{ fontSize: "13px", color: T.soft }}>
                 {/* R148 pass 9 (1 Oct 2026): a signup whose scan chose no keyword left "-" with no next step; nomada picks it (signup.ts order email). */}

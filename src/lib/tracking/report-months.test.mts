@@ -77,4 +77,6 @@ test("8 Oct 2026 (audit data-10): a young client's month compares with its first
   assert.equal(card.lfl!.firstWeek, true);
   const older = monthFigures(fx.data, sept, { startedOn: fx.client.started_on, today: fx.today, engines });
   assert.equal(older.lfl?.firstWeek, false);
+  const src = readFileSync(new URL("../../components/app/Reports.tsx", import.meta.url), "utf8");
+  assert.match(src, /f\.lfl\.firstWeek \? " in the first week" : ""/, "the card says which period it is against");
 });
