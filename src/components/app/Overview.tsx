@@ -17,6 +17,7 @@ import {
   comparisonLabel,
   dailySeries,
   daysIn,
+  firstCheckDay,
   formatDay,
   keywordRows,
   movers,
@@ -26,12 +27,12 @@ import {
   sparkPoints,
   ungroupedRead,
 } from "@/lib/tracking/figures";
-import { type ClusterCard, clusterCards, clusterChart, clusterSummary, pendingBasis } from "@/lib/tracking/cluster-figures";
+import { type ClusterCard, clusterCards, clusterChart, clusterSummary, keyFigureChanges, pendingBasis } from "@/lib/tracking/cluster-figures";
 import { rangeLabel } from "@/lib/tracking/date-range";
-import { namedPage } from "@/lib/tracking/named-figures";
+import { whoIsNamedCard } from "@/lib/tracking/named-figures";
 import type { Compare, OverviewData } from "@/lib/tracking/overview-data";
 import { type PlacementRow, chartMarkers } from "@/lib/tracking/placement-figures";
-import { MISSING_READS, failedTodayLine, runNote, todayRun } from "@/lib/tracking/run-note";
+import { MISSING_READS, failedTodayNote, runNote, todayRun } from "@/lib/tracking/run-note";
 
 import ClusterChart from "./ClusterChart";
 import DatePicker from "./DatePicker";
@@ -236,7 +237,7 @@ export default function Overview({
         </a>
       ) : null}
       {/* T5 (30 Sep 2026): the face is drawn here, on the server, so JS off still shows the range; DatePicker opens boards/DatePicker.dc.html on it. */}
-      <DatePicker range={range} compare={compareMode} today={today} startedOn={startedOn}>
+      <DatePicker range={range} compare={compareMode} today={today} startedOn={startedOn} firstCheck={firstCheckDay(startedOn, data.questions)}>
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={T.ink} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <rect x="3" y="5" width="18" height="16" rx="2" />
           <path d="M3 10h18M8 3v4M16 3v4" />
@@ -274,23 +275,26 @@ export default function Overview({
   const todays = todayRun(data.runs, today);
   // The range's lost checks - partial or failed days, whose reads every figure leaves out - in one note under
   // the line; a failed today is the line's own, so the note leaves it out.
-  const lostNote = runNote(data, range, today, { skipToday: todays?.status === "failed" });
+  // Review of audit data-3 (8 Oct 2026): the failed-today line says where the figures run to, so only on a
+  // range that ends today - an earlier range gets an aside after "Last checked". A failed run can have stored
+  // its answers first (runner.ts), which every figure then counts; run-note.ts reads which it was.
+  const failed = failedTodayNote(data, range, today);
+  const lostNote = runNote(data, range, today, { skipToday: !!failed?.line });
   // R151 (1 Oct 2026): a partial run (decide.ts runOutcome - some reads failed after the retry)
   // said "Checked today" like a whole one. The figures skip an unanswered read, so say so - in the note when there is one.
   const missing = data.lastRun?.status === "partial" && !lostNote ? ` ${MISSING_READS}` : "";
   const nextLine = ended ? "Tracking has ended, so no more checks run." : liveQuestions ? "Next check tomorrow at 06:00." : "No more checks until a cluster has prompts.";
-  const checked =
-    todays?.status === "failed"
-      ? `${failedTodayLine(data.lastRun?.run_date ?? null)} ${nextLine}`
-      : data.lastRun?.finished_at
-        ? data.lastRun.run_date === today
-          ? `Checked today at ${londonTime(data.lastRun.finished_at)}.${missing} ${ended ? "Tracking has ended, so this was the last check." : liveQuestions ? "Next check tomorrow at 06:00." : "No more checks until a cluster has prompts."}`
-          : `Last checked ${formatDay(data.lastRun.run_date)} at ${londonTime(data.lastRun.finished_at)}.${missing} ${ended ? "Tracking has ended, so no more checks run." : !liveQuestions ? "No more checks until a cluster has prompts." : range.to === today ? (todays && todays.status !== "complete" && todays.status !== "partial" ? "Today's check has not finished yet, so today is blank." : "Nothing from today's check yet, so today is blank.") : "Next check at 06:00."}`
-        : firstCheckLine;
+  const checked = failed?.line
+    ? `${failed.line} ${nextLine}`
+    : data.lastRun?.finished_at
+      ? data.lastRun.run_date === today
+        ? `Checked today at ${londonTime(data.lastRun.finished_at)}.${missing} ${ended ? "Tracking has ended, so this was the last check." : liveQuestions ? "Next check tomorrow at 06:00." : "No more checks until a cluster has prompts."}`
+        : `Last checked ${formatDay(data.lastRun.run_date)} at ${londonTime(data.lastRun.finished_at)}.${missing} ${ended ? "Tracking has ended, so no more checks run." : !liveQuestions ? "No more checks until a cluster has prompts." : range.to === today ? (todays && todays.status !== "complete" && todays.status !== "partial" ? "Today's check has not finished yet, so today is blank." : "Nothing from today's check yet, so today is blank.") : failed?.aside ? `${failed.aside} Next check tomorrow at 06:00.` : "Next check at 06:00."}`
+      : firstCheckLine;
   // Mobile.dc.html: "Checked today at 06:10", nothing after it. DS8 (2 Oct 2026, R172 pass 1): a
   // partial run is not on the board, and "some reads missing" alone left the phone guessing what
   // it meant for the figures, so the phone says the same sentence the desktop line does.
-  const checkedShort = todays?.status === "failed" ? failedTodayLine(data.lastRun?.run_date ?? null) : data.lastRun?.finished_at && data.lastRun.run_date === today ? `Checked today at ${londonTime(data.lastRun.finished_at)}${missing ? `.${missing}` : ""}` : null;
+  const checkedShort = failed?.line ? failed.line : data.lastRun?.finished_at && data.lastRun.run_date === today ? `Checked today at ${londonTime(data.lastRun.finished_at)}${missing ? `.${missing}` : ""}` : null;
 
   if (!hasData) {
     // R148 pass 7 (1 Oct 2026): only a start that has happened "began" - on day zero it starts tomorrow, and said "Tracking began" with tomorrow's date.
@@ -333,25 +337,11 @@ export default function Overview({
   const fig = byCluster
     ? { now: byCluster.now, promptsNamed: byCluster.promptsNamed, promptsNamedBefore: byCluster.promptsNamedBefore, never: byCluster.never.length }
     : { now: o.named, promptsNamed: o.questions, promptsNamedBefore: o.questionsBefore && o.questionsBefore.den ? o.questionsBefore : null, never: o.questions.den - o.questions.num };
-  const lflDelta = byCluster ? byCluster.lflDelta : o.lfl ? pointsDelta(o.lfl.now, o.lfl.before) : null;
-  // 8 Oct 2026 (audit data-4): every key figure's chip is its like-for-like change, as the headline's is. The
-  // figure counts everything in the range; the chip only what was tracked all of both periods, so "40 of 45,
-  // was 37 of 40" - really no change - and a cluster added on page 1 no longer read as gains.
-  const chg = {
-    named: lflDelta,
-    prompts: byCluster
-      ? byCluster.promptsNamedLfl && byCluster.promptsNamedBefore
-        ? { now: byCluster.promptsNamedLfl, before: byCluster.promptsNamedBefore }
-        : null
-      : (o.change?.questions ?? null),
-    sov: o.change?.sov ?? null,
-    page1: cs ? (cs.page1Lfl !== null && cs.page1Before !== null ? cs.page1Lfl - cs.page1Before : null) : o.change?.keywords ? o.change.keywords.now - o.change.keywords.before : null,
-  };
-  const promptsChange = chg.prompts
-    ? `like-for-like ${chg.prompts.now.num} of ${chg.prompts.now.den}, ${
-        chg.prompts.now.den !== chg.prompts.before.den ? `was ${chg.prompts.before.num} of ${chg.prompts.before.den}` : chg.prompts.now.num === chg.prompts.before.num ? "no change" : `was ${chg.prompts.before.num}`
-      }`
-    : null;
+  // 8 Oct 2026 (audit data-4): every key figure's chip is its like-for-like change, as the headline's is
+  // (cluster-figures.ts keyFigureChanges, where the rule and its tests live).
+  const chg = keyFigureChanges(o, cs, byCluster);
+  const lflDelta = chg.named;
+  const promptsChange = chg.promptsLine;
   const lflWhat = byCluster ? "clusters" : "prompts";
   const changeCaption = o.compare
     ? o.compareKind === "start"
@@ -384,14 +374,17 @@ export default function Overview({
     : o.lfl && lflDelta !== null
       ? ` On the ${o.lfl.questions} prompts tracked ${allPeriod} that's ${pct(o.lfl.now)}, ${direction(lflDelta)} ${pct(o.lfl.before)}${inBefore}.`
       : "";
+  // The prompts tracked from the comparison's first day to the range's last: like-for-like when not by cluster.
+  const lflIds = o.compare ? new Set(data.questions.filter((q) => q.added_on <= o.compare!.from && (q.stopped_on === null || q.stopped_on > range.to)).map((q) => q.id)) : null;
   // Audit ia-3 (8 Oct 2026): the brand named in most of the headline's own answers, on the headline's basis.
-  const headIds = byCluster && cards ? new Set(cards.filter((c) => c.status !== "pending").flatMap((c) => c.prompts.map((p) => p.id))) : null;
-  const leader = [...namedPage({ answers: data.answers, range, before: null, you: brand, only: headIds }).rows].sort((x, y) => y.answers - x.answers)[0];
+  // Review of audit ia-3 (8 Oct 2026): the card below and this line read the headline's own answers - by
+  // cluster, the prompts of the clusters with readings - and the card's change the headline's like-for-like ones.
+  const who = whoIsNamedCard({ answers: data.answers, range, before: o.compare, you: brand, only: byCluster ? byCluster.ids : null, lfl: byCluster ? byCluster.lflIds : lflIds });
+  const leader = [...who.page.rows].sort((x, y) => y.answers - x.answers)[0];
   const leaderLine = !leader || !leader.answers ? "" : leader.you ? " No other brand was named in more of them." : ` ${leader.name} was named in ${pct(leader.reach)} of the same answers.`;
 
   // ---- 3. chart ----
   const toChart = (days: ReturnType<typeof dailySeries>): ChartDay[] => days.map((d) => ({ label: formatDay(d.day), all: d.all, by: d.by }));
-  const lflIds = o.compare ? new Set(data.questions.filter((q) => q.added_on <= o.compare!.from && (q.stopped_on === null || q.stopped_on > range.to)).map((q) => q.id)) : null;
   // Left out of like-for-like: added after the comparison began (audit data-10: for a young client that is its
   // first day, so the prompts it began with are not "added mid-range").
   const addedMid = data.questions.filter((q) => q.added_on > (o.compare ? o.compare.from : range.from) && q.added_on <= range.to);
@@ -412,11 +405,11 @@ export default function Overview({
   // ---- 4 and 5 ----
   const moved = movers(data.answers, range, o.compare);
   // Audit ia-3 (8 Oct 2026): "Who is named instead" on the headline's basis - answers naming each brand, of
-  // every answer - from Who is named's own rows (named-figures.ts), so the two pages cannot drift. Its share
-  // of every brand mention set a trailing client's 10% beside a leader's 22%, under a headline of 27%.
-  // The change is like-for-like, as every chip on the page.
-  const whoPage = namedPage({ answers: data.answers, range, before: o.compare, you: brand });
-  const whoLfl = lflIds && o.compare ? new Map(namedPage({ answers: data.answers, range, before: o.compare, you: brand, only: lflIds }).rows.map((r) => [r.key, pointsDelta(r.reach, r.reachBefore)])) : null;
+  // the headline's answers - from Who is named's own rows (named-figures.ts whoIsNamedCard), so the two pages
+  // cannot drift. Its share of every brand mention set a trailing client's 10% beside a leader's 22%, under a
+  // headline of 27%. The change is like-for-like, as every chip on the page.
+  const whoPage = who.page;
+  const whoLfl = who.change;
   const board = [...whoPage.rows].filter((r) => r.answers > 0).sort((x, y) => y.answers - x.answers);
   const top = board.slice(0, 5);
   const rest = board.slice(5);

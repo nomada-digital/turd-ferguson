@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { test } from "node:test";
 
 import { SERP_DEPTH } from "../scan/dataforseo-request.ts";
+import { compareText } from "./date-range.ts";
 import { expandFixture, fixtureState } from "./fixture-mode.ts";
 
 import {
@@ -17,7 +18,9 @@ import {
   comparisonLabel,
   comparisonRange,
   daysIn,
+  firstCheckDay,
   firstWeek,
+  formatDay,
   keywordRows,
   keywordsIn,
   keywordsOnPage1,
@@ -253,10 +256,11 @@ test("8 Oct 2026 (audit data-4): every key figure's change is like-for-like - th
   assert.equal(overview({ range: fxRange, compare: "none", startedOn: fx.client.started_on, engines: [], questions: fx.data.questions, answers: fx.data.answers, serp: fx.data.serp, keywordCount: 9 }).change, null);
 });
 
-test("8 Oct 2026 (audit data-10): a young client compares with its first week - the first seven days read", () => {
+test("8 Oct 2026 (audit data-10): a young client compares with its first week - its first seven days of checks", () => {
   const y = fixtureState(fx, { TRACKING_FIXTURE_STATE: "young" });
   const start = y.client.started_on;
-  const c = resolveComparison(fxRange, "prev", start);
+  assert.equal(firstCheckDay(start, y.data.questions), start, "its prompts were asked from its start day");
+  const c = resolveComparison(fxRange, "prev", start, firstCheckDay(start, y.data.questions));
   const read = [...new Set(y.data.answers.filter((a) => a.answered).map((a) => a.run_date))].sort();
   assert.equal(c.kind, "start");
   assert.deepEqual(c.range, firstWeek(start));
@@ -274,4 +278,38 @@ test("8 Oct 2026 (audit data-10): a young client compares with its first week - 
   const day3 = resolveComparison({ from: addDays(start, -25), to: addDays(start, 2) }, "prev", start);
   assert.equal(day3.range, null);
   assert.match(day3.hidden ?? "", /From 27 Sep the changes are against your first week\.$/);
+});
+
+test("8 Oct 2026 (review of data-10): the date picker names the first week every page reads, whatever the first check read", () => {
+  // The first week began on the first day an answer came back, which a page held only when its comparison
+  // reached back; the picker read started_on. A client whose first check read nothing then saw "your first
+  // week, 20 Sep - 26 Sep" in the picker and "vs your first week, 21 Sep - 27 Sep" on the page. Both now read
+  // firstCheckDay - started_on and the prompts - which every page holds whatever the range.
+  const y = fixtureState(fx, { TRACKING_FIXTURE_STATE: "young" });
+  const start = y.client.started_on;
+  const nothingRead = { ...y.data, answers: y.data.answers.map((a) => (a.run_date === start ? { ...a, answered: false, named: false } : a)) };
+  const lateSetup = { ...y.data, questions: y.data.questions.map((q) => ({ ...q, added_on: q.added_on < addDays(start, 2) ? addDays(start, 2) : q.added_on })) };
+  const cases = [
+    { name: "the first check read nothing", data: nothingRead, startedOn: start, range: fxRange, week: "20 Sep - 26 Sep" },
+    { name: "the default fixture's last 90 days", data: fx.data, startedOn: fx.client.started_on, range: { from: addDays(fx.today, -89), to: fx.today }, week: "10 Jun - 16 Jun" },
+    { name: "a signup whose prompts came two days after its start", data: lateSetup, startedOn: start, range: fxRange, week: "22 Sep - 28 Sep" },
+  ];
+  for (const c of cases) {
+    const o = fxOverview(c.data, c.startedOn, c.range);
+    assert.equal(o.compareKind, "start", c.name);
+    assert.equal(comparisonLabel(o.compare!, o.compareKind), `vs your first week, ${c.week}`, `${c.name}: the page`);
+    assert.equal(compareText(c.range, "prev", c.startedOn, firstCheckDay(c.startedOn, c.data.questions)), `Tracking began ${formatDay(c.startedOn)}, so this compares with your first week, ${c.week}.`, `${c.name}: the picker`);
+  }
+  // The late signup's prompts are all like-for-like against a week that began when they were first asked.
+  assert.ok((fxOverview(lateSetup, start).lfl?.questions ?? 0) >= 40);
+  // Its previous period is not used while it reaches back before the first check, even once it is after started_on.
+  const later = { from: addDays(start, 30), to: addDays(start, 30 + 27) }; // its previous period begins on start + 2
+  assert.equal(resolveComparison(later, "prev", start, addDays(start, 2)).kind, "prev");
+  assert.equal(resolveComparison(later, "prev", start, addDays(start, 4)).kind, "start");
+  // Every date picker that compares is handed the page's first check day.
+  const dir = new URL("../../components/app/", import.meta.url);
+  const pickers = readdirSync(dir).filter((f) => f.endsWith(".tsx")).flatMap((f) => [...readFileSync(new URL(f, dir), "utf8").matchAll(/<DatePicker [^>]*>/g)].map((m) => `${f}: ${m[0]}`));
+  const comparing = pickers.filter((p) => !p.includes("noCompare"));
+  assert.ok(comparing.length >= 5, `${comparing.length} comparing pickers, floor 5`);
+  for (const p of comparing) assert.match(p, /firstCheck=\{/, p);
 });

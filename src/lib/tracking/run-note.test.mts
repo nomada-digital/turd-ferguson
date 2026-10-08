@@ -4,7 +4,7 @@ import { test } from "node:test";
 
 import { addDays } from "./figures.ts";
 import { expandFixture, fixtureState } from "./fixture-mode.ts";
-import { MISSING_READS, failedReadNames, failedTodayLine, latestAnswersNote, partialRunNote, runNote, todayRun } from "./run-note.ts";
+import { MISSING_READS, failedReadNames, failedTodayAside, failedTodayLine, failedTodayNote, latestAnswersNote, partialRunNote, runNote, storedAnswers, todayRun } from "./run-note.ts";
 
 /** R151 (1 Oct 2026): the note a screen shows when the last check shown lost reads. */
 
@@ -99,4 +99,38 @@ test("8 Oct 2026 (audit data-3): Latest answers picks the latest day with an ans
   assert.match(pick, /\.eq\("answered", true\)/, "a failed run's unanswered rows are not the latest check");
   const repo = readFileSync(new URL("./repo.ts", import.meta.url), "utf8");
   assert.match(repo, /a\.answered && \(d === null \|\| a\.run_date > d\)/, "the fixture picks the same day");
+});
+
+test("8 Oct 2026 (review of audit data-3): on a range that ends before today, a failed check today claims nothing about the range", () => {
+  // The Overview on 5 Aug - 1 Sep read "Today's check failed, so the figures run to 28 Sep" - a day the page does not show.
+  const fx = expandFixture(JSON.parse(readFileSync(new URL("./fixture.json", import.meta.url), "utf8")));
+  const failed = fixtureState(fx, { TRACKING_FIXTURE_STATE: "failed" }).data;
+  assert.deepEqual(failedTodayNote(failed, { from: addDays(fx.today, -27), to: fx.today }, fx.today), { line: "Today's check failed, so the figures run to 28 Sep.", aside: null });
+  assert.deepEqual(failedTodayNote(failed, { from: "2026-08-05", to: "2026-09-01" }, fx.today), { line: null, aside: "Today's check failed." });
+  assert.equal(failedTodayNote(fx.data, { from: addDays(fx.today, -27), to: fx.today }, fx.today), null, "today's check did not fail");
+  const src = readFileSync(new URL("../../components/app/Overview.tsx", import.meta.url), "utf8");
+  assert.match(src, /const failed = failedTodayNote\(data, range, today\);/);
+  assert.match(src, /failed\?\.aside \? `\$\{failed\.aside\} Next check tomorrow at 06:00\.`/, "an earlier range keeps Last checked, then the aside");
+  assert.match(src, /skipToday: !!failed\?\.line/);
+});
+
+test("8 Oct 2026 (review of audit data-3): a failed check that stored answers did not finish - it did not read nothing", () => {
+  // runner.ts stores the answers before the keyword positions; a failure after that, or the stall sweep, marks
+  // the run failed with answers every figure counts. "None of its reads came back" and "the figures run to
+  // yesterday" were then both untrue. The answers say which it was.
+  const fx = expandFixture(JSON.parse(readFileSync(new URL("./fixture.json", import.meta.url), "utf8")));
+  const r = { from: addDays(fx.today, -27), to: fx.today };
+  const stored = { ...fx.data, runs: (fx.data.runs ?? []).map((x) => (x.run_date === fx.today ? { ...x, status: "failed", error: "could not store the keyword positions: timeout" } : x)) };
+  assert.equal(storedAnswers(stored.answers, fx.today), true, "the default fixture answered today");
+  const failed = fixtureState(fx, { TRACKING_FIXTURE_STATE: "failed" }).data;
+  assert.equal(storedAnswers(failed.answers, fx.today), false, "the failed state's today stored nothing answered");
+  assert.equal(runNote(stored, r, fx.today), "Today's check did not finish. Any reads it did not store are left out of the figures, not counted as misses.");
+  assert.match(runNote(failed, r, fx.today)!, /^Today's check failed: none of its reads came back/);
+  assert.deepEqual(failedTodayNote(stored, r, fx.today), { line: "Today's check did not finish, so some of today's reads may be missing.", aside: null });
+  assert.deepEqual(failedTodayNote(stored, { from: "2026-08-05", to: "2026-09-01" }, fx.today), { line: null, aside: "Today's check did not finish." });
+  assert.equal(failedTodayLine("2026-09-28", true), "Today's check did not finish, so some of today's reads may be missing.");
+  assert.equal(failedTodayAside(), "Today's check failed.");
+  // Listed among several, it reads "did not finish" too.
+  const two = { ...stored, runs: [...stored.runs, { run_date: "2026-09-20", status: "partial", error: null }] };
+  assert.equal(runNote(two, r, fx.today), `2 checks in this range lost reads: 20 Sep (partial) and today (did not finish). ${MISSING_READS}`);
 });

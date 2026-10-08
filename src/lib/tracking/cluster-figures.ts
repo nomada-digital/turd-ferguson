@@ -1,4 +1,4 @@
-import { type AnswerRow, type Day, type Range, type Rate, type SerpRow, averagePosition, daysIn, formatDay, pointsDelta, rate } from "./figures.ts";
+import { type AnswerRow, type Day, type Overview, type Range, type Rate, type SerpRow, averagePosition, daysIn, formatDay, pointsDelta, rate } from "./figures.ts";
 import { APP_LIMITS } from "../../config/contact.ts";
 import type { Angle } from "./limits.ts";
 
@@ -150,6 +150,16 @@ export type ClusterSummary = {
   page1Lfl: number | null;
   /** Keywords at #11-#20: the ones a push would put on page 1. */
   offPage1: string[];
+  /**
+   * The prompts behind `now` - every prompt of a cluster with readings - and
+   * behind `lfl`, those of the clusters tracked all period (review of audit
+   * ia-3, 8 Oct 2026). The Overview's "Who is named instead" card counts
+   * these, so it reads the headline's answers: counting every answer, a
+   * pending cluster holding moved prompts set the client at 27% under a
+   * headline of 25%.
+   */
+  ids: ReadonlySet<string>;
+  lflIds: ReadonlySet<string>;
 };
 
 /**
@@ -190,6 +200,48 @@ export function clusterSummary(cards: ClusterCard[]): ClusterSummary {
     page1Before: hasBefore ? lfl.filter((c) => c.positionBefore !== null && c.positionBefore <= 10).length : null,
     page1Lfl: hasBefore ? lfl.filter((c) => c.position !== null && c.position <= 10).length : null,
     offPage1: read.filter((c) => c.position !== null && c.position >= 11 && c.position <= 20).map((c) => c.keyword ?? c.name),
+    ids: new Set(read.flatMap((c) => c.prompts.map((p) => p.id))),
+    lflIds: new Set(lfl.flatMap((c) => c.prompts.map((p) => p.id))),
+  };
+}
+
+export type KeyFigureChanges = {
+  /** The headline's and the first figure's change, in points. */
+  named: number | null;
+  /** Prompts named in, like-for-like now and before. */
+  prompts: { now: Rate; before: Rate } | null;
+  /** "like-for-like 37 of 40, no change" - the prompts figure's foot. */
+  promptsLine: string | null;
+  sov: number | null;
+  /** Keywords on page 1, in keywords. */
+  page1: number | null;
+};
+
+/**
+ * The Overview's key-figure chips (8 Oct 2026, audit data-4): every one is
+ * its like-for-like change, as the headline's is. The figure counts
+ * everything in the range; the chip only what was tracked all of both
+ * periods, so "40 of 45, was 37 of 40" - really no change - and a cluster
+ * added on page 1 no longer read as gains. `byCluster` is the summary when
+ * the headline reads by cluster (every prompt grouped), else null; `cs` the
+ * summary whenever there are clusters, for page 1.
+ */
+export function keyFigureChanges(o: Pick<Overview, "lfl" | "change">, cs: ClusterSummary | null, byCluster: ClusterSummary | null): KeyFigureChanges {
+  const prompts = byCluster
+    ? byCluster.promptsNamedLfl && byCluster.promptsNamedBefore
+      ? { now: byCluster.promptsNamedLfl, before: byCluster.promptsNamedBefore }
+      : null
+    : (o.change?.questions ?? null);
+  return {
+    named: byCluster ? byCluster.lflDelta : o.lfl ? pointsDelta(o.lfl.now, o.lfl.before) : null,
+    prompts,
+    promptsLine: prompts
+      ? `like-for-like ${prompts.now.num} of ${prompts.now.den}, ${
+          prompts.now.den !== prompts.before.den ? `was ${prompts.before.num} of ${prompts.before.den}` : prompts.now.num === prompts.before.num ? "no change" : `was ${prompts.before.num}`
+        }`
+      : null,
+    sov: o.change?.sov ?? null,
+    page1: cs ? (cs.page1Lfl !== null && cs.page1Before !== null ? cs.page1Lfl - cs.page1Before : null) : o.change?.keywords ? o.change.keywords.now - o.change.keywords.before : null,
   };
 }
 

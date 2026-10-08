@@ -12,7 +12,7 @@ import { CONTACT_URL, PACK_CLUSTERS, PACK_KEYWORDS, PACK_PROMPTS, contactUrlFor 
 import { T } from "@/config/tokens";
 import { ENGINE_SPECS, type Engine } from "@/lib/scan/engines";
 import { type ClusterCard, type ClusterFilter as Filter, clusterCards, daysOfLine, filterClusters, namedCount, neverCount, pendingBasis, searchPrompts } from "@/lib/tracking/cluster-figures";
-import { type Range, addDays, basis as basisLine, comparisonLabel, daysIn, formatDay, resolveComparison } from "@/lib/tracking/figures";
+import { type Range, addDays, basis as basisLine, comparisonLabel, daysIn, firstCheckDay, formatDay, resolveComparison } from "@/lib/tracking/figures";
 import { type KeywordCheck, draftPrompts } from "@/lib/tracking/add-cluster";
 import { ANGLES, BRANDED_CHIP, BRANDED_NOTE, PROMPTS_PER_CLUSTER, type Subject, namesBrandIn, refuseEdit } from "@/lib/tracking/limits";
 import type { Compare, OverviewData } from "@/lib/tracking/overview-data";
@@ -127,7 +127,9 @@ export default function Clusters({
   upgrade?: { tier: TierKey; mode: UpsellMode; hidden: ReadonlySet<PromptCta>; startedOn: string; domain: string } | null;
 }) {
   // 8 Oct 2026 (audit data-10): the comparison the Overview reads - the first week for a young client.
-  const cmp = resolveComparison(range, compareMode, startedOn ?? null, data.answers);
+  // The first week's first day, from started_on and the prompts - the date picker is handed the same day.
+  const firstCheck = firstCheckDay(startedOn ?? null, data.questions);
+  const cmp = resolveComparison(range, compareMode, startedOn ?? null, firstCheck);
   const before = cmp.range;
   // Audit data-3 (8 Oct 2026): every partial or failed check in the range, not only the last.
   const partial = runNote(data, range, today);
@@ -179,7 +181,7 @@ export default function Clusters({
           {partial ? <p style={{ margin: 0, fontSize: "14px", lineHeight: 1.5, color: T.soft, maxWidth: "680px" }}>{partial}</p> : null}
         </div>
         {/* T5 (30 Sep 2026): the server-drawn face opens boards/DatePicker.dc.html; JS off still shows the range. */}
-        <DatePicker range={range} compare={compareMode} today={today} startedOn={startedOn ?? null} grow={false}>
+        <DatePicker range={range} compare={compareMode} today={today} startedOn={startedOn ?? null} firstCheck={firstCheck} grow={false}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={T.ink} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <rect x="3" y="5" width="18" height="16" rx="2" />
             <path d="M3 10h18M8 3v4M16 3v4" />

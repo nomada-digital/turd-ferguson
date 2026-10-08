@@ -10,7 +10,7 @@ import { T } from "@/config/tokens";
 import { type Inline, parseAnswer } from "@/components/scan/answer-markdown";
 import { ENGINE_SPECS, type Engine } from "@/lib/scan/engines";
 import { type ClusterDetail, type ClusterInput, clusterChart, daysOfLine, positionMove, promptBrands, promptStrip } from "@/lib/tracking/cluster-figures";
-import { type Day, type Range, type Rate, basis as basisLine, comparisonLabel, daysIn, formatDay, pointsDelta, resolveComparison } from "@/lib/tracking/figures";
+import { type Day, type Range, type Rate, basis as basisLine, comparisonLabel, daysIn, firstCheckDay, formatDay, periodPair, pointsDelta, resolveComparison } from "@/lib/tracking/figures";
 import { type AnswerTab, type LatestAnswers, answerTabs, brandRuns } from "@/lib/tracking/latest-answers";
 import { NOTE_SAID, type NoteState } from "@/lib/tracking/note";
 import type { ClusterNote, Compare, OverviewData } from "@/lib/tracking/overview-data";
@@ -100,7 +100,9 @@ export default function OneCluster({
 }) {
   const c = detail.card;
   // 8 Oct 2026 (audit data-10): the comparison the Overview reads - the first week for a young client.
-  const cmp = resolveComparison(range, compareMode, startedOn ?? null, data.answers);
+  // The first week's first day, from started_on and the prompts - the date picker is handed the same day.
+  const firstCheck = firstCheckDay(startedOn ?? null, data.questions);
+  const cmp = resolveComparison(range, compareMode, startedOn ?? null, firstCheck);
   const before = cmp.range;
   // Audit data-3 (8 Oct 2026): every partial or failed check in the range, not only the last.
   const partial = runNote(data, range, today);
@@ -179,7 +181,7 @@ export default function OneCluster({
           {partial ? <p style={{ margin: 0, fontSize: "14px", lineHeight: 1.5, color: T.soft, maxWidth: "680px" }}>{partial}</p> : null}
         </div>
         {/* T5 (30 Sep 2026): the server-drawn face opens boards/DatePicker.dc.html; JS off still shows the range. */}
-        <DatePicker range={range} compare={compareMode} today={today} startedOn={startedOn ?? null} grow={false}>
+        <DatePicker range={range} compare={compareMode} today={today} startedOn={startedOn ?? null} firstCheck={firstCheck} grow={false}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={T.ink} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <rect x="3" y="5" width="18" height="16" rx="2" />
             <path d="M3 10h18M8 3v4M16 3v4" />
@@ -193,7 +195,7 @@ export default function OneCluster({
 
       <section aria-label="Summary" className="app-cl-sum" style={{ ...CARD, display: "flex", flexWrap: "wrap" }}>
         {/* R148 pass 7 (1 Oct 2026): before the first answer there is no count to give - "-", not "0 of 0" or "0 of 5". */}
-        {fig("Answers naming you", "cl-named", big(c.now.den ? `${c.now.num} of ${c.now.den}` : "-"), <Chip value={c.delta} unit=" pts" none={noChange(c)} />, !c.now.den ? "No answers yet" : c.before ? `${pct(c.now)} this period, ${pct(c.before)} the one before` : `${pct(c.now)} this period`, true)}
+        {fig("Answers naming you", "cl-named", big(c.now.den ? `${c.now.num} of ${c.now.den}` : "-"), <Chip value={c.delta} unit=" pts" none={noChange(c)} />, !c.now.den ? "No answers yet" : periodPair(c.now, c.before, cmp.kind), true)}
         {fig("Google position", "cl-google", big(c.position === null ? "-" : `#${c.position}`), <PositionChip c={c} />, `${posLine}${upFrom}`)}
         {fig("Prompts naming you", "cl-prompts", big(c.now.den ? `${c.promptsNamed.num} of ${c.promptsNamed.den}` : "-"), null, c.now.den ? "Each named you on at least one engine" : `${c.promptsNamed.den} prompts, none checked yet`)}
         {fig(

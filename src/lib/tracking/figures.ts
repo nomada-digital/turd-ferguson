@@ -79,36 +79,66 @@ export function firstWeek(startedOn: Day): Range {
 export type ComparisonKind = "prev" | "month" | "start";
 
 /**
+ * The day the first week starts (8 Oct 2026, review of audit data-10): the
+ * first day a check had a prompt to ask - started_on, or the day the first
+ * prompt was added when that came later (a signup with no scan adds none, so
+ * a client can start days before anything is asked). Read from started_on
+ * and the prompts alone, which every page and the date picker hold whatever
+ * the range. It used to be the first day an answer came back, which only a
+ * page whose comparison reached back had loaded, so the picker named one
+ * first week and the page another. A first check that failed stays in the
+ * week: it is still the first week of checks.
+ */
+export function firstCheckDay(startedOn: Day | null, questions: readonly Pick<QuestionRow, "added_on" | "stopped_on">[]): Day | null {
+  if (!startedOn) return null;
+  let first: Day | null = null;
+  for (const q of questions) {
+    if (q.stopped_on !== null && q.stopped_on <= q.added_on) continue; // stopped before it was ever asked
+    const d = q.added_on > startedOn ? q.added_on : startedOn;
+    if (first === null || d < first) first = d;
+  }
+  return first ?? startedOn;
+}
+
+/**
  * The comparison every page reads (8 Oct 2026, audit data-10). The previous
- * period or the month before, as picked; when that reaches back before
- * tracking began, the client's first week instead - before this, a client
- * saw no change at all for its first 55 days, the whole 14-day trial
- * included. The first week starts on the first day anything was read, when
- * `answers` say (a first check that failed does not leave an empty week),
- * else on started_on. A range that ends inside it has nothing to compare
- * yet, and says when it will. The first week may overlap the range: the
- * change is then this period against its first seven days, which is what
- * "vs your first week" says.
+ * period or the month before, as picked; when that reaches back before the
+ * first check (firstCheckDay, else started_on), the client's first week
+ * instead - before this, a client saw no change at all for its first 55
+ * days, the whole 14-day trial included. A range that ends inside the first
+ * week has nothing to compare yet, and says when it will. The first week may
+ * overlap the range: the change is then this period against its first seven
+ * days, which is what "vs your first week" says. Pages and the date picker
+ * (date-range.ts compareText) both call this, with the same firstCheck.
  */
 export function resolveComparison(
   range: Range,
   compare: "prev" | "month" | "none",
   startedOn: Day | null,
-  answers?: readonly Pick<AnswerRow, "run_date" | "answered">[],
+  firstCheck?: Day | null,
 ): { range: Range | null; kind: ComparisonKind | null; hidden: string | null } {
   const c = comparisonRange(range, compare);
   if (!c || compare === "none") return { range: null, kind: null, hidden: null };
-  if (!startedOn || c.from >= startedOn) return { range: c, kind: compare, hidden: null };
-  // Every read since tracking began is loaded here: the comparison asked for reaches back before it.
-  let firstRead: Day | null = null;
-  for (const a of answers ?? []) if (a.answered && a.run_date >= startedOn && a.run_date <= range.to && (firstRead === null || a.run_date < firstRead)) firstRead = a.run_date;
-  const first = firstWeek(firstRead ?? startedOn);
+  const start = startedOn && firstCheck && firstCheck > startedOn ? firstCheck : startedOn;
+  if (!startedOn || !start || c.from >= start) return { range: c, kind: compare, hidden: null };
+  const first = firstWeek(start);
   if (first.to < range.to) return { range: first, kind: "start", hidden: null };
   return {
     range: null,
     kind: null,
     hidden: `Tracking began ${formatDay(startedOn)}, so there is no earlier period to compare with yet. From ${formatDay(addDays(first.to, 1))} the changes are against your first week.`,
   };
+}
+
+/**
+ * "45% this period, 43% the one before" under a figure (8 Oct 2026, review of
+ * audit data-10): against the first week the second rate is "in your first
+ * week" - that week can sit inside this period, so "the one before" called
+ * seven of its own days an earlier period.
+ */
+export function periodPair(now: Rate, before: Rate | null, kind: ComparisonKind | null): string {
+  const p = (r: Rate) => (r.pct === null ? "-" : `${r.pct}%`);
+  return before ? `${p(now)} this period, ${p(before)} ${kind === "start" ? "in your first week" : "the one before"}` : `${p(now)} this period`;
 }
 
 /** "vs 5 Aug - 1 Sep", or "vs your first week, 20 Sep - 26 Sep" - the comparison as a chip or a date face says it. */
@@ -277,7 +307,7 @@ export function overview(input: {
   keywords?: readonly { id: string; added_on: Day; stopped_on: Day | null }[];
 }): Overview {
   const { range, answers, serp } = input;
-  const resolved = resolveComparison(range, input.compare, input.startedOn, answers);
+  const resolved = resolveComparison(range, input.compare, input.startedOn, firstCheckDay(input.startedOn, input.questions));
   const compare = resolved.range;
   const compareHidden = resolved.hidden;
   // Like-for-like: live from the comparison's first day to the range's last (BRIEF decision 8).

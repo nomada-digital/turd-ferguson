@@ -41,7 +41,7 @@ const SHADOW = `0 24px 60px -28px color-mix(in srgb, ${T.ink} 45%, transparent)`
 const BTN: React.CSSProperties = { display: "flex", alignItems: "center", height: "44px", padding: "0 16px", borderRadius: "12px", fontSize: "14px", fontWeight: 600, cursor: "pointer", fontFamily: "inherit" };
 const ARROW: React.CSSProperties = { position: "absolute", top: 0, width: "36px", height: "36px", border: `1px solid ${T.line}`, borderRadius: "10px", background: T.surface, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" };
 
-export default function DatePicker({ range, compare, today, startedOn, className, grow = true, noCompare = false, children }: { range: Range; compare: Compare; today: Day; startedOn: Day | null; className?: string; /** Fill the row, as the Overview header does; the cluster pages keep the face its own width. */ grow?: boolean; /** DS25: Placements compares nothing (every span is go-live to now) and Reports' CSVs ignore it (DS26), so the foot drops "Compare with" and Apply writes no compare. */ noCompare?: boolean; children: React.ReactNode }) {
+export default function DatePicker({ range, compare, today, startedOn, firstCheck = null, className, grow = true, noCompare = false, children }: { range: Range; compare: Compare; today: Day; startedOn: Day | null; /** The first week's first day as the page reads it (figures.ts firstCheckDay), so the compare line names the same week the page will. */ firstCheck?: Day | null; className?: string; /** Fill the row, as the Overview header does; the cluster pages keep the face its own width. */ grow?: boolean; /** DS25: Placements compares nothing (every span is go-live to now) and Reports' CSVs ignore it (DS26), so the foot drops "Compare with" and Apply writes no compare. */ noCompare?: boolean; children: React.ReactNode }) {
   const router = useRouter();
   // R151: pending while the server re-reads the new range, so Apply shows it took.
   const [loading, startLoading] = useTransition();
@@ -228,7 +228,7 @@ export default function DatePicker({ range, compare, today, startedOn, className
                   </span>
                 </div>
                 )}
-                {noCompare ? null : <div style={{ fontSize: "12px", color: T.soft }}>{pick.picking ? "" : compareText({ from: pick.from, to: pick.to }, cmp, startedOn)}</div>}
+                {noCompare ? null : <div style={{ fontSize: "12px", color: T.soft }}>{pick.picking ? "" : compareText({ from: pick.from, to: pick.to }, cmp, startedOn, firstCheck)}</div>}
               </div>
               <div style={{ display: "flex", gap: "8px" }}>
                 <button type="button" onClick={close} style={{ ...BTN, border: `1px solid ${T.line}`, background: T.surface, color: T.ink }}>

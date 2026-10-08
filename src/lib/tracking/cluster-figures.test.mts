@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
-import { clusterCards, clusterChart, clusterDetail, daysOfLine, clusterSearch, clusterSummary, filterClusters, pendingBasis, positionMove, promptBrands, promptIndex, promptStrip, searchPrompts } from "./cluster-figures.ts";
-import { addDays, comparisonRange, keywordsIn, resolveComparison } from "./figures.ts";
+import { clusterCards, clusterChart, clusterDetail, daysOfLine, clusterSearch, clusterSummary, filterClusters, keyFigureChanges, pendingBasis, positionMove, promptBrands, promptIndex, promptStrip, searchPrompts } from "./cluster-figures.ts";
+import { addDays, comparisonRange, keywordsIn, overview, periodPair, pointsDelta, resolveComparison, ungroupedRead } from "./figures.ts";
 import { expandFixture, fixtureState } from "./fixture-mode.ts";
 
 /**
@@ -363,4 +363,47 @@ test("8 Oct 2026 (audit data-10): a young client's clusters change against its f
   assert.ok(live.every((c) => c.delta !== null), "every one has a change against its first week (it read 'New' on every card)");
   const s = clusterSummary(young);
   assert.ok(s.lflDelta !== null && s.promptsNamedLfl && s.page1Lfl !== null);
+  // Review of data-10 (8 Oct 2026): the one-cluster page's line under "Answers naming you" said "43% the one
+  // before" of a first week seven days inside this period. Against the first week it says so.
+  const c1 = clusterDetail({ ...y.data, range: r, before: cmp.range, today: y.today, engines: ["google_aio", "chatgpt", "gemini", "perplexity"] }, "c1")!.card;
+  assert.equal(periodPair(c1.now, c1.before, cmp.kind), "45% this period, 43% in your first week");
+  assert.equal(periodPair(c1.now, c1.before, "prev"), "45% this period, 43% the one before", "an earlier period keeps its words");
+  assert.equal(periodPair(c1.now, null, null), "45% this period");
+  const page = readFileSync(new URL("../../components/app/OneCluster.tsx", import.meta.url), "utf8");
+  assert.match(page, /periodPair\(c\.now, c\.before, cmp\.kind\)/, "the page says it with the comparison's kind");
+  assert.ok(!page.includes("the one before"), "no second wording of its own");
+});
+
+test("8 Oct 2026 (review of audit data-4): the key-figure chips the Overview prints, by cluster and flat", () => {
+  const r = { from: addDays(fx.today, -27), to: fx.today };
+  const strip = (data: typeof fx.data) => {
+    const o = overview({ range: r, compare: "prev", startedOn: fx.client.started_on, engines: [], questions: data.questions, answers: data.answers, serp: data.serp, keywordCount: keywordsIn(data.keywords, r), keywords: data.keywords });
+    const grouped = !!data.clusters?.length && data.questions.some((q) => q.cluster_id);
+    const cs = grouped ? clusterSummary(clusterCards({ ...data, range: r, before: o.compare, today: fx.today, engines: [] })) : null;
+    const byCluster = cs && !ungroupedRead(data.questions, data.answers, r) ? cs : null;
+    return { o, cs, byCluster, chg: keyFigureChanges(o, cs, byCluster) };
+  };
+  // By cluster: "40 of 45" with the like-for-like 37 of 40 in both periods - no change, where it read "was 37 of 40".
+  const d = strip(fx.data);
+  assert.ok(d.byCluster);
+  assert.deepEqual({ ...d.chg, prompts: null }, { named: 3, prompts: null, promptsLine: "like-for-like 37 of 40, no change", sov: 2, page1: 2 });
+  assert.equal(d.chg.named, d.byCluster.lflDelta, "the headline's chip");
+  assert.equal(d.chg.page1, d.cs!.page1Lfl! - d.cs!.page1Before!, "page 1 on the clusters tracked all period");
+  // Flat (no prompt grouped): the chip is the headline's +3; it read +2, the all-prompts change, under a +3 headline.
+  const u = strip(fixtureState(fx, { TRACKING_FIXTURE_STATE: "ungrouped" }).data);
+  assert.equal(u.cs, null);
+  assert.equal(u.chg.named, 3);
+  assert.equal(u.chg.named, pointsDelta(u.o.lfl!.now, u.o.lfl!.before));
+  assert.notEqual(pointsDelta(u.o.named, u.o.namedBefore!), u.chg.named, "the all-prompts change it read before");
+  assert.equal(u.chg.page1, u.o.change!.keywords!.now - u.o.change!.keywords!.before);
+  // The prompts line's other wordings.
+  const line = (now: [number, number], before: [number, number]) =>
+    keyFigureChanges({ lfl: null, change: null }, null, { ...d.byCluster!, promptsNamedLfl: { num: now[0], den: now[1], pct: null }, promptsNamedBefore: { num: before[0], den: before[1], pct: null } }).promptsLine;
+  assert.equal(line([38, 40], [37, 40]), "like-for-like 38 of 40, was 37");
+  assert.equal(line([38, 40], [37, 41]), "like-for-like 38 of 40, was 37 of 41");
+  // The Overview prints these, not a copy of its own.
+  const src = readFileSync(new URL("../../components/app/Overview.tsx", import.meta.url), "utf8");
+  assert.match(src, /const chg = keyFigureChanges\(o, cs, byCluster\);/);
+  assert.match(src, /const promptsChange = chg\.promptsLine;/);
+  assert.ok(!src.includes("like-for-like ${"), "no second wording of the prompts line");
 });

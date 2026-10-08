@@ -4,8 +4,8 @@ import { test } from "node:test";
 
 import { clusterCards, clusterSummary } from "./cluster-figures.ts";
 import { expandFixture } from "./fixture-mode.ts";
-import { type AnswerRow, brandBoard, comparisonRange, overview, shareOfVoice } from "./figures.ts";
-import { CITED_WITH_TOP, NAMED_TOP, citedWithBrand, namedPage, openKey } from "./named-figures.ts";
+import { type AnswerRow, addDays, brandBoard, comparisonRange, keywordsIn, overview, shareOfVoice, ungroupedRead } from "./figures.ts";
+import { CITED_WITH_TOP, NAMED_TOP, citedWithBrand, namedPage, openKey, whoIsNamedCard } from "./named-figures.ts";
 
 /**
  * R143 (1 Oct 2026; BRIEF-4 P3): the Who is named page reads what the
@@ -124,7 +124,49 @@ test("8 Oct 2026 (audit ia-3): the Overview's card reads answers naming each bra
   assert.deepEqual([row("Ledgerline").share.num, row("Ledgerline").share.pct, row(you).share.pct], [2924, 34, 15], "/named's share of mentions is unchanged");
   // Each row's reach counts the same answers as its Answers column on /named.
   for (const r of page.rows) assert.equal(r.reach.num, r.answers, r.name);
+  // Review of audit ia-3 (8 Oct 2026): the card is whoIsNamedCard - Who is named's rows on the headline's own
+  // answers (the call this pinned counted every answer; see the pending-cluster test below).
   const src = readFileSync(new URL("../../components/app/Overview.tsx", import.meta.url), "utf8");
-  assert.match(src, /namedPage\(\{ answers: data\.answers, range, before: o\.compare, you: brand \}\)/, "the card is built from Who is named's rows");
-  assert.ok(!src.includes("brandBoard("), "not a second count of its own");
+  assert.match(src, /whoIsNamedCard\(\{ answers: data\.answers, range, before: o\.compare, you: brand, only: byCluster \? byCluster\.ids : null, lfl: byCluster \? byCluster\.lflIds : lflIds \}\)/, "the card is built from Who is named's rows, on the headline's basis");
+  assert.match(src, /const leader = \[\.\.\.who\.page\.rows\]/, "the leader line reads the card's rows");
+  assert.match(src, /const whoPage = who\.page;\n  const whoLfl = who\.change;/);
+  assert.ok(!src.includes("brandBoard(") && !src.includes("namedPage("), "not a second count of its own");
+});
+
+/** The Overview's headline inputs for one fixture variant: the summary when it reads by cluster, and the flat like-for-like prompts. */
+function overviewBasis(data: typeof fx.data) {
+  const r = { from: addDays(fx.today, -27), to: fx.today };
+  const o = overview({ range: r, compare: "prev", startedOn: fx.client.started_on, engines: [], questions: data.questions, answers: data.answers, serp: data.serp, keywordCount: keywordsIn(data.keywords, r), keywords: data.keywords });
+  const cs = clusterSummary(clusterCards({ ...data, range: r, before: o.compare, today: fx.today, engines: [] }));
+  assert.equal(ungroupedRead(data.questions, data.answers, r), 0, "every prompt grouped: the headline reads by cluster");
+  const card = whoIsNamedCard({ answers: data.answers, range: r, before: o.compare, you, only: cs.ids, lfl: cs.lflIds });
+  return { r, o, cs, card, row: (name: string) => card.page.rows.find((x) => x.name === name)! };
+}
+
+test("8 Oct 2026 (review of audit ia-3): the card counts the headline's answers when a pending cluster holds moved prompts", () => {
+  // c1 set to start tomorrow, its five prompts keeping their readings: the case pendingBasis exists for. The
+  // headline counts the clusters with readings, 1,039 of 4,200; the card counted every answer, 4,760, so one
+  // page put the client at 25% and 27%, and Ledgerline at 62% and 61%.
+  const moved = { ...fx.data, clusters: fx.data.clusters.map((c) => (c.id === "c1" ? { ...c, started_on: addDays(fx.today, 1) } : c)) };
+  const { r, cs, card, row } = overviewBasis(moved);
+  assert.deepEqual([cs.now.num, cs.now.den, cs.now.pct], [1039, 4200, 25], "the headline");
+  assert.equal(card.page.answers, cs.now.den, "the card's denominator is the headline's");
+  assert.deepEqual(row(you).reach, cs.now, "the client's row is the headline");
+  assert.deepEqual([row("Ledgerline").reach.num, row("Ledgerline").reach.den, row("Ledgerline").reach.pct], [2587, 4200, 62], "the leader line's 62%");
+  assert.equal(namedPage({ answers: moved.answers, range: r, before: null, you }).answers, 4760, "every answer, as the card counted before");
+  assert.equal(card.change!.get(row(you).key), cs.lflDelta, "the client's change is the headline's like-for-like change");
+});
+
+test("8 Oct 2026 (review of audit ia-3): the card's change is like-for-like, the client's row equal to the headline's chip", () => {
+  const { o, cs, card, row } = overviewBasis(fx.data);
+  // The card's change used to be brandBoard's share-of-mentions delta (Tallyroo +1, Ledgerline -1, Sumly 0).
+  assert.equal(cs.lflDelta, 3);
+  assert.deepEqual(Object.fromEntries(["Tallyroo", "Ledgerline", "Brightbook", "Countwise", "Sumly"].map((n) => [n, card.change!.get(row(n).key)])), { Tallyroo: 3, Ledgerline: -2, Brightbook: -2, Countwise: 0, Sumly: -1 });
+  assert.equal(card.change!.get(row(you).key), cs.lflDelta, "Tallyroo +3, the headline chip");
+  // Both periods on one footing: answers naming the brand, of the answers in that period.
+  assert.deepEqual(row(you).reachBefore, { num: 1111, den: 4480, pct: 25 });
+  assert.deepEqual(row("Ledgerline").reachBefore, { num: 2805, den: 4480, pct: 63 });
+  assert.equal(o.namedBefore!.den, 4480, "the comparison's answers, as the headline counts them");
+  // No comparison, no change.
+  assert.equal(whoIsNamedCard({ answers: fx.data.answers, range: o.range, before: null, you, only: cs.ids, lfl: cs.lflIds }).change, null);
 });
