@@ -6,7 +6,7 @@ import { selectAllCounted } from "@/lib/supabase/page";
 import { trackingDay } from "./decide.ts";
 import type { LatestAnswers, LatestRow } from "./latest-answers.ts";
 import type { Angle } from "./limits.ts";
-import { ANSWER_SELECT, type ReadOpts, type Structure, clusterQuestionIds } from "./read-shape.ts";
+import { ANSWER_SELECT, type ReadOpts, type Structure, boundStated, clusterQuestionIds } from "./read-shape.ts";
 import { type AnswerRow, type CitationRow, type Day, type Range, type SerpRow, addDays, comparisonRange } from "./figures.ts";
 
 /**
@@ -25,14 +25,14 @@ const DAY = /^\d{4}-\d{2}-\d{2}$/;
  * to the last 28 days to today against the previous period. A malformed or
  * reversed range falls back to the default rather than erroring.
  */
-export function rangeFrom(params: Record<string, string | string[] | undefined>, today: Day = trackingDay()): { range: Range; compare: Compare } {
+export function rangeFrom(params: Record<string, string | string[] | undefined>, today: Day = trackingDay(), startedOn: Day | null = null): { range: Range; compare: Compare } {
   const one = (k: string) => (typeof params[k] === "string" ? (params[k] as string) : undefined);
   const compare: Compare = one("compare") === "month" || one("compare") === "none" ? (one("compare") as Compare) : "prev";
   const from = one("from");
   const to = one("to");
-  if (from && to && DAY.test(from) && DAY.test(to) && from <= to && to <= today && !Number.isNaN(Date.parse(from)) && !Number.isNaN(Date.parse(to))) {
-    return { range: { from, to }, compare };
-  }
+  // perf-8 (8 Oct 2026): a stated from before rangeFloor starts on it; a range wholly before it is the default.
+  const bounded = from && to && DAY.test(from) && DAY.test(to) && from <= to && to <= today && !Number.isNaN(Date.parse(from)) && !Number.isNaN(Date.parse(to)) ? boundStated({ from, to }, today, startedOn) : null;
+  if (bounded) return { range: bounded, compare };
   return { range: { from: addDays(today, -27), to: today }, compare };
 }
 
@@ -42,8 +42,8 @@ export function rangeFrom(params: Record<string, string | string[] | undefined>,
  * and only when stated, so moving between pages keeps the reader's range.
  * "" when nothing is stated - the next page takes its own default.
  */
-export function rangeQuery(params: Record<string, string | string[] | undefined>, today: Day = trackingDay()): string {
-  const { range, compare } = rangeFrom(params, today);
+export function rangeQuery(params: Record<string, string | string[] | undefined>, today: Day = trackingDay(), startedOn: Day | null = null): string {
+  const { range, compare } = rangeFrom(params, today, startedOn);
   const q = new URLSearchParams();
   if (params.from === range.from && params.to === range.to) {
     q.set("from", range.from);

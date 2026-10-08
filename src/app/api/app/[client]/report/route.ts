@@ -33,7 +33,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ client: string 
   const client = (await repo.clientsFor(email)).find((c) => c.slug === slug);
   if (!client) return NextResponse.json({ error: "Not found." }, { status: 404 });
 
-  let range = rangeFrom(Object.fromEntries(sp), repo.today()).range;
+  let range = rangeFrom(Object.fromEntries(sp), repo.today(), client.started_on).range;
   let body: string;
   if (kind === "placements") {
     // The placements screen's own read (placements-screen.ts), so the file is the table on the page.

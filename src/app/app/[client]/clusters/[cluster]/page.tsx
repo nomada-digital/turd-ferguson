@@ -50,7 +50,7 @@ export default async function ClientCluster({
   const engines = enginesFor(tier);
   const today = repo.today();
   const sp = await searchParams;
-  const { range, compare } = rangeFrom(sp, today);
+  const { range, compare } = rangeFrom(sp, today, client.started_on);
   // perf-9 (8 Oct 2026): this cluster's prompts' answers only; every cluster is still read, for "N of M".
   const data = await repo.loadOverview(client.id, range, compare, { cluster: id });
   const input = { clusters: data.clusters ?? [], questions: data.questions, keywords: data.keywords, answers: data.answers, serp: data.serp, range, before: comparisonRange(range, compare), today, engines };
@@ -67,7 +67,7 @@ export default async function ClientCluster({
 
   return (
     <div className="app-shell" style={{ display: "flex", flexWrap: "wrap", minHeight: "100vh", color: T.ink }}>
-      <Sidebar keep={rangeQuery(sp, today)} client={client} others={clients.filter((c) => c.slug !== slug)} email={email} role={client.role} tier={tier} engines={engines} clusters current="Clusters" placements={placedTier(tier)} clusterLimit={client.cluster_limit ?? CLUSTER_BASE} packPrice={trackingPackPrice(client.market)} upsell={upgrade.mode === "nomada"} />
+      <Sidebar keep={rangeQuery(sp, today, client.started_on)} client={client} others={clients.filter((c) => c.slug !== slug)} email={email} role={client.role} tier={tier} engines={engines} clusters current="Clusters" placements={placedTier(tier)} clusterLimit={client.cluster_limit ?? CLUSTER_BASE} packPrice={trackingPackPrice(client.market)} upsell={upgrade.mode === "nomada"} />
       <div id="app-content" tabIndex={-1} className="app-main" style={{ flex: "1 1 480px", minWidth: 0, padding: "36px 40px 48px", background: T.bg }}>
         <OneCluster
           brand={client.brand ?? client.domain}

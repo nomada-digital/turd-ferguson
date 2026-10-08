@@ -43,7 +43,7 @@ export async function placementsScreen(
   const stated = typeof sp.from === "string" && typeof sp.to === "string";
   const floor = addDays(today, -SINCE_MAX_DAYS);
   const started: Day = client.started_on && client.started_on > floor ? client.started_on : floor;
-  const range = stated ? rangeFrom(sp, today).range : { from: started > today ? today : started, to: today };
+  const range = stated ? rangeFrom(sp, today, client.started_on ?? null).range : { from: started > today ? today : started, to: today };
   const [structure, rows] = await Promise.all([repo.structure(client.id), repo.placements(client.id)]);
   if (!placedTier(tier) && !rows.some((p) => p.status !== "removed")) return null;
 

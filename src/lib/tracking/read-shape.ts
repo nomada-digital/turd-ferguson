@@ -1,4 +1,4 @@
-import { type Day, type Range, comparisonRange } from "./figures.ts";
+import { type Day, type Range, addDays, comparisonRange } from "./figures.ts";
 import type { OverviewData } from "./overview-data.ts";
 
 /**
@@ -107,4 +107,29 @@ export function monthSlice(data: OverviewData, range: Range): OverviewData {
   const from = comparisonRange(range, "prev")?.from ?? range.from;
   const inside = (d: Day) => d >= from && d <= range.to;
   return { ...data, answers: data.answers.filter((a) => inside(a.run_date)), serp: data.serp.filter((s) => inside(s.run_date)) };
+}
+
+/**
+ * The earliest day a range stated in the URL may start (8 Oct 2026, audit
+ * perf-8): a year before today, or tracking's first day when that is longer
+ * ago. `rangeFrom` honoured any from up to today, so a hand-edited
+ * `?from=1900-01-01` read and drew 46,000 days - 134 MB and 66 s for one
+ * cluster on the fixture dev server - and doubled it again for the comparison.
+ *
+ * Not started_on itself: the default range is today's 28 days whatever the
+ * client's age, and every page's links carry it, so a client under 28 days
+ * old routinely states a from before its start. Clamping that would change
+ * the range - and so the figures - between a page and the link it wrote. A
+ * year back is past anything the picker, the presets or those links produce.
+ */
+export function rangeFloor(today: Day, startedOn: Day | null): Day {
+  const yearBack = addDays(today, -365);
+  return startedOn && startedOn < yearBack ? startedOn : yearBack;
+}
+
+/** A stated range held to `rangeFloor`: an earlier from starts on the floor, and a range wholly before it is none. */
+export function boundStated(r: Range, today: Day, startedOn: Day | null): Range | null {
+  const floor = rangeFloor(today, startedOn);
+  const from = r.from < floor ? floor : r.from;
+  return from <= r.to ? { from, to: r.to } : null;
 }

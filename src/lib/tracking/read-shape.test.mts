@@ -8,7 +8,8 @@ import { type Fixture, expandFixture, fixtureState } from "./fixture-mode.ts";
 import type { OverviewData } from "./overview-data.ts";
 import { chartSeries, citeRows, placementsView } from "./placement-figures.ts";
 import { urlKey } from "./placements.ts";
-import { ANSWER_SELECT, clusterQuestionIds, monthSlice, reportSpan, shapeRead } from "./read-shape.ts";
+import { presets } from "./date-range.ts";
+import { ANSWER_SELECT, boundStated, clusterQuestionIds, monthSlice, rangeFloor, reportSpan, shapeRead } from "./read-shape.ts";
 import { monthFigures, reportMonths } from "./report-months.ts";
 
 /**
@@ -181,4 +182,48 @@ test("census: the pages on a narrow read use their answers only where compared a
     assert.doesNotMatch(page, /loadOverview\(/, `${p} reads answers again`);
     assert.match(page, /repo\.structure\(client\.id\)/);
   }
+});
+
+/**
+ * perf-8 (8 Oct 2026): a stated range has a lower bound. On the fixture dev
+ * server /app/tallyroo/clusters/c1?from=1900-01-01 rendered 134 MB in 66 s.
+ */
+test("a stated from before the floor starts on it; one wholly before it is no range", () => {
+  const today = "2026-09-29";
+  assert.equal(rangeFloor(today, "2026-06-10"), "2025-09-29", "a year back, for a client younger than that");
+  assert.equal(rangeFloor(today, null), "2025-09-29", "no start yet: a year back");
+  assert.equal(rangeFloor(today, "2024-03-01"), "2024-03-01", "a client older than a year keeps all of its history");
+  assert.deepEqual(boundStated({ from: "1900-01-01", to: today }, today, "2026-06-10"), { from: "2025-09-29", to: today });
+  assert.deepEqual(boundStated({ from: "1900-01-01", to: today }, today, "2024-03-01"), { from: "2024-03-01", to: today });
+  assert.equal(boundStated({ from: "1900-01-01", to: "1900-01-31" }, today, "2026-06-10"), null, "the page takes its default");
+  assert.equal(boundStated({ from: "2020-01-01", to: "2025-09-28" }, today, null), null);
+  assert.deepEqual(boundStated({ from: "2025-09-29", to: "2025-09-29" }, today, null), { from: "2025-09-29", to: "2025-09-29" }, "the floor itself is a day");
+});
+
+test("a from before tracking began is honoured inside the year: the default range and its links state one", () => {
+  const today = "2026-09-29";
+  // Nine days old (the trial): the default 28 days start 19 days before tracking did, and every page's links carry them.
+  const young = "2026-09-20";
+  const dflt = { from: addDays(today, -27), to: today };
+  assert.deepEqual(boundStated(dflt, today, young), dflt);
+  assert.deepEqual(boundStated({ from: "2026-06-01", to: today }, today, young), { from: "2026-06-01", to: today });
+  // Nothing the picker offers moves, whatever the client's age.
+  for (const started of [null, today, young, "2026-06-10", "2025-12-01", "2024-03-01", "2026-10-05"]) {
+    for (const p of presets(today, started)) assert.deepEqual(boundStated(p.range, today, started), p.range, `${p.id} for a client started ${started}`);
+    assert.deepEqual(boundStated(dflt, today, started), dflt);
+  }
+});
+
+test("rangeFrom applies the floor, and every page and the CSV route pass it the client's start", () => {
+  const data = src("./overview-data.ts");
+  assert.match(data, /boundStated\(\{ from, to \}, today, startedOn\)/, "rangeFrom no longer bounds a stated range");
+  assert.match(src("../../app/api/app/[client]/report/route.ts"), /rangeFrom\(Object\.fromEntries\(sp\), repo\.today\(\), client\.started_on\)/);
+  assert.match(src("./placements-screen.ts"), /rangeFrom\(sp, today, client\.started_on \?\? null\)/);
+  let calls = 0;
+  for (const p of ["", "/clusters", "/clusters/[cluster]", "/named", "/cited", "/reports"]) {
+    const page = src(`../../app/app/[client]${p}/page.tsx`);
+    assert.match(page, /rangeFrom\(sp, today, client\.started_on\)/, `${p || "/"} reads its range without the client's start`);
+    calls++;
+  }
+  assert.equal(calls, 6);
 });

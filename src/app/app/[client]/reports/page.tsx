@@ -42,7 +42,7 @@ export default async function ClientReports({ params, searchParams }: { params: 
   const engines = enginesFor(tier);
   const today = repo.today();
   const sp = await searchParams;
-  const { range, compare } = rangeFrom(sp, today);
+  const { range, compare } = rangeFrom(sp, today, client.started_on);
   const months = reportMonths(client.started_on, today);
   // perf-1 (8 Oct 2026): from the oldest month's own comparison to today, verdicts only - every card's like-for-like
   // has its rows, and nothing a card does not count is read (read-shape.ts reportSpan; "prev" on the whole span read
@@ -52,7 +52,7 @@ export default async function ClientReports({ params, searchParams }: { params: 
 
   return (
     <div className="app-shell" style={{ display: "flex", flexWrap: "wrap", minHeight: "100vh", color: T.ink }}>
-      <Sidebar keep={rangeQuery(sp, today)} client={client} others={clients.filter((c) => c.slug !== slug)} email={email} role={client.role} tier={tier} engines={engines} clusters={(data.clusters?.length ?? 0) > 0} current="Reports" placements={placed} clusterLimit={client.cluster_limit ?? CLUSTER_BASE} packPrice={trackingPackPrice(client.market)} upsell={upgrade.mode === "nomada"} />
+      <Sidebar keep={rangeQuery(sp, today, client.started_on)} client={client} others={clients.filter((c) => c.slug !== slug)} email={email} role={client.role} tier={tier} engines={engines} clusters={(data.clusters?.length ?? 0) > 0} current="Reports" placements={placed} clusterLimit={client.cluster_limit ?? CLUSTER_BASE} packPrice={trackingPackPrice(client.market)} upsell={upgrade.mode === "nomada"} />
       <div id="app-content" tabIndex={-1} className="app-main" style={{ flex: "1 1 480px", minWidth: 0, padding: "36px 40px 48px", background: T.bg }}>
         <Reports
           today={today}
