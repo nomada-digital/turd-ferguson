@@ -190,14 +190,37 @@ test("census: the pages on a narrow read use their answers only where compared a
  */
 test("a stated from before the floor starts on it; one wholly before it is no range", () => {
   const today = "2026-09-29";
-  assert.equal(rangeFloor(today, "2026-06-10"), "2025-09-29", "a year back, for a client younger than that");
-  assert.equal(rangeFloor(today, null), "2025-09-29", "no start yet: a year back");
+  // Review, 8 Oct 2026: the floor is the first of its month, so a Reports month card's range is never cut (below).
+  assert.equal(rangeFloor(today, "2026-06-10"), "2025-09-01", "the month a year back, for a client younger than that");
+  assert.equal(rangeFloor(today, null), "2025-09-01", "no start yet: the month a year back");
   assert.equal(rangeFloor(today, "2024-03-01"), "2024-03-01", "a client older than a year keeps all of its history");
-  assert.deepEqual(boundStated({ from: "1900-01-01", to: today }, today, "2026-06-10"), { from: "2025-09-29", to: today });
+  assert.equal(rangeFloor(today, "2024-03-17"), "2024-03-01", "from the first of the month tracking began in");
+  assert.deepEqual(boundStated({ from: "1900-01-01", to: today }, today, "2026-06-10"), { from: "2025-09-01", to: today });
   assert.deepEqual(boundStated({ from: "1900-01-01", to: today }, today, "2024-03-01"), { from: "2024-03-01", to: today });
   assert.equal(boundStated({ from: "1900-01-01", to: "1900-01-31" }, today, "2026-06-10"), null, "the page takes its default");
-  assert.equal(boundStated({ from: "2020-01-01", to: "2025-09-28" }, today, null), null);
-  assert.deepEqual(boundStated({ from: "2025-09-29", to: "2025-09-29" }, today, null), { from: "2025-09-29", to: "2025-09-29" }, "the floor itself is a day");
+  assert.equal(boundStated({ from: "2020-01-01", to: "2025-08-31" }, today, null), null);
+  assert.deepEqual(boundStated({ from: "2025-09-01", to: "2025-09-01" }, today, null), { from: "2025-09-01", to: "2025-09-01" }, "the floor itself is a day");
+  assert.deepEqual(boundStated({ from: "2025-08-20", to: "2025-09-03" }, today, null), { from: "2025-09-01", to: "2025-09-03" });
+});
+
+test("every Reports month card's range, which its CSV links state, passes the floor unmoved", () => {
+  // Review, 8 Oct 2026: on the day-exact floor a client started 15 Sep 2025 had its September card's
+  // files cut to start on the 15th, and one started 20 Oct 2025 had October's cut to the 8th.
+  let cards = 0;
+  for (const today of ["2026-10-08", "2026-09-29", "2026-03-31", "2026-01-01", "2028-02-29"]) {
+    const ages = [0, 27, 200, 330, 360, 364, 365, 366, 370, 380, 400, 500, 800];
+    for (const back of ages) {
+      const started = addDays(today, -back);
+      for (const m of reportMonths(started, today)) {
+        assert.deepEqual(boundStated(m.range, today, started), m.range, `${m.label} for a client started ${started}, today ${today}`);
+        cards++;
+      }
+    }
+    for (const started of ["2025-09-15", "2025-10-20", "2024-03-17"]) {
+      for (const m of reportMonths(started, today)) assert.deepEqual(boundStated(m.range, today, started), m.range, `${m.label}, started ${started}`);
+    }
+  }
+  assert.ok(cards >= 200, `only ${cards} cards checked`);
 });
 
 test("a from before tracking began is honoured inside the year: the default range and its links state one", () => {
@@ -208,7 +231,7 @@ test("a from before tracking began is honoured inside the year: the default rang
   assert.deepEqual(boundStated(dflt, today, young), dflt);
   assert.deepEqual(boundStated({ from: "2026-06-01", to: today }, today, young), { from: "2026-06-01", to: today });
   // Nothing the picker offers moves, whatever the client's age.
-  for (const started of [null, today, young, "2026-06-10", "2025-12-01", "2024-03-01", "2026-10-05"]) {
+  for (const started of [null, today, young, "2026-06-10", "2025-12-01", "2025-10-20", "2025-09-15", "2024-03-01", "2024-03-17", "2026-10-05"]) {
     for (const p of presets(today, started)) assert.deepEqual(boundStated(p.range, today, started), p.range, `${p.id} for a client started ${started}`);
     assert.deepEqual(boundStated(dflt, today, started), dflt);
   }

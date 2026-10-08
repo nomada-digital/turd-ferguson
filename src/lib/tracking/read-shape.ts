@@ -111,20 +111,30 @@ export function monthSlice(data: OverviewData, range: Range): OverviewData {
 
 /**
  * The earliest day a range stated in the URL may start (8 Oct 2026, audit
- * perf-8): a year before today, or tracking's first day when that is longer
- * ago. `rangeFrom` honoured any from up to today, so a hand-edited
- * `?from=1900-01-01` read and drew 46,000 days - 134 MB and 66 s for one
- * cluster on the fixture dev server - and doubled it again for the comparison.
+ * perf-8): the first of the month a year before today, or the first of the
+ * month tracking began in when that is longer ago. `rangeFrom` honoured any
+ * from up to today, so a hand-edited `?from=1900-01-01` read and drew 46,000
+ * days - 134 MB and 66 s for one cluster on the fixture dev server - and
+ * doubled it again for the comparison.
  *
  * Not started_on itself: the default range is today's 28 days whatever the
  * client's age, and every page's links carry it, so a client under 28 days
  * old routinely states a from before its start. Clamping that would change
- * the range - and so the figures - between a page and the link it wrote. A
- * year back is past anything the picker, the presets or those links produce.
+ * the range - and so the figures - between a page and the link it wrote.
+ *
+ * The first of the month, not the day (review, 8 Oct 2026): Reports' cards
+ * are calendar months from the one tracking began in, and each links its
+ * CSVs with its own range, which starts on the 1st. On the day itself, a
+ * client started on 15 Sep 2025 had its September card's file cut to
+ * 15-30 Sep, and one started on 20 Oct 2025 had October's cut to start on 8
+ * Oct - a file whose name and rows were not the card's. read-shape.test.mts
+ * holds every month card, every preset and the default range unmoved at
+ * client ages either side of a year.
  */
 export function rangeFloor(today: Day, startedOn: Day | null): Day {
   const yearBack = addDays(today, -365);
-  return startedOn && startedOn < yearBack ? startedOn : yearBack;
+  const floor = startedOn && startedOn < yearBack ? startedOn : yearBack;
+  return `${floor.slice(0, 7)}-01`;
 }
 
 /** A stated range held to `rangeFloor`: an earlier from starts on the floor, and a range wholly before it is none. */
