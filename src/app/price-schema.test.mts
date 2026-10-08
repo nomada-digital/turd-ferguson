@@ -383,3 +383,12 @@ test("the comment strip above is load-bearing", () => {
   assert.ok(raw.includes('startsWith("from")'), "the header stopped naming the defect - this guard is now untested");
   assert.ok(!code(raw).includes('startsWith("from")'), "the strip stopped removing it");
 });
+
+/**
+ * The trial is not in the Offer markup (Danny, 8 Oct 2026): the published
+ * price stays the price, whether config/trial.ts has the trial on or off.
+ */
+test("the trial never reaches the Offer markup, on or off", () => {
+  const schema = readFileSync(new URL("../config/service-schema.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(schema, /trial/i, "service-schema.ts must not read the trial");
+});

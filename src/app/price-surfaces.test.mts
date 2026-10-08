@@ -220,3 +220,15 @@ test("the basis travels with the price it qualifies, on every surface that print
   assert.ok(grid.includes(clustersLine), "the /packages grid sells clusters without saying how many checkout takes: " + clustersLine);
   assert.ok(!/\$\d+\s*\/\s*£\d+/.test(grid), "the packages grid prints a price in both currencies at once, whatever the toggle says (R61)");
 });
+
+/**
+ * The alwaystracked trial (8 Oct 2026, config/trial.ts) is built dark, so the
+ * built pages this file reads show it off. The line it adds while on carries
+ * no figure and no "from", so every rule above reads a surface the same with
+ * it on: no price for the parse to find, no floor to quote flat.
+ */
+test("the trial line carries no price, so these rules hold with the trial on as well as off", async () => {
+  const { TRIAL_LINE, trialLine } = await import("../config/trial.ts");
+  assert.equal(trialLine("tracked", true), TRIAL_LINE);
+  assert.doesNotMatch(TRIAL_LINE, /[$£€]\s*\d|\d+\s*(?:\/mo|a month)|\bfrom\b/i);
+});

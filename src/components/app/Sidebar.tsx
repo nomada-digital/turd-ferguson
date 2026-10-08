@@ -4,7 +4,8 @@ import Link from "@/components/app/AppLink";
 import BrandMark from "@/components/BrandMark";
 import EngineLogo from "@/components/EngineLogo";
 import TierName, { type TierKey } from "@/components/TierName";
-import { PACK_CLUSTERS, TRACKED_BASIS, contactUrlFor } from "@/config/pricing";
+import { PACK_CLUSTERS, TRACKED_BASIS, TRACKED_PRICE, contactUrlFor } from "@/config/pricing";
+import { trialStatus } from "@/config/trial";
 import { T } from "@/config/tokens";
 import { ENGINE_SPECS, type Engine } from "@/lib/scan/engines";
 import { KEYWORDS_PER_CLUSTER, PROMPTS_PER_CLUSTER } from "@/lib/tracking/limits";
@@ -80,7 +81,7 @@ function NavIcon({ item, size }: { item: string; size: number }) {
   );
 }
 
-type Client ={ slug: string; domain: string; brand: string | null; market: string };
+type Client ={ slug: string; domain: string; brand: string | null; market: string; trial_ends_at?: string | null; trial_cancelled_at?: string | null };
 
 function Lockup({ size }: { size: number }) {
   return (
@@ -138,6 +139,8 @@ export default function Sidebar({
   const nav: readonly string[] = (clusters ? CLUSTER_NAV : NAV).filter((n) => placements || n !== PLACEMENTS_ITEM);
   const tabs: readonly string[] = clusters ? CLUSTER_TABS : TABS;
   const name = client.brand ?? client.domain;
+  // The alwaystracked trial (8 Oct 2026): "Free trial - ends <date>. Then $129 a month." or the cancelled line.
+  const trial = trialStatus({ trialEndsAt: client.trial_ends_at ?? null, cancelled: Boolean(client.trial_cancelled_at), market: client.market, price: TRACKED_PRICE });
   // R130 (30 Sep 2026): a built screen is a link; an unbuilt one is drawn
   // disabled with "Coming soon" - no href, not focusable, aria-disabled.
   // R151 (1 Oct): the nav and tabs are AppLinks, so moving between screens is
@@ -287,6 +290,7 @@ export default function Sidebar({
           <p style={{ margin: 0, fontSize: "13px", lineHeight: 1.5, color: T.soft }}>
             {clusters && clusterLimit ? `${clusterLimit * PROMPTS_PER_CLUSTER} prompts and ${clusterLimit * KEYWORDS_PER_CLUSTER} Google keywords, checked every day on ${WORDS[engines.length] ?? engines.length} engines.` : `${TRACKED_BASIS}.`}
           </p>
+          {trial ? <p style={{ margin: 0, fontSize: "13px", lineHeight: 1.5, fontWeight: 600, color: T.ink }}>{trial}</p> : null}
           <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
             {engines.map((e) => (
               <EngineLogo key={e} engine={e} size={18} title={ENGINE_SPECS[e].label} />

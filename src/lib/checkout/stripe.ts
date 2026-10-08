@@ -32,3 +32,40 @@ export async function createCheckoutSession(form: URLSearchParams, fetchImpl: ty
   }
   return { ok: true, url: body.url };
 }
+
+/**
+ * The two subscription calls the alwaystracked trial needs (Danny, 8 Oct
+ * 2026): read a subscription's status and trial end, so the webhook records
+ * the real first-charge date; and set cancel_at_period_end, the owner's
+ * "Cancel trial" - the subscription ends when the trial does and nothing is
+ * charged. Neither bills anybody.
+ */
+export type SubscriptionRead = { ok: true; status: string; trialEnd: number | null; cancelAtPeriodEnd: boolean } | { ok: false; reason: "no_key" | "refused" | "unreachable"; status?: number };
+
+async function subscriptionCall(id: string, form: URLSearchParams | null, fetchImpl: typeof fetch): Promise<SubscriptionRead> {
+  const key = process.env.STRIPE_SECRET_KEY;
+  if (!key) return { ok: false, reason: "no_key" };
+  if (!/^sub_[A-Za-z0-9]{1,200}$/.test(id)) return { ok: false, reason: "refused" };
+  let res: Response;
+  try {
+    res = await fetchImpl(`https://api.stripe.com/v1/subscriptions/${id}`, {
+      method: form ? "POST" : "GET",
+      headers: { authorization: `Bearer ${key}`, ...(form ? { "content-type": "application/x-www-form-urlencoded" } : {}) },
+      body: form ? form.toString() : undefined,
+      signal: AbortSignal.timeout(15_000),
+    });
+  } catch {
+    return { ok: false, reason: "unreachable" };
+  }
+  const body = (await res.json().catch(() => null)) as { status?: unknown; trial_end?: unknown; cancel_at_period_end?: unknown } | null;
+  if (!res.ok || typeof body?.status !== "string") return { ok: false, reason: "refused", status: res.status };
+  return { ok: true, status: body.status, trialEnd: typeof body.trial_end === "number" ? body.trial_end : null, cancelAtPeriodEnd: body.cancel_at_period_end === true };
+}
+
+export function readSubscription(id: string, fetchImpl: typeof fetch = fetch): Promise<SubscriptionRead> {
+  return subscriptionCall(id, null, fetchImpl);
+}
+
+export function cancelAtPeriodEnd(id: string, fetchImpl: typeof fetch = fetch): Promise<SubscriptionRead> {
+  return subscriptionCall(id, new URLSearchParams({ cancel_at_period_end: "true" }), fetchImpl);
+}

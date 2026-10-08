@@ -23,6 +23,9 @@ export type MemberClient = {
   keyword_limit: number;
   /** BRIEF-3 C2: 10 plus 5 per pack, set by the webhook only. Absent in fixtures cut before clusters. */
   cluster_limit?: number;
+  /** The alwaystracked trial (8 Oct 2026): when it ends, and when an owner cancelled it. Absent in fixtures. */
+  trial_ends_at?: string | null;
+  trial_cancelled_at?: string | null;
 };
 
 /** The signed-in email, or null. */
@@ -48,7 +51,7 @@ export async function clientsFor(email: string): Promise<(MemberClient & { role:
   if (!roleOf.size) return [];
   const { data: rows, error: cErr } = await db
     .from("client_domains")
-    .select("id, account_id, slug, domain, brand_name, market, tier, started_on, question_limit, keyword_limit, cluster_limit")
+    .select("id, account_id, slug, domain, brand_name, market, tier, started_on, question_limit, keyword_limit, cluster_limit, trial_ends_at, trial_cancelled_at")
     .in("account_id", [...roleOf.keys()])
     .not("slug", "is", null)
     .order("created_at", { ascending: true });
@@ -64,6 +67,8 @@ export async function clientsFor(email: string): Promise<(MemberClient & { role:
     question_limit: r.question_limit as number,
     keyword_limit: r.keyword_limit as number,
     cluster_limit: r.cluster_limit as number,
+    trial_ends_at: (r.trial_ends_at as string | null) ?? null,
+    trial_cancelled_at: (r.trial_cancelled_at as string | null) ?? null,
     role: roleOf.get(r.account_id as string) ?? "viewer",
   }));
 }

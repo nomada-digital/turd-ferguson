@@ -338,6 +338,13 @@ const NO_CALLER: { route: string; method: string; why: string; earns: () => bool
     earns: () => readFileSync(join(ROOT, "src/components/app/Settings.tsx"), "utf8").includes("const action = `/api/app/${encodeURIComponent(slug)}/member${keep}`;"),
   },
   {
+    route: "/api/app/[client]/trial",
+    method: "POST",
+    // 8 Oct 2026: the alwaystracked trial's Cancel trial, owners only, built dark.
+    why: "Posted by the plain HTML Cancel trial confirm form in Settings > Billing, which the fetch scanner does not read.",
+    earns: () => readFileSync(join(ROOT, "src/components/app/Settings.tsx"), "utf8").includes("action={`/api/app/${encodeURIComponent(slug)}/trial`}"),
+  },
+  {
     route: "/api/checkout",
     method: "POST",
     // R91, 29 Sep 2026. It opens a live Stripe Checkout - the one route

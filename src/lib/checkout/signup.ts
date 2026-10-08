@@ -3,7 +3,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { siteUrl } from "@/lib/scan/verify-email";
 import { sendOrderEmail } from "@/lib/checkout/order-mail";
-import { clustersToMake, orderEmailText, orderRow, packsOn, signupResume, subscriptionScanToken, type CompletedOrder } from "@/lib/checkout/webhook";
+import { clustersToMake, orderEmailText, orderRow, packsOn, signupResume, subscriptionScanToken, trialConverted, type CompletedOrder } from "@/lib/checkout/webhook";
+import { readSubscription } from "@/lib/checkout/stripe";
+import { TRACKED_PRICE } from "@/config/pricing";
+import { trialCharge, trialDay } from "@/config/trial";
 import { dayAfter, slugFor, trackingDay } from "@/lib/tracking/decide";
 import { angleFor, clusterLimitFor, insertCluster, insertKeyword, insertPrompts, namesBrandIn, PROMPTS_PER_CLUSTER } from "@/lib/tracking/limits";
 import { planEnded, welcome } from "@/lib/email/lifecycle";
@@ -214,7 +217,25 @@ async function clientFromOrder(db: SupabaseClient, o: CompletedOrder): Promise<{
   };
 }
 
+/**
+ * When a trialing order's first charge is due (Danny, 8 Oct 2026): Stripe's own
+ * trial_end, read off the subscription, so the date is the one Stripe charges
+ * on. If the read fails the trial's length from now stands in, logged - the
+ * signup is not held up for a date.
+ */
+async function trialEndOf(o: CompletedOrder): Promise<string | null> {
+  if (!o.trialDays) return null;
+  if (o.subscriptionId) {
+    const sub = await readSubscription(o.subscriptionId);
+    if (sub.ok && sub.trialEnd) return new Date(sub.trialEnd * 1000).toISOString();
+    console.warn(`[stripe] trial end not read for ${o.subscriptionId}: ${sub.ok ? "no trial_end" : sub.reason}`);
+  }
+  return new Date(Date.now() + o.trialDays * 24 * 3600 * 1000).toISOString();
+}
+
 export async function onCheckoutCompleted(db: SupabaseClient, o: CompletedOrder, eventId: string): Promise<boolean> {
+  const trialEndsAt = await trialEndOf(o);
+  const trial = trialEndsAt ? { firstCharge: trialDay(trialEndsAt), amount: trialCharge(o.market, TRACKED_PRICE) } : null;
   const r = await clientFromOrder(db, o);
   if (!r.ok) {
     console.error(`[stripe] signup failed for ${eventId}: ${r.outcome}`);
@@ -222,9 +243,9 @@ export async function onCheckoutCompleted(db: SupabaseClient, o: CompletedOrder,
     // order email, only Stripe's retries (R148 pass 8, 1 Oct 2026). The first
     // failure for a Session writes its order row and tells Danny; a retry finds
     // the row and stays quiet. Still false, so Stripe retries the signup.
-    const order = await writeOrder(db, o, r.clientId ?? null);
+    const order = await writeOrder(db, o, r.clientId ?? null, trialEndsAt);
     if (order.inserted) {
-      const mail = orderEmailText(o, `FAILED, Stripe will retry it: ${r.outcome} Order row: ${order.text}.`, siteUrl());
+      const mail = orderEmailText(o, `FAILED, Stripe will retry it: ${r.outcome} Order row: ${order.text}.`, siteUrl(), trial);
       await sendOrderEmail({ ...mail, subject: `SIGNUP FAILED - ${mail.subject}`, replyTo: o.email });
     }
     return false;
@@ -232,16 +253,22 @@ export async function onCheckoutCompleted(db: SupabaseClient, o: CompletedOrder,
   if (r.clientId) {
     const { error } = await db.from("stripe_events").update({ client_domain_id: r.clientId }).eq("id", eventId);
     if (error) console.warn(`[stripe] event ${eventId} not linked to its client: ${error.message}`);
+    // The dashboard's "Free trial - ends <date>" reads this. Logged, not
+    // retried: the client is made and the order row carries the date too.
+    if (trialEndsAt) {
+      const { error: tErr } = await db.from("client_domains").update({ trial_ends_at: trialEndsAt }).eq("id", r.clientId);
+      if (tErr) console.error(`[stripe] trial_ends_at not set on client ${r.clientId}: ${tErr.message}`);
+    }
   }
-  const order = await writeOrder(db, o, r.clientId ?? null);
-  const mail = orderEmailText(o, `${r.outcome} Order row: ${order.text}.`, siteUrl());
+  const order = await writeOrder(db, o, r.clientId ?? null, trialEndsAt);
+  const mail = orderEmailText(o, `${r.outcome} Order row: ${order.text}.`, siteUrl(), trial);
   await sendOrderEmail({ ...mail, replyTo: o.email });
   return true;
 }
 
 /** inserted is false when the Session's row was already there (a retry), or was not written. */
-async function writeOrder(db: SupabaseClient, o: CompletedOrder, clientId: string | null): Promise<{ text: string; inserted: boolean }> {
-  const built = orderRow(o, clientId);
+async function writeOrder(db: SupabaseClient, o: CompletedOrder, clientId: string | null, trialEndsAt: string | null = null): Promise<{ text: string; inserted: boolean }> {
+  const built = orderRow(o, clientId, trialEndsAt);
   if (!built.row) {
     console.error(`[stripe] order row not written for ${o.sessionId}: ${built.reason}`);
     // No row means nothing marks a retry, so a failing signup mails on each one: noisy beats silent.
@@ -263,19 +290,31 @@ async function writeOrder(db: SupabaseClient, o: CompletedOrder, clientId: strin
 
 async function clientOfSubscription(db: SupabaseClient, sub: Record<string, unknown>): Promise<string | null | false> {
   const token = subscriptionScanToken(sub);
-  if (!token) return null;
-  const { data: scan, error } = await db.from("scans").select("id").eq("public_token", token).maybeSingle();
-  if (error) return false;
-  if (!scan) return null;
-  const { data: c, error: cErr } = await db.from("client_domains").select("id").eq("source_scan_id", scan.id).order("created_at", { ascending: false }).limit(1);
-  if (cErr) return false;
-  return (c?.[0]?.id as string | undefined) ?? null;
+  if (token) {
+    const { data: scan, error } = await db.from("scans").select("id").eq("public_token", token).maybeSingle();
+    if (error) return false;
+    if (scan) {
+      const { data: c, error: cErr } = await db.from("client_domains").select("id").eq("source_scan_id", scan.id).order("created_at", { ascending: false }).limit(1);
+      if (cErr) return false;
+      if (c?.[0]?.id) return c[0].id as string;
+    }
+  }
+  // An order with no scan (R158) carries no token, so its subscription found no
+  // client and a cancellation ended nothing. The order row holds both ids
+  // (8 Oct 2026, found building the trial's cancel).
+  const id = typeof sub.id === "string" ? sub.id : "";
+  if (!id) return null;
+  const { data: o, error: oErr } = await db.from("orders").select("client_domain_id").eq("stripe_subscription_id", id).not("client_domain_id", "is", null).limit(1);
+  if (oErr) return false;
+  return (o?.[0]?.client_domain_id as string | undefined) ?? null;
 }
 
 /** Packs become cluster_limit (limits.ts: 10 + 5 per pack). No client for the subscription: nothing to do. */
-export async function onSubscriptionUpdated(db: SupabaseClient, sub: Record<string, unknown>): Promise<boolean> {
+export async function onSubscriptionUpdated(db: SupabaseClient, sub: Record<string, unknown>, previous: Record<string, unknown> = {}): Promise<boolean> {
   const clientId = await clientOfSubscription(db, sub);
   if (clientId === false) return false;
+  // A trial that became paying changes nothing here; it is worth a line in the log.
+  if (trialConverted(sub, previous)) console.info(`[stripe] trial converted to paid: ${String(sub.id)} client ${clientId ?? "none"}`);
   if (!clientId) return true;
   const { error } = await db.from("client_domains").update({ cluster_limit: clusterLimitFor(packsOn(sub)) }).eq("id", clientId);
   if (error) console.error(`[stripe] cluster_limit not set: ${error.message}`);

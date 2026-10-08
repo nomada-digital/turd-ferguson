@@ -123,6 +123,8 @@ const KEYS: Record<string, Record<string, string>> = {
     who: "teamToast(sp.team, sp.who,", // readEmail: trimmed, format-checked, at most EMAIL_MAX
     // R151, 3 Oct 2026: a refusal's code from the member route; teamWhy matches it against TEAM_WHY's keys, nothing is echoed.
     why: "inviteRefusal(sp.team, sp.why)",
+    // 8 Oct 2026: the trial route's 303 back - only "cancelled" or "refused" draw a toast, nothing is echoed.
+    trial: 'sp.trial === "cancelled"',
   },
   "/placements": {
     type: 'pickKind(typeof sp.type === "string" ? sp.type : null)',
@@ -160,9 +162,10 @@ const ROLE_READS: Record<string, string[]> = {
  * Raised 2 Oct 2026 (R166 part 5): 36 keys - /setup's card, kw and sig.
  * Raised 2 Oct 2026 (R173 pass 2): 37 keys - the Overview's setup.
  * Raised 2 Oct 2026 (R173 pass 3, DS36): 10 pages - the [...rest] catch-all.
+ * Raised 8 Oct 2026: 38 keys - Settings' trial, the Cancel trial route's way back.
  */
 const PAGE_FLOOR = 10;
-const KEY_FLOOR = 37;
+const KEY_FLOOR = 38;
 
 /** The query keys a page reads by name, as written. */
 export function keysRead(src: string): string[] {

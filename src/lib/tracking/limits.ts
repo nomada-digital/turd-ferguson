@@ -315,3 +315,48 @@ export async function readingsFor(db: SupabaseClient, kind: "prompt" | "keyword"
   if (error) return `Could not count the readings: ${error.message}`;
   return count ?? 0;
 }
+
+/**
+ * "Cancel trial" (Danny, 8 Oct 2026). There is no Stripe portal, so an owner
+ * cancels in Settings > Billing: the subscription is set to end when the
+ * trial does (cancel_at_period_end, no charge), the client keeps tracking
+ * until then, and the end arrives as customer.subscription.deleted through the
+ * existing plan-ended handling. After the trial the 30 days' notice terms
+ * apply unchanged, so there is nothing to cancel here once it is over.
+ */
+export function refuseTrialCancel(p: { role: string; trialEndsAt: string | null; cancelledAt: string | null; subscriptionId: string | null; now: number }): string | null {
+  if (p.role !== "owner") return "Only an owner can cancel the trial.";
+  if (!p.trialEndsAt || new Date(p.trialEndsAt).getTime() <= p.now) return "There is no free trial running to cancel.";
+  if (p.cancelledAt) return "The trial is already cancelled.";
+  if (!p.subscriptionId) return "We could not find the trial's subscription. Ask us and we will cancel it.";
+  return null;
+}
+
+export async function cancelTrial(
+  db: SupabaseClient,
+  p: { clientId: string; role: string; by: string; now: number; cancel: (subscriptionId: string) => Promise<boolean> },
+): Promise<Written> {
+  const { data: c, error: cErr } = await db.from("client_domains").select("trial_ends_at, trial_cancelled_at").eq("id", p.clientId).maybeSingle();
+  if (cErr) return { ok: false, message: `could not read the client: ${cErr.message}` };
+  const { data: o, error: oErr } = await db
+    .from("orders")
+    .select("stripe_subscription_id")
+    .eq("client_domain_id", p.clientId)
+    .not("trial_ends_at", "is", null)
+    .not("stripe_subscription_id", "is", null)
+    .order("created_at", { ascending: false })
+    .limit(1);
+  if (oErr) return { ok: false, message: `could not read the order: ${oErr.message}` };
+  const subscriptionId = (o?.[0]?.stripe_subscription_id as string | undefined) ?? null;
+  const refused = refuseTrialCancel({ role: p.role, trialEndsAt: (c?.trial_ends_at as string | null) ?? null, cancelledAt: (c?.trial_cancelled_at as string | null) ?? null, subscriptionId, now: p.now });
+  if (refused) return { ok: false, message: refused };
+  if (!(await p.cancel(subscriptionId!))) return { ok: false, message: "Stripe did not take the cancellation. Please try again." };
+  const at = new Date(p.now).toISOString();
+  const { error: wErr } = await db.from("client_domains").update({ trial_cancelled_at: at }).eq("id", p.clientId).is("trial_cancelled_at", null);
+  // Stripe already holds the cancellation, so a failed stamp is logged rather
+  // than reported as a refusal: the owner was not charged either way.
+  if (wErr) console.error(`[app] trial cancelled in Stripe but trial_cancelled_at not set on ${p.clientId}: ${wErr.message}`);
+  const { error: eErr } = await db.from("dashboard_events").insert({ client_domain_id: p.clientId, member_email: p.by, event: "trial_cancelled", path: "/settings", props: {} });
+  if (eErr) console.warn(`[app] trial_cancelled event not recorded: ${eErr.message}`);
+  return { ok: true, ids: [p.clientId] };
+}

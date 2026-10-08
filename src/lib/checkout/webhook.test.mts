@@ -141,6 +141,8 @@ test("a completed Session becomes one orders row that meets the table's checks",
     amount_total: 12900,
     currency: "usd",
     client_domain_id: "client-1",
+    // 8 Oct 2026: the alwaystracked trial's first-charge date, null on a paid order.
+    trial_ends_at: null,
   });
   // Each check in 20260930020000_orders.sql refuses here before the database would.
   const bad = (m: Record<string, string>, extra: Record<string, unknown> = {}) =>
@@ -158,9 +160,13 @@ test("signup writes the orders row keyed on the Session id, and every column exi
   assert.ok(src.includes(`from("orders").upsert(built.row, { onConflict: "stripe_session_id", ignoreDuplicates: true })`), "signup.ts no longer upserts orders on the Session id");
   const sql = await readFile(new URL("../../../supabase/migrations/20260930020000_orders.sql", import.meta.url), "utf8");
   assert.ok(sql.includes("stripe_session_id text not null unique"));
+  // 8 Oct 2026: trial_ends_at, the 14th column, was added by its own additive migration.
+  const trial = await readFile(new URL("../../../supabase/migrations/20261008010000_trial_columns.sql", import.meta.url), "utf8");
   const cols = Object.keys(orderRow(completedOrder(completed.data.object), null).row ?? {});
-  assert.equal(cols.length, 13);
-  for (const col of cols) assert.ok(sql.includes(`\n  ${col} `), `orders has no ${col} column`);
+  assert.equal(cols.length, 14);
+  for (const col of cols) {
+    assert.ok(sql.includes(`\n  ${col} `) || trial.includes(`alter table orders add column if not exists ${col} `), `orders has no ${col} column`);
+  }
 });
 
 test("packs count only items marked as a pack", () => {

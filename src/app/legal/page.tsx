@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
-import TierName from "@/components/TierName";
+import TierName, { TierText } from "@/components/TierName";
 import { OG_IMAGE } from "@/config/og";
 
 import { COMPANY_LINE, CONTACT_EMAIL } from "@/config/contact";
 import { CARD, GRID12, MICRO, SHELL, T } from "@/config/tokens";
+import { TRIAL, TRIAL_TERMS } from "@/config/trial";
 
 export const metadata: Metadata = {
   title: "Privacy policy",
@@ -148,6 +149,25 @@ const SECTIONS: Section[] = [
       </>
     ),
   },
+  // The alwaystracked trial clause (Danny, 8 Oct 2026), only while
+  // config/trial.ts has the trial on. A draft for Danny to read first.
+  ...(TRIAL.enabled
+    ? [
+        {
+          id: "free-trial",
+          title: "The free trial",
+          body: (
+            <>
+              <TierText>{TRIAL_TERMS.join(" ")}</TierText> Email{" "}
+              <a href={`mailto:${CONTACT_EMAIL}`} style={{ fontWeight: 600, textDecoration: "none", color: T.accent }}>
+                {CONTACT_EMAIL}
+              </a>{" "}
+              with any question about a charge.
+            </>
+          ),
+        },
+      ]
+    : []),
 ];
 
 export default function LegalPage() {

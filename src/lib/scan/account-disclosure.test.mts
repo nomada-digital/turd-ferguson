@@ -167,7 +167,8 @@ const RECORDED: Record<string, string> = {
   "src/lib/tracking/member.ts :: account_id, role":
     "joins a member to their accounts server-side; clientsFor returns no account_id.",
   // 30 Sep 2026, T6 part 1: cluster_limit added for the Clusters page's usage bar; account_id still stays server-side.
-  "src/lib/tracking/member.ts :: id, account_id, slug, domain, brand_name, market, tier, started_on, question_limit, keyword_limit, cluster_limit":
+  // 8 Oct 2026: trial_ends_at and trial_cancelled_at added for the plan card's trial line; account_id still stays server-side.
+  "src/lib/tracking/member.ts :: id, account_id, slug, domain, brand_name, market, tier, started_on, question_limit, keyword_limit, cluster_limit, trial_ends_at, trial_cancelled_at":
     "maps each client to its role by account server-side; the returned MemberClient omits account_id.",
   // 1 Oct 2026, R142 (BRIEF-4 P2): Settings' team list. The id picks the account's members and is dropped.
   "src/lib/tracking/settings-data.ts :: account_id, brand_aliases":

@@ -7,6 +7,7 @@ import TierName, { TierText, type TierKey } from "@/components/TierName";
 import { ALWAYS_ON, ALWAYS_ON_SUPPORT } from "@/config/always-on";
 import { CLUSTERS_LINE, CONTACT_URL, TIERS, TRACKED_BASIS, TRACKED_CLUSTERS, TRACKED_KEYWORDS, TRACKED_PROMPTS, checkoutUrlFor, contactUrlFor, enginesFor, type Tier } from "@/config/pricing";
 import { ld } from "@/config/schema";
+import { trialLine } from "@/config/trial";
 import { serviceSchema } from "@/config/service-schema";
 import { CARD, MICRO, SHELL, T } from "@/config/tokens";
 import Link from "next/link";
@@ -179,6 +180,8 @@ export default function PackagePage({
                 <PackLine />
               </span>
             )}
+            {/* The alwaystracked trial, only while config/trial.ts has it on. Not in the Offer markup. */}
+            {trialLine(tier.key) ? <span style={{ display: "block", marginTop: "6px", color: T.ink, fontWeight: 600 }}>{trialLine(tier.key)}</span> : null}
           </p>
           <TierEngines tier={tier.key} size={16} colour={T.soft} style={{ margin: "-4px 0 16px" }} />
           {/* The sector tiers' CTA carries the picks to the order form, or to

@@ -4,6 +4,7 @@ import PkgScroll from "@/components/home/PkgScroll";
 import TierName, { TierText, type TierKey } from "@/components/TierName";
 import { ALWAYS_ON, ALWAYS_ON_SUPPORT } from "@/config/always-on";
 import { CLUSTERS_LINE, TIERS, checkoutUrlFor, contactUrlFor } from "@/config/pricing";
+import { trialLine } from "@/config/trial";
 import { CARD, SHELL, T } from "@/config/tokens";
 
 import { D, PACKAGES_WASH } from "./dark";
@@ -176,6 +177,8 @@ export default function Packages({ full = false }: { full?: boolean }) {
                 <span style={{ display: "block", fontSize: "14px", color: D.muted, marginTop: "4px" }}>
                   <MarketPrice tier={t.key} fallback={t.priceLabel} />
                 </span>
+                {/* The alwaystracked trial, only while config/trial.ts has it on. */}
+                {trialLine(t.key) ? <span style={{ display: "block", fontSize: "13px", color: D.muted, marginTop: "2px" }}>{trialLine(t.key)}</span> : null}
                 <TierEngines tier={t.key} size={14} colour={D.muted} style={{ marginTop: "8px" }} />
               </li>
             ))}
@@ -263,6 +266,7 @@ export default function Packages({ full = false }: { full?: boolean }) {
                         {t.key === "tracked" ? (
                           <div style={{ fontSize: "12px", lineHeight: 1.45, color: T.soft, marginTop: "4px" }}>
                             <PackLine />
+                            {trialLine(t.key) ? <span style={{ display: "block", marginTop: "4px", color: T.ink, fontWeight: 600 }}>{trialLine(t.key)}</span> : null}
                           </div>
                         ) : null}
                       </>

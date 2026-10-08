@@ -3,6 +3,7 @@ import { OG_IMAGE } from "@/config/og";
 import PackagePage from "@/components/PackagePage";
 import TrackedBeat from "@/components/TrackedBeat";
 import { priceProse, TIERS } from "@/config/pricing";
+import { trialLine } from "@/config/trial";
 
 const tier = TIERS.find((t) => t.id === "tracked")!;
 /**
@@ -17,7 +18,9 @@ export const metadata: Metadata = {
   title: "alwaystracked | AI visibility tracking",
   description:
     "AI visibility tracking for one topic: who the engines name, which sources they cite, and which of your coverage is in that list." +
-    (price ? ` White-labelled, ${price}.` : " White-labelled."),
+    (price ? ` White-labelled, ${price}.` : " White-labelled.") +
+    // The trial, only while config/trial.ts has it on; llms.txt reads this description.
+    (trialLine("tracked") ? ` ${trialLine("tracked")}` : ""),
   openGraph: { url: "https://alwayscited.com/alwaystracked", images: OG_IMAGE },
   alternates: { canonical: "https://alwayscited.com/alwaystracked" },
 };

@@ -1,9 +1,11 @@
 import { CHECKOUT_LIMITS } from "@/config/contact";
 import { contactUrlFor, TRACKED_PRICE } from "@/config/pricing";
 import { TIER_PLAIN } from "@/components/TierName";
+import { TRIAL, type TrialRepeat } from "@/config/trial";
 import { isPlausibleEmail } from "@/lib/email-address";
 import { CHECKOUT_TIERS, checkoutRequest, type CheckoutTier } from "@/lib/checkout/session";
 import { createCheckoutSession } from "@/lib/checkout/stripe";
+import { readTrialRepeat } from "@/lib/checkout/trial-repeat";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -50,10 +52,24 @@ export async function POST(req: Request) {
     website: field("website", CHECKOUT_LIMITS.website),
   };
 
+  // The trial's one-per-domain-and-email read, only while the trial is on and
+  // only for the tier it applies to; dark, checkout reads nothing new.
+  let repeat: TrialRepeat = null;
+  let repeatFailed = false;
+  if (TRIAL.enabled && tier === "tracked") {
+    try {
+      repeat = await readTrialRepeat({ email: order.email, website: order.website, scan: order.scan });
+    } catch (e) {
+      console.error("[checkout] trial repeat read failed: " + (e instanceof Error ? e.message : String(e)));
+      repeatFailed = true;
+    }
+  }
+
   const r = checkoutRequest(order, {
     trackedPrice: { us: TRACKED_PRICE.us, uk: TRACKED_PRICE.uk },
     names: { tracked: TIER_PLAIN.tracked, mentioned: TIER_PLAIN.mentioned, cited: TIER_PLAIN.cited },
     origin: ORIGIN,
+    trial: { enabled: TRIAL.enabled, repeat },
   });
 
   const known = (CHECKOUT_TIERS as readonly string[]).includes(tier) || tier === "everywhere";
@@ -85,6 +101,10 @@ export async function POST(req: Request) {
     return Response.json({ error: "invalid", message: r.message }, { status: 400 });
   }
   if (r.kind === "call") return go(call);
+  if (repeatFailed) {
+    if (isForm) return back("failed");
+    return Response.json({ error: "checkout_failed", message: "The checkout did not open. Please try again, or book a call." }, { status: 502 });
+  }
 
   const s = await createCheckoutSession(r.form);
   if (s.ok) return go(s.url);

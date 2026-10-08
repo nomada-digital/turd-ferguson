@@ -1,6 +1,8 @@
 import SubmitButton from "@/components/app/SubmitButton";
 import TierName, { type TierKey } from "@/components/TierName";
 import { APP_LIMITS } from "@/config/contact";
+import { TRACKED_PRICE } from "@/config/pricing";
+import { trialDay, trialStatus } from "@/config/trial";
 import { T } from "@/config/tokens";
 import type { UpsellMode } from "@/lib/tracking/ask";
 import { formatDay } from "@/lib/tracking/figures";
@@ -59,6 +61,8 @@ export default function Settings({
   toast,
   inviteError = null,
   keep = "",
+  trialEndsAt = null,
+  trialCancelledAt = null,
 }: {
   domain: string;
   brand: string | null;
@@ -83,11 +87,15 @@ export default function Settings({
   inviteError?: string | null;
   /** The stated range as rangeQuery's "?from=&to=&compare=" or "" (DS40): the team and ask forms post it so their 303 keeps it. */
   keep?: string;
+  /** The alwaystracked trial (8 Oct 2026): client_domains.trial_ends_at and trial_cancelled_at. */
+  trialEndsAt?: string | null;
+  trialCancelledAt?: string | null;
 }) {
   const action = `/api/app/${encodeURIComponent(slug)}/member${keep}`;
   const askAction = `/api/app/${encodeURIComponent(slug)}/ask${keep}`;
   const owners = members.filter((m) => m.role === "owner").length;
   const names = [brand?.trim() || domain, ...aliases.filter((a) => a !== brand)];
+  const trial = trialStatus({ trialEndsAt, cancelled: Boolean(trialCancelledAt), market, price: TRACKED_PRICE });
   return (
     <div className="app-col" style={{ display: "flex", flexDirection: "column", gap: "20px", minWidth: 0, maxWidth: "880px" }}>
       <header style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
@@ -114,6 +122,7 @@ export default function Settings({
           )}
           {`${clusterLimit} clusters: ${clusterLimit * PROMPTS_PER_CLUSTER} prompts and ${clusterLimit * KEYWORDS_PER_CLUSTER} Google keywords, checked daily`}
         </Row>
+        {trial ? <Row label="Trial">{trial}</Row> : null}
         <Row label="Clusters in use">{`${clustersInUse} of ${clusterLimit}`}</Row>
         {/* DS56 (2 Oct 2026, R173 pass 6): signup sets started_on to the first check, tomorrow, so "since" read a day still to come. */}
         <Row label={startedOn && startedOn > today ? "Tracking from" : "Tracking since"}>{startedOn ? formatDay(startedOn, true) : "Not started yet"}</Row>
@@ -241,6 +250,20 @@ export default function Settings({
               </form>
             ) : null}
           </div>
+          {/* "Cancel trial" (Danny, 8 Oct 2026): no Stripe portal, so it is here, behind a confirm like Remove, posted as a plain form. */}
+          {trial && !trialCancelledAt && trialEndsAt ? (
+            <div style={{ ...ROW, alignItems: "center" }}>
+              <span style={{ color: T.soft }}>{`Your free trial ends ${trialDay(trialEndsAt)}. Cancel before then and nothing is charged.`}</span>
+              <details>
+                <summary style={{ ...BUTTON, display: "flex", alignItems: "center", listStyle: "none" }}>Cancel trial</summary>
+                <form method="post" action={`/api/app/${encodeURIComponent(slug)}/trial`} style={{ margin: "8px 0 0", display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "8px", textAlign: "right" }}>
+                  <input type="hidden" id="set-trial-confirm" name="confirm" value="1" />
+                  <span style={{ fontSize: "13px", color: T.soft, maxWidth: "260px" }}>{`Tracking carries on until ${trialDay(trialEndsAt)}, then stops. You are not charged.`}</span>
+                  <SubmitButton busy="Cancelling..." style={DARK}>Yes, cancel the trial</SubmitButton>
+                </form>
+              </details>
+            </div>
+          ) : null}
         </section>
       ) : null}
 

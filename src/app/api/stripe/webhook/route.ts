@@ -30,7 +30,7 @@ export async function POST(req: Request) {
       if (error) console.error(`[stripe] could not forget ${id}: ${error.message}`);
     },
     completed: (order, eventId) => onCheckoutCompleted(supabaseAdmin(), order, eventId),
-    updated: (sub) => onSubscriptionUpdated(supabaseAdmin(), sub),
+    updated: (sub, previous) => onSubscriptionUpdated(supabaseAdmin(), sub, previous),
     deleted: (sub) => onSubscriptionDeleted(supabaseAdmin(), sub),
   });
   return Response.json(answer.body, { status: answer.status });

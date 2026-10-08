@@ -8,6 +8,7 @@ import { word } from "@/components/home/EngineDemo";
 import { TierText, TIER_PLAIN } from "@/components/TierName";
 import { DEAREST_PRICED_TIER, publishedPricesClause, quotedPricesClause, TIERS } from "@/config/pricing";
 import { CARD, GRID12, MICRO, SHELL, T } from "@/config/tokens";
+import { trialLine } from "@/config/trial";
 import { ENGINE_SPECS, FREE_ENGINES } from "@/lib/scan/engines";
 import { FREE_ENGINE_COUNT, listOf, QUESTIONS } from "@/config/scan-shape";
 import { ORG_REF, ld } from "@/config/schema";
@@ -132,7 +133,7 @@ function firstClause(s: string): string {
  */
 const priceAnswer = [
   publishedPricesClause(),
-  tracked ? "Tracking is " + tracked.priceLabel + "." + (tracked.priceBasis ? " " + tracked.priceBasis.replace(/\.?$/, ".") : "") : "",
+  tracked ? "Tracking is " + tracked.priceLabel + "." + (tracked.priceBasis ? " " + tracked.priceBasis.replace(/\.?$/, ".") : "") + (trialLine("tracked") ? " " + trialLine("tracked") : "") : "",
   mentioned ? "Placements start at " + mentioned.priceLabel + " under " + TIER_PLAIN.mentioned + "." : "",
   cited
     ? "The " + TIER_PLAIN.cited + " plan, which adds the on-site work and the link insertions, is " + cited.priceLabel + "."

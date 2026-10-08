@@ -47,7 +47,7 @@ export function signStripePayload(raw: string, secret: string, t: number): strin
   return `t=${t},v1=${hmacHex(secret, `${t}.${raw}`)}`;
 }
 
-export type StripeEvent = { id: string; type: string; data: { object: Record<string, unknown> } };
+export type StripeEvent = { id: string; type: string; data: { object: Record<string, unknown>; previous_attributes?: Record<string, unknown> } };
 
 /** What checkout.session.completed carries that signup needs, read from the Session and its metadata. */
 export type CompletedOrder = {
@@ -65,6 +65,8 @@ export type CompletedOrder = {
   customerId: string | null;
   amountTotal: number | null;
   currency: string | null;
+  /** The trial's length when checkout gave one (config/trial.ts), else null. */
+  trialDays: number | null;
 };
 
 const str = (v: unknown) => (typeof v === "string" ? v : "");
@@ -94,6 +96,7 @@ export function completedOrder(session: Record<string, unknown>): CompletedOrder
     customerId: str(session.customer) || null,
     amountTotal: typeof session.amount_total === "number" ? session.amount_total : null,
     currency: str(session.currency) || null,
+    trialDays: /^\d{1,2}$/.test(str(m.trial_days)) ? Number(str(m.trial_days)) : null,
   };
 }
 
@@ -117,9 +120,11 @@ export type OrderRow = {
   amount_total: number | null;
   currency: string | null;
   client_domain_id: string | null;
+  /** When a trial ends and the first charge is due; null for a paid order. */
+  trial_ends_at: string | null;
 };
 
-export function orderRow(o: CompletedOrder, clientId: string | null): { row: OrderRow } | { row: null; reason: string } {
+export function orderRow(o: CompletedOrder, clientId: string | null, trialEndsAt: string | null = null): { row: OrderRow } | { row: null; reason: string } {
   if (!o.sessionId) return { row: null, reason: "no Session id" };
   if (!o.email) return { row: null, reason: "no buyer email" };
   if (!["tracked", "mentioned", "cited"].includes(o.tier)) return { row: null, reason: `unknown tier "${o.tier}"` };
@@ -141,6 +146,7 @@ export function orderRow(o: CompletedOrder, clientId: string | null): { row: Ord
       amount_total: o.amountTotal !== null && o.amountTotal >= 0 ? o.amountTotal : null,
       currency: currency === "gbp" || currency === "usd" ? currency : null,
       client_domain_id: clientId,
+      trial_ends_at: trialEndsAt,
     },
   };
 }
@@ -204,7 +210,8 @@ export type WebhookDeps = {
   /** Undo `record` when the handler failed, so Stripe's retry is acted on. */
   forget: (id: string) => Promise<void>;
   completed: (order: CompletedOrder, eventId: string) => Promise<boolean>;
-  updated: (sub: Record<string, unknown>) => Promise<boolean>;
+  /** `previous` is the event's previous_attributes, which is how a trial's conversion is seen. */
+  updated: (sub: Record<string, unknown>, previous: Record<string, unknown>) => Promise<boolean>;
   deleted: (sub: Record<string, unknown>) => Promise<boolean>;
 };
 
@@ -231,7 +238,7 @@ export async function handleWebhook(raw: string, signature: string | null, secre
   const obj = event.data.object;
   const type = event.type as HandledEvent;
   const done =
-    type === "checkout.session.completed" ? await deps.completed(completedOrder(obj), event.id) : type === "customer.subscription.updated" ? await deps.updated(obj) : await deps.deleted(obj);
+    type === "checkout.session.completed" ? await deps.completed(completedOrder(obj), event.id) : type === "customer.subscription.updated" ? await deps.updated(obj, event.data.previous_attributes ?? {}) : await deps.deleted(obj);
   if (!done) {
     await deps.forget(event.id);
     return { status: 500, body: { error: "handler_failed" } };
@@ -240,7 +247,7 @@ export async function handleWebhook(raw: string, signature: string | null, secre
 }
 
 /** The order email to Danny (pricing spec section 5): plain text, what was bought and what the webhook did. */
-export function orderEmailText(o: CompletedOrder, outcome: string, siteOrigin: string): { subject: string; text: string } {
+export function orderEmailText(o: CompletedOrder, outcome: string, siteOrigin: string, trial: { firstCharge: string; amount: string } | null = null): { subject: string; text: string } {
   const amount = o.amountTotal !== null && o.currency ? `${(o.amountTotal / 100).toFixed(2)} ${o.currency.toUpperCase()}` : "unknown";
   const text = [
     "A checkout completed on alwayscited.com.",
@@ -252,6 +259,7 @@ export function orderEmailText(o: CompletedOrder, outcome: string, siteOrigin: s
     `Email: ${o.email ?? "none given"}`,
     `Keyword target: ${o.keyword || "-"}`,
     `First payment: ${amount}`,
+    ...(trial ? [`Trial started - first charge ${trial.firstCharge}, ${trial.amount}`] : []),
     // Which path the signup took (R158, 1 Oct 2026): from the scan, or with no scan from the website.
     `Path: ${o.scanToken ? "scan" : "no scan"}`,
     `Scan: ${o.scanToken ? `${siteOrigin}/scan/${o.scanToken}` : "none"}`,
@@ -263,4 +271,13 @@ export function orderEmailText(o: CompletedOrder, outcome: string, siteOrigin: s
     "Book the onboarding call, where the prompts are agreed.",
   ].join("\n");
   return { subject: `Order: ${o.tier || "unknown tier"}, ${o.quantity} cluster(s), ${o.email ?? "no email"}`, text };
+}
+
+/**
+ * A trial that just became a paying subscription: customer.subscription.updated
+ * with status active where it was trialing. Logged and nothing else - the
+ * client, its limits and its trial_ends_at stay as they are.
+ */
+export function trialConverted(sub: Record<string, unknown>, previous: Record<string, unknown>): boolean {
+  return str(previous.status) === "trialing" && str(sub.status) === "active";
 }

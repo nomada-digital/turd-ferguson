@@ -69,12 +69,18 @@ export default async function ClientSettings({ params, searchParams }: { params:
           owner={client.role === "owner"}
           keep={rangeQuery(sp, today)}
           toast={
-            sp.ask === "sent"
+            sp.trial === "cancelled"
+              ? "Trial cancelled. Tracking stops when the trial ends, and nothing is charged."
+              : sp.trial === "refused"
+                ? "The trial was not cancelled. Try again, or use Ask us and we will cancel it."
+                : sp.ask === "sent"
               ? askToast(sp.via === "agency" ? "your account contact" : "nomada digital", email)
               : (askRefusal(sp.ask) ??
                 teamToast(sp.team, sp.who, settings.members.find((m) => m.email === sp.who)?.role ?? null, sp.why))
           }
           inviteError={inviteRefusal(sp.team, sp.why)}
+          trialEndsAt={client.trial_ends_at ?? null}
+          trialCancelledAt={client.trial_cancelled_at ?? null}
         />
       </div>
     </div>

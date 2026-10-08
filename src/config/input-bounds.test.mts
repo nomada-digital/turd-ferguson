@@ -372,6 +372,11 @@ const EXEMPT: Record<string, Exemption> = {
     why: "Settings' billing ask's hidden `about`. type=hidden, nobody types in it; ask.ts readAskAbout accepts only aliases or billing.",
     holds: [{ file: "lib/tracking/ask.ts", needs: 'raw === "aliases" || raw === "billing" ? raw : null' }],
   },
+  // 8 Oct 2026: Settings > Billing's "Cancel trial" confirm carries confirm=1.
+  "set-trial-confirm": {
+    why: "Cancel trial's hidden `confirm`. type=hidden, nobody types in it; the trial route acts only when it is exactly \"1\".",
+    holds: [{ file: "app/api/app/[client]/trial/route.ts", needs: 'form?.get("confirm") !== "1"' }],
+  },
   // R151 (2 Oct 2026): /app/login posts without script, so the page a
   // signed-out visitor was going to rides the form as a hidden field.
   "app-login-next": {

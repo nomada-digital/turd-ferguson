@@ -1,5 +1,6 @@
 import { MAX_CLUSTERS, type Market, quoteFor } from "../../config/sector-pricing.ts";
 import { CHECKOUT_LIMITS } from "../../config/contact.ts";
+import { TRIAL, type TrialRepeat, noTrialLine, trialApplies } from "../../config/trial.ts";
 import { isPlausibleEmail } from "../email-address.ts";
 import { isPlausibleDomain, normalizeDomain } from "../scan/domain.ts";
 
@@ -21,7 +22,7 @@ import { isPlausibleDomain, normalizeDomain } from "../scan/domain.ts";
 export const CHECKOUT_TIERS = ["tracked", "mentioned", "cited"] as const;
 export type CheckoutTier = (typeof CHECKOUT_TIERS)[number];
 
-export type Order = { tier: string; sector: string; quantity: number; market: string; email: string; keyword: string; scan?: string; website?: string };
+export type Order = { tier: string; sector: string; quantity: number; market: string; email: string; keyword: string; scan?: string; website?: string; /** Extra tracking packs. No checkout sells one yet, so 0. */ packs?: number };
 
 export type CheckoutContext = {
   /** alwaystracked's monthly price per market, from pricing.ts. */
@@ -30,9 +31,15 @@ export type CheckoutContext = {
   names: Record<CheckoutTier, string>;
   /** Where Stripe returns the buyer. Always the production origin. */
   origin: "https://alwayscited.com";
+  /**
+   * The alwaystracked trial (config/trial.ts): whether it is on, and whether
+   * the order's email or domain has been through before - read by the route,
+   * which holds the database. Absent means off.
+   */
+  trial?: { enabled: boolean; repeat: TrialRepeat };
 };
 
-export type CheckoutRequest = { kind: "session"; form: URLSearchParams; amount: number; currency: "usd" | "gbp" } | { kind: "call" } | { kind: "invalid"; message: string };
+export type CheckoutRequest = { kind: "session"; form: URLSearchParams; amount: number; currency: "usd" | "gbp"; trial: boolean } | { kind: "call" } | { kind: "invalid"; message: string };
 
 export function checkoutRequest(order: Order, ctx: CheckoutContext): CheckoutRequest {
   const market = order.market === "uk" ? "uk" : order.market === "us" ? "us" : null;
@@ -103,5 +110,22 @@ export function checkoutRequest(order: Order, ctx: CheckoutContext): CheckoutReq
   f.set("automatic_tax[enabled]", "true");
   f.set("tax_id_collection[enabled]", "true");
   f.set("billing_address_collection", "required");
-  return { kind: "session", form: f, amount: unit * quantity, currency };
+
+  // The free trial (Danny, 8 Oct 2026): alwaystracked with no packs, a first
+  // time through. The card is taken now and the first charge is on day 15; a
+  // trial that ends with no card on file cancels rather than invoicing.
+  const packs = Math.max(0, Math.floor(order.packs ?? 0));
+  const t = { tier, packs, repeat: ctx.trial?.repeat ?? null };
+  const on = ctx.trial?.enabled ?? false;
+  const trial = trialApplies(t, on);
+  if (trial) {
+    f.set("subscription_data[trial_period_days]", String(TRIAL.days));
+    f.set("payment_method_collection", "always");
+    f.set("subscription_data[trial_settings][end_behavior][missing_payment_method]", "cancel");
+    f.set("metadata[trial_days]", String(TRIAL.days));
+    f.set("subscription_data[metadata][trial_days]", String(TRIAL.days));
+  }
+  const why = noTrialLine(t, on);
+  if (why) f.set("custom_text[submit][message]", why);
+  return { kind: "session", form: f, amount: unit * quantity, currency, trial };
 }

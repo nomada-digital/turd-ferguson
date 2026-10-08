@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { MarketToggle, useSeededMarket } from "@/components/SectorPrice";
 import { CHECKOUT_LIMITS } from "@/config/contact";
 import { TRACKED_PRICE, contactUrlFor } from "@/config/pricing";
+import { trialLine } from "@/config/trial";
 import { MARKETS, MAX_CLUSTERS, SECTORS, formatPrice, quoteFor, type Market } from "@/config/sector-pricing";
 import { withSelection, type Selection } from "@/config/sector-selection";
 import { CARD, MICRO, T } from "@/config/tokens";
@@ -175,6 +176,10 @@ export default function CheckoutOrder({ tier, tierPlain, plan, tierPage, include
           {/* UK prices are before VAT, which Stripe Tax adds on its page (R129, 30 Sep 2026). */}
           {price && market === "uk" ? <span style={{ fontSize: "15px", fontWeight: 500, letterSpacing: 0, color: T.soft }}> plus VAT</span> : null}
         </div>
+        {/* The alwaystracked trial, only while config/trial.ts has it on. A
+            repeat domain or email is told on Stripe's own form that it pays
+            from today; no checkout sells a pack yet, so there is no pack line. */}
+        {trialLine(tier) ? <p style={{ margin: "6px 0 0", fontSize: "14px", lineHeight: 1.5, color: T.ink, fontWeight: 600 }}>{trialLine(tier)}</p> : null}
       </div>
 
       {call ? (
