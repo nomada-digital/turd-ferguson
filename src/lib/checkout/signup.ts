@@ -9,9 +9,11 @@ import { readSubscription } from "@/lib/checkout/stripe";
 import { TRACKED_PRICE } from "@/config/pricing";
 import { trialCharge, trialMoment } from "@/config/trial";
 import { dayAfter, slugFor, trackingDay } from "@/lib/tracking/decide";
-import { angleFor, clusterLimitFor, insertCluster, insertKeyword, insertPrompts, namesBrandIn, PROMPTS_PER_CLUSTER } from "@/lib/tracking/limits";
-import { planEnded, welcome } from "@/lib/email/lifecycle";
+import { angleFor, CLUSTER_BASE, clusterLimitFor, insertCluster, insertKeyword, insertPrompts, namesBrandIn, PROMPTS_PER_CLUSTER } from "@/lib/tracking/limits";
+import { upsellMode } from "@/lib/tracking/ask";
+import { billingUrl, planEnded, trialTerms, welcome } from "@/lib/email/lifecycle";
 import { lifecycleOn, sendLifecycle } from "@/lib/email/lifecycle-mail";
+import { endedInTrial } from "@/lib/email/lifecycle-schedule";
 import type { TierKey } from "@/lib/tier-text";
 import { sendLoginLink } from "@/lib/tracking/login-mail";
 import { LOGIN_TTL_MS, hashToken, newToken } from "@/lib/tracking/session";
@@ -53,7 +55,7 @@ type Scan = {
  * prefills cluster 1; every other cluster bought starts "Needs a keyword".
  * Before this an order without a scan built nothing and the buyer heard nothing.
  */
-async function clientFromOrder(db: SupabaseClient, o: CompletedOrder): Promise<{ ok: boolean; outcome: string; clientId?: string }> {
+async function clientFromOrder(db: SupabaseClient, o: CompletedOrder, trialEndsAt: string | null = null): Promise<{ ok: boolean; outcome: string; clientId?: string }> {
   if (!o.email) return { ok: true, outcome: "no buyer email on the Session, so no client was created" };
   const tier = TIERS.includes(o.tier) ? o.tier : "tracked";
 
@@ -104,16 +106,19 @@ async function clientFromOrder(db: SupabaseClient, o: CompletedOrder): Promise<{
     source_scan_id: scan?.id ?? null,
   };
   let clientId: string;
+  // The slug and cluster_limit come back for the welcome's links and the plan's room.
+  let made: { slug: string; cluster_limit: number | null } = { slug: clientRow.slug, cluster_limit: null };
   if (clientRow.topic !== null) {
-    const { data: client, error: cErr } = await db.from("client_domains").upsert(clientRow, { onConflict: "account_id,domain,topic,market" }).select("id").single();
+    const { data: client, error: cErr } = await db.from("client_domains").upsert(clientRow, { onConflict: "account_id,domain,topic,market" }).select("id, slug, cluster_limit").single();
     if (cErr) return { ok: false, outcome: `could not create the client: ${cErr.message}` };
     clientId = client.id as string;
+    made = client as typeof made;
   } else {
     // A null topic never conflicts in a unique index (nulls are distinct), so a
     // retry would make a second client: look for the first one instead.
     const { data: had, error: hErr } = await db
       .from("client_domains")
-      .select("id")
+      .select("id, slug, cluster_limit")
       .eq("account_id", accountId)
       .eq("domain", domain)
       .eq("market", market)
@@ -121,11 +126,14 @@ async function clientFromOrder(db: SupabaseClient, o: CompletedOrder): Promise<{
       .order("created_at", { ascending: true })
       .limit(1);
     if (hErr) return { ok: false, outcome: `could not read the client: ${hErr.message}` };
-    if (had?.[0]) clientId = had[0].id as string;
-    else {
-      const { data: client, error: cErr } = await db.from("client_domains").insert(clientRow).select("id").single();
+    if (had?.[0]) {
+      clientId = had[0].id as string;
+      made = had[0] as typeof made;
+    } else {
+      const { data: client, error: cErr } = await db.from("client_domains").insert(clientRow).select("id, slug, cluster_limit").single();
       if (cErr) return { ok: false, outcome: `could not create the client: ${cErr.message}` };
       clientId = client.id as string;
+      made = client as typeof made;
     }
   }
 
@@ -203,12 +211,16 @@ async function clientFromOrder(db: SupabaseClient, o: CompletedOrder): Promise<{
     .from("dashboard_login_tokens")
     .insert({ token_hash: hashToken(token), email: o.email, ip_hash: null, expires_at: new Date(Date.now() + LOGIN_TTL_MS).toISOString(), used_at: null });
   // The welcome replaces the bare link only once its flag is on (R159; off until Danny approves it).
+  // A trial order's welcome is trial_started's, behind its own flag (8 Oct 2026, audit activation-1,
+  // copy-4): the paid welcome says "bought", so a trialist never gets it, whichever flag is on.
   const link = appUrl(`/auth?token=${token}`, siteUrl());
-  const welcomeOn = !tErr && (await lifecycleOn(db, "welcome"));
+  const trial = trialEndsAt ? trialTerms({ endsAt: trialEndsAt, market, price: TRACKED_PRICE, billing: billingUrl(made.slug, siteUrl()) }) : null;
+  const clusterLimit = made.cluster_limit ?? CLUSTER_BASE;
+  const welcomeOn = !tErr && (await lifecycleOn(db, trial ? "trial_started" : "welcome"));
   const sent =
     !tErr &&
     (welcomeOn
-      ? await sendLifecycle({ memberEmail: o.email, mail: welcome({ tier: tier as TierKey, clusters, domain, link }) })
+      ? await sendLifecycle({ memberEmail: o.email, mail: welcome({ tier: tier as TierKey, clusters, clusterLimit, domain, link, trial }) })
       : await sendLoginLink({ memberEmail: o.email, link }));
 
   return {
@@ -217,7 +229,7 @@ async function clientFromOrder(db: SupabaseClient, o: CompletedOrder): Promise<{
     outcome:
       `${scan ? "from the scan" : "no scan, from the website on the order"}: ${domain} at ${tier}, first check ${startedOn}; ` +
       `cluster 1 "${clusterName}" with ${rows.length} prompt(s)${clusters > 1 ? `, ${clusters - 1} more "${NEEDS_A_KEYWORD}"` : ""}` +
-      `${chosen && rows.length && clusters === 1 ? "" : " - pick keywords and prompts in /admin/tracking"}; ${o.email} is owner; ${welcomeOn ? "welcome email" : "login link"} ${sent ? "sent" : "NOT sent"}.`,
+      `${chosen && rows.length && clusters === 1 ? "" : " - pick keywords and prompts in /admin/tracking"}; ${o.email} is owner; ${welcomeOn ? (trial ? "trial_started email" : "welcome email") : "login link"} ${sent ? "sent" : "NOT sent"}.`,
   };
 }
 
@@ -240,7 +252,7 @@ async function trialEndOf(o: CompletedOrder): Promise<string | null> {
 export async function onCheckoutCompleted(db: SupabaseClient, o: CompletedOrder, eventId: string): Promise<boolean> {
   const trialEndsAt = await trialEndOf(o);
   const trial = trialEndsAt ? { firstCharge: trialMoment(trialEndsAt, o.market), amount: trialCharge(o.market, TRACKED_PRICE) } : null;
-  const r = await clientFromOrder(db, o);
+  const r = await clientFromOrder(db, o, trialEndsAt);
   if (!r.ok) {
     console.error(`[stripe] signup failed for ${eventId}: ${r.outcome}`);
     // A paid order whose signup keeps failing was silent: no order row, no
@@ -325,28 +337,51 @@ export async function onSubscriptionUpdated(db: SupabaseClient, sub: Record<stri
   return !error;
 }
 
+/** A Stripe timestamp (seconds) in ms, or null. */
+const secs = (v: unknown) => (typeof v === "number" ? v * 1000 : null);
+
 /**
  * Cancelled: the client ends. Nothing is deleted. plan_ended goes to its live
  * owners only when this call ended it (not a client already ended) and its
  * flag is on (R159; off until Danny approves it). A failed send is logged, not retried.
+ *
+ * 8 Oct 2026 (audit copy-4): a subscription that ended inside its trial gets
+ * the trial's version - not charged, no receipt, no second trial - and, as
+ * the email now sends the owner to Billing to ask us to restart, it goes only
+ * where Billing has Ask us: upsell mode nomada, as the ended banner decides.
  */
 export async function onSubscriptionDeleted(db: SupabaseClient, sub: Record<string, unknown>): Promise<boolean> {
   const clientId = await clientOfSubscription(db, sub);
   if (clientId === false) return false;
   if (!clientId) return true;
-  const { data: ended, error } = await db.from("client_domains").update({ status: "ended" }).eq("id", clientId).neq("status", "ended").select("account_id, domain, tier");
+  const { data: ended, error } = await db
+    .from("client_domains")
+    .update({ status: "ended" })
+    .eq("id", clientId)
+    .neq("status", "ended")
+    .select("account_id, domain, tier, slug, trial_ends_at");
   if (error) {
     console.error(`[stripe] client not ended: ${error.message}`);
     return false;
   }
   const row = ended?.[0];
   if (row && (await lifecycleOn(db, "plan_ended"))) {
-    const { data: owners, error: oErr } = await db.from("dashboard_members").select("email").eq("account_id", row.account_id).eq("role", "owner").is("removed_at", null);
-    if (oErr) console.error(`[stripe] plan_ended not sent, owners not read: ${oErr.message}`);
-    const mail = planEnded({ tier: (TIERS.includes(row.tier as string) ? row.tier : "tracked") as TierKey, domain: row.domain as string });
-    for (const m of owners ?? []) {
+    const owners = await planEndedOwners(db, row.account_id as string);
+    const trial = endedInTrial({ trialEndsAt: (row.trial_ends_at as string | null) ?? null, endedAt: secs(sub.ended_at) ?? secs(sub.canceled_at), now: Date.now() });
+    const mail = planEnded({ tier: (TIERS.includes(row.tier as string) ? row.tier : "tracked") as TierKey, domain: row.domain as string, billing: billingUrl(row.slug as string, siteUrl()), trial });
+    for (const m of owners) {
       if (!(await sendLifecycle({ memberEmail: m.email as string, mail }))) console.warn(`[stripe] plan_ended not sent for ${clientId}`);
     }
   }
   return true;
+}
+
+/** plan_ended's recipients: the live owners, and none outside upsell mode nomada or when a read failed. */
+async function planEndedOwners(db: SupabaseClient, accountId: string): Promise<{ email: unknown }[]> {
+  const { data: account, error: aErr } = await db.from("accounts").select("upsell_mode").eq("id", accountId).maybeSingle();
+  if (aErr) console.error(`[stripe] plan_ended not sent, account not read: ${aErr.message}`);
+  if (aErr || upsellMode(account?.upsell_mode) !== "nomada") return [];
+  const { data: owners, error: oErr } = await db.from("dashboard_members").select("email").eq("account_id", accountId).eq("role", "owner").is("removed_at", null);
+  if (oErr) console.error(`[stripe] plan_ended not sent, owners not read: ${oErr.message}`);
+  return owners ?? [];
 }

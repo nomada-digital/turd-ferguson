@@ -1,0 +1,106 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import { test } from "node:test";
+
+import type { AnswerRow } from "../tracking/figures.ts";
+import { ENDING_BEFORE_MS, SETUP_MAIL_EVENTS, TRIAL_MAIL_EVENT, endedInTrial, setupReminderDue, trialEndingOnStripe, trialMailDue, trialRecap, unsentEvent } from "./lifecycle-schedule.ts";
+
+/**
+ * When the daily cron sends a trial or setup email (8 Oct 2026, audit
+ * activation-1): the day-offset picker on a 14-day trial, day by day, and the
+ * once-per-client record it reads. Nothing is read or sent here.
+ */
+
+const DAY = 86_400_000;
+const START = Date.parse("2026-10-08T19:30:00Z");
+const END = new Date(START + 14 * DAY).toISOString();
+const none = new Set<string>();
+const due = (day: number, over: Partial<Parameters<typeof trialMailDue>[0]> = {}) =>
+  trialMailDue({ status: "active", trialEndsAt: END, cancelledAt: null, sent: none, now: START + day * DAY, ...over });
+
+test("day 0 sends nothing from the cron - trial_started went with the signup", () => {
+  assert.equal(due(0), null);
+  assert.equal(due(6.9), null);
+});
+
+test("day 7 sends trial_midpoint, once", () => {
+  assert.equal(due(7), "trial_midpoint");
+  assert.equal(due(8), "trial_midpoint", "a missed morning is caught up the next");
+  assert.equal(due(7, { sent: new Set([TRIAL_MAIL_EVENT.trial_midpoint]) }), null);
+});
+
+test("day 11 - three days before the end - sends trial_ending, once, and never the midpoint late", () => {
+  assert.equal(due(11), "trial_ending");
+  assert.equal(due(13.9), "trial_ending");
+  assert.equal(due(11, { sent: new Set([TRIAL_MAIL_EVENT.trial_ending]) }), null);
+  assert.equal(due(10.9), "trial_midpoint", "just before the window it is still the midpoint");
+  assert.equal(due(10.9, { sent: new Set([TRIAL_MAIL_EVENT.trial_midpoint]) }), null);
+  assert.equal(ENDING_BEFORE_MS, 3 * DAY);
+});
+
+test("day 14 - the trial is over - sends nothing", () => {
+  assert.equal(due(14), null);
+  assert.equal(due(15), null);
+});
+
+test("a cancelled trial, an ended client or no trial sends nothing", () => {
+  for (const day of [0, 7, 11, 13]) {
+    assert.equal(due(day, { cancelledAt: new Date(START + DAY).toISOString() }), null, `cancelled, day ${day}`);
+    assert.equal(due(day, { status: "ended" }), null, `ended, day ${day}`);
+    assert.equal(due(day, { trialEndsAt: null }), null, `no trial, day ${day}`);
+  }
+});
+
+test("an unsent claim does not count as sent, so the next morning tries again", () => {
+  assert.equal(unsentEvent(TRIAL_MAIL_EVENT.trial_ending), "unsent_trial_mail_ending");
+  assert.equal(due(12, { sent: new Set([unsentEvent(TRIAL_MAIL_EVENT.trial_ending)]) }), "trial_ending");
+});
+
+test("Stripe's trial_will_end sends trial_ending whenever the trial is still running and it has not gone", () => {
+  const p = { status: "active", trialEndsAt: END, cancelledAt: null, sent: none, now: START + 10.99 * DAY };
+  assert.equal(trialEndingOnStripe(p), true, "Stripe's three days and ours can differ by seconds");
+  assert.equal(trialEndingOnStripe({ ...p, sent: new Set([TRIAL_MAIL_EVENT.trial_ending]) }), false);
+  assert.equal(trialEndingOnStripe({ ...p, cancelledAt: END }), false);
+  assert.equal(trialEndingOnStripe({ ...p, now: START + 14 * DAY }), false);
+});
+
+test("setup reminders: 24 and 72 hours after signup, while unconfirmed, in the first week only", () => {
+  const at = (hours: number, over: Partial<Parameters<typeof setupReminderDue>[0]> = {}) =>
+    setupReminderDue({ status: "active", signedUpAt: new Date(START).toISOString(), confirmed: false, sent: none, now: START + hours * 3_600_000, ...over });
+  assert.equal(at(23), null);
+  assert.equal(at(24), "setup_mail_24h");
+  assert.equal(at(30, { sent: new Set(["setup_mail_24h"]) }), null);
+  assert.equal(at(72, { sent: new Set(["setup_mail_24h"]) }), "setup_mail_72h");
+  assert.equal(at(100), "setup_mail_72h", "past 72 hours the first is skipped, not sent late");
+  assert.equal(at(80, { sent: new Set(["setup_mail_72h"]) }), null);
+  assert.equal(at(48, { confirmed: true }), null, "a confirmed setup is never reminded");
+  assert.equal(at(48, { status: "ended" }), null);
+  assert.equal(at(7 * 24 + 1), null, "a client older than a week - the ones set up by hand before this - is never mailed");
+});
+
+test("the recap is the Overview's figures, from the first finished check", () => {
+  const row = (run_date: string, named: boolean, brands: string[], answered = true): AnswerRow => ({ run_date, question_id: "q1", engine: "chatgpt", answered, named, brands });
+  const rows = [row("2026-10-09", true, ["Xero"]), row("2026-10-10", false, ["Xero", "QuickBooks"]), row("2026-10-10", false, ["QuickBooks"]), row("2026-10-11", false, ["Xero"], false), row("2026-10-08", true, [])];
+  const r = trialRecap({ rows, firstDay: "2026-10-09", today: "2026-10-15", you: "Tallyroo", clustersInUse: 2, clusterLimit: 10, livePrompts: 7 });
+  assert.deepEqual(r, { named: 1, answers: 3, since: "9 Oct", topOther: { name: "Xero", answers: 2 }, clustersInUse: 2, clusterLimit: 10, livePrompts: 7 });
+  const before = trialRecap({ rows: [], firstDay: null, today: "2026-10-15", you: "Tallyroo", clustersInUse: 1, clusterLimit: 10, livePrompts: 0 });
+  assert.equal(before.since, null);
+  assert.equal(before.answers, 0);
+});
+
+test("a subscription that ended by its trial's end was never charged", () => {
+  const ends = "2026-10-22T19:30:00Z";
+  const t = Date.parse(ends);
+  assert.equal(endedInTrial({ trialEndsAt: ends, endedAt: t, now: t }), true, "a cancelled trial ends exactly at trial_end");
+  assert.equal(endedInTrial({ trialEndsAt: ends, endedAt: t - 5 * DAY, now: t }), true, "ended early, inside the trial");
+  assert.equal(endedInTrial({ trialEndsAt: ends, endedAt: t + 30 * DAY, now: t + 30 * DAY }), false, "a paying plan cancelled later");
+  assert.equal(endedInTrial({ trialEndsAt: null, endedAt: t, now: t }), false, "no trial");
+  assert.equal(endedInTrial({ trialEndsAt: ends, endedAt: null, now: t + 30 * DAY }), false, "no ended_at: now stands in");
+});
+
+test("the migration's unique index names exactly the events the sweep claims", () => {
+  const sql = fs.readFileSync(new URL("../../../supabase/migrations/20261008040000_trial_lifecycle_emails.sql", import.meta.url), "utf8");
+  const listed = /where event in \(([^)]*)\)/.exec(sql)?.[1]?.match(/'([a-z0-9_]+)'/g)?.map((s) => s.slice(1, -1)) ?? [];
+  assert.deepEqual(listed.sort(), [...Object.values(TRIAL_MAIL_EVENT), ...SETUP_MAIL_EVENTS].sort());
+  for (const e of listed) assert.ok(!listed.includes(unsentEvent(e)), "a released claim must fall outside the index");
+});
