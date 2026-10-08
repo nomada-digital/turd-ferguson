@@ -8,6 +8,8 @@ import { parseSelection, picksLine, tierFromPlain } from "@/config/sector-select
 import { TIER_PLAIN } from "@/lib/tier-text";
 import { isPlausibleEmail } from "@/lib/email-address";
 import { headerSafe } from "@/lib/email-header";
+import { isWorkEmail, WORK_EMAIL_REFUSAL } from "@/lib/work-email";
+import { workEmailBlockedExtra } from "@/lib/work-email-server";
 
 /**
  * Contact form submission. This previously logged to the server console behind
@@ -123,6 +125,9 @@ export async function submitContactForm(
   // widening all three to a TLD that is not ASCII. See @/lib/email-address.
   if (!isPlausibleEmail(email)) {
     return { status: "error", message: "Please enter a valid email address.", values, field: "email" };
+  }
+  if (!isWorkEmail(email, await workEmailBlockedExtra())) {
+    return { status: "error", message: WORK_EMAIL_REFUSAL, values, field: "email" };
   }
 
   /**

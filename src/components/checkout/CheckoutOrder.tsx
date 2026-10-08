@@ -24,7 +24,7 @@ import type { CheckoutTier } from "@/lib/checkout/session";
  */
 
 const ERRORS: Record<string, string> = {
-  email: "Type your work email again, in the form name@company.com.",
+  email: "Type your email again, in the form name@company.com.",
   keyword: `A keyword target of at least ${CHECKOUT_LIMITS.keyword.min} characters is needed.`,
   website: "Type your website again, in the form company.com.",
   failed: "The checkout did not open. Please try again, or book a call.",
@@ -210,7 +210,7 @@ export default function CheckoutOrder({ tier, tierPlain, plan, tierPage, include
           ) : null}
           <div style={{ display: "grid", gap: "14px" }}>
             <label style={MICRO}>
-              Work email
+              Email
               <input
                 type="email"
                 id="checkout-email"

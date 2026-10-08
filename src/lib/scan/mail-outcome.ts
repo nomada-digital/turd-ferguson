@@ -1,3 +1,5 @@
+import { WORK_EMAIL_REFUSAL } from "../work-email.ts";
+
 /**
  * R151 (3 Oct 2026): the waiting screen's "email me the report" form posted
  * without script comes back by a 303 carrying only an outcome code - never the
@@ -10,6 +12,7 @@ export const MAIL_OUTCOMES = {
   already: { ok: true, message: "That is already on its way to you." },
   long: { ok: false, message: "That email address is longer than an address can be." },
   bad: { ok: false, message: "That email does not look right." },
+  personal: { ok: false, message: WORK_EMAIL_REFUSAL },
   unfinished: { ok: false, message: "That check did not finish, so there is no report to send yet." },
   soon: { ok: false, message: "We could not send that just now. Please try again later." },
   failed: { ok: false, message: "We could not send that just now. Please try again." },

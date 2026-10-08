@@ -7,6 +7,8 @@ import { mailFrom } from "@/config/mail-from";
 import { isPlausibleEmail } from "@/lib/email-address";
 import { headerSafe } from "@/lib/email-header";
 import { isPlausibleDomain, normalizeDomain } from "@/lib/scan/domain";
+import { isWorkEmail, WORK_EMAIL_REFUSAL } from "@/lib/work-email";
+import { workEmailBlockedExtra } from "@/lib/work-email-server";
 
 /**
  * Pre-launch capture, used only while the live scan is unconfigured.
@@ -104,6 +106,9 @@ export async function requestScan(input: {
   // time the comment above was describing the domain fix.
   if (!isPlausibleEmail(email)) {
     return { ok: false, message: "That email address does not look right." };
+  }
+  if (!isWorkEmail(email, await workEmailBlockedExtra())) {
+    return { ok: false, message: WORK_EMAIL_REFUSAL };
   }
 
   const key = process.env.RESEND_API_KEY;

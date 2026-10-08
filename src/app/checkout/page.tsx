@@ -19,7 +19,7 @@ export const metadata: Metadata = {
 
 /**
  * The order form (R91 part 3, pricing spec section 5): the plan, the market,
- * the keyword target, sector, quantity and work email, before payment. The
+ * the keyword target, sector, quantity and email, before payment. The
  * card itself is CheckoutOrder, an island so the price follows the US/UK
  * toggle with no reload (Danny, 1 Oct 2026, danny.md lines 156-157); it is
  * plain HTML both ways with no script, and "Continue to payment" posts the

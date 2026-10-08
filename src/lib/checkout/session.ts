@@ -40,7 +40,7 @@ export function checkoutRequest(order: Order, ctx: CheckoutContext): CheckoutReq
   if (!(CHECKOUT_TIERS as readonly string[]).includes(order.tier)) return { kind: "call" };
   const tier = order.tier as CheckoutTier;
   const email = order.email.trim().toLowerCase();
-  if (email.length > CHECKOUT_LIMITS.email || !isPlausibleEmail(email)) return { kind: "invalid", message: "A work email is needed." };
+  if (email.length > CHECKOUT_LIMITS.email || !isPlausibleEmail(email)) return { kind: "invalid", message: "An email address is needed." };
   const keyword = order.keyword.trim();
   if (tier !== "tracked" && (keyword.length < CHECKOUT_LIMITS.keyword.min || keyword.length > CHECKOUT_LIMITS.keyword.max)) return { kind: "invalid", message: "A keyword target is needed." };
   // The free scan the order came from, when it did (BRIEF-3 C4): the webhook

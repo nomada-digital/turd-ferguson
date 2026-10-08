@@ -72,12 +72,12 @@ export default async function CheckoutDone({ searchParams }: Props) {
           {fromScan ? (
             <p style={P}>
               Stripe emails your receipt. We are setting up your dashboard from your scan
-              {email ? "" : " and sending a sign-in link to your work email"}. The first check runs tomorrow.
+              {email ? "" : " and sending a sign-in link to your email"}. The first check runs tomorrow.
             </p>
           ) : (
             <p style={P}>
               Stripe emails your receipt. We are setting up your dashboard for your website
-              {email ? "" : " and sending a sign-in link to your work email"}. We add each cluster&apos;s keyword and
+              {email ? "" : " and sending a sign-in link to your email"}. We add each cluster&apos;s keyword and
               prompts, then the daily checks begin.
             </p>
           )}

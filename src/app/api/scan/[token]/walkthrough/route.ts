@@ -7,6 +7,8 @@ import { markClaimed } from "@/lib/scan/unlock";
 import { sendWalkthroughAlert } from "@/lib/scan/walkthrough-mail";
 import { walkthroughBack } from "@/lib/scan/walkthrough-outcome";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { isWorkEmail, WORK_EMAIL_REFUSAL } from "@/lib/work-email";
+import { workEmailBlockedExtra } from "@/lib/work-email-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -44,7 +46,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ token: string 
   }
   const answer = (json: { ok?: true; error?: string; message?: string }, status = 200) => {
     if (!isForm) return Response.json(json, { status });
-    const outcome = json.ok || status === 429 ? (body.kind === "demo" ? "demo" : "video") : json.error === "bad_email" ? "bad" : "failed";
+    const outcome = json.ok || status === 429 ? (body.kind === "demo" ? "demo" : "video") : json.error === "bad_email" ? "bad" : json.error === "personal_email" ? "personal" : "failed";
     return NextResponse.redirect(new URL(`${walkthroughBack(body.back, token)}?walkthrough=${outcome}#walkthrough`, req.url), 303);
   };
 
@@ -54,6 +56,9 @@ export async function POST(req: Request, ctx: { params: Promise<{ token: string 
   const email = normalizeEmail(body.email ?? "");
   if (email.length > SCAN_LIMITS.email || !isPlausibleEmail(email)) {
     return answer({ error: "bad_email", message: "That email does not look right." }, 400);
+  }
+  if (!isWorkEmail(email, await workEmailBlockedExtra())) {
+    return answer({ error: "personal_email", message: WORK_EMAIL_REFUSAL }, 400);
   }
 
   const db = supabaseAdmin();

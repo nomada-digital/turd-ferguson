@@ -7,6 +7,8 @@ import { MAIL_OUTCOMES, type MailOutcome } from "@/lib/scan/mail-outcome";
 import { sendRequestedReport } from "@/lib/scan/report-mail";
 import { reportMailWaitMessage, reportMailWaitMs } from "@/lib/scan/report-mail-limit";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { isWorkEmail } from "@/lib/work-email";
+import { workEmailBlockedExtra } from "@/lib/work-email-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -130,6 +132,12 @@ async function answer(req: Request, token: string, body: { email?: string }): Pr
   if (!isPlausibleEmail(email)) {
     return Response.json(
       { error: "bad_email", message: MAIL_OUTCOMES.bad.message },
+      { status: 400 },
+    );
+  }
+  if (!isWorkEmail(email, await workEmailBlockedExtra())) {
+    return Response.json(
+      { error: "personal_email", message: MAIL_OUTCOMES.personal.message },
       { status: 400 },
     );
   }

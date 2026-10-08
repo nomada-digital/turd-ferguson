@@ -12,7 +12,7 @@ const ORIGIN = "https://alwayscited.com";
 
 /**
  * Start a live Stripe Checkout (R91 part 2, Danny, 29 Sep 2026; pricing spec
- * section 5). Takes the order - tier, sector, quantity, market, work email,
+ * section 5). Takes the order - tier, sector, quantity, market, email,
  * keyword - as a plain form post or JSON, builds the Session with
  * `checkoutRequest` (the amount always from the price config, never from this
  * request) and sends the buyer to Stripe's own form with a 303.
@@ -78,7 +78,7 @@ export async function POST(req: Request) {
 
   // checkoutRequest checks the address too; this door checks it itself, as every door that takes one does.
   if (r.kind === "session" && !isPlausibleEmail(order.email.trim().toLowerCase())) {
-    return isForm ? back("email") : Response.json({ error: "invalid", message: "A work email is needed." }, { status: 400 });
+    return isForm ? back("email") : Response.json({ error: "invalid", message: "An email address is needed." }, { status: 400 });
   }
   if (r.kind === "invalid") {
     if (isForm) return back(r.message.includes("email") ? "email" : r.message.includes("keyword") ? "keyword" : r.message.includes("website") ? "website" : "failed");

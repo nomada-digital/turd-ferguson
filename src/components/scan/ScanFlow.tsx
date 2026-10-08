@@ -30,6 +30,7 @@ import ConfirmScreen from "./ConfirmScreen";
 import ScanProgress from "./ScanProgress";
 import { MAIL_OUTCOMES, type MailOutcome } from "@/lib/scan/mail-outcome";
 import type { WalkthroughOutcome } from "@/lib/scan/walkthrough-outcome";
+import { isWorkEmail } from "@/lib/work-email";
 
 import ResultView from "./ResultView";
 import { field } from "./screens";
@@ -821,6 +822,10 @@ export default function ScanFlow(p: {
    */
   async function onMailRequest(e: React.FormEvent) {
     e.preventDefault();
+    if (mailTo.trim() && !isWorkEmail(mailTo)) {
+      setMailErr(MAIL_OUTCOMES.personal.message);
+      return;
+    }
     setMailErr("");
     setMailBusy(true);
     try {

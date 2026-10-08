@@ -4,6 +4,8 @@ import { isPlausibleEmail, normalizeEmail } from "@/lib/email-address";
 import { clientIp, hashIp } from "@/lib/scan/ip";
 import { sendWalkthroughAlert } from "@/lib/scan/walkthrough-mail";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { isWorkEmail, WORK_EMAIL_REFUSAL } from "@/lib/work-email";
+import { workEmailBlockedExtra } from "@/lib/work-email-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -42,6 +44,9 @@ export async function POST(req: Request) {
   const email = normalizeEmail(body.email ?? "");
   if (email.length > SCAN_LIMITS.email || !isPlausibleEmail(email)) {
     return Response.json({ error: "bad_email", message: "That email does not look right." }, { status: 400 });
+  }
+  if (!isWorkEmail(email, await workEmailBlockedExtra())) {
+    return Response.json({ error: "personal_email", message: WORK_EMAIL_REFUSAL }, { status: 400 });
   }
 
   const db = supabaseAdmin();

@@ -7,6 +7,7 @@ import { WAITLIST_LIMITS } from "@/config/contact";
 import { FREE_ENGINE_LABELS, listOf } from "@/config/scan-shape";
 import { T } from "@/config/tokens";
 import { isPlausibleDomain, normalizeDomain } from "@/lib/scan/domain";
+import { isWorkEmail, WORK_EMAIL_REFUSAL } from "@/lib/work-email";
 
 import { DomainScreen, TopicScreen, btn, field, label } from "./screens";
 
@@ -66,6 +67,12 @@ export default function RequestScanForm({ initialDomain = "" }: { initialDomain?
 
   async function onEmail(e: React.FormEvent) {
     e.preventDefault();
+    // The server's own check, so a personal address is refused before the
+    // round trip. Only the built-in list: the extra domains are the server's.
+    if (email.trim() && !isWorkEmail(email)) {
+      setError(WORK_EMAIL_REFUSAL);
+      return;
+    }
     setError("");
     setBusy(true);
     try {

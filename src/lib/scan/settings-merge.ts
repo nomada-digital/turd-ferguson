@@ -13,6 +13,7 @@
  * value is worth is here, and `settings-merge.test.mts` runs it.
  */
 
+import { parseBlockedExtra } from "../work-email.ts";
 import { FREE_ENGINES, GATED_ENGINES, type Engine, isEngine } from "./engines.ts";
 
 export type Settings = {
@@ -57,6 +58,12 @@ export type Settings = {
    * into this repo, only into the row.
    */
   coverage_ceiling_exempt_domains: string[];
+  /**
+   * Domains refused on public forms on top of `work-email.ts`'s built-in list
+   * (Danny, 8 Oct 2026), so one can be added without a deploy. Stored as
+   * comma-separated text, empty by default; split by `parseBlockedExtra`.
+   */
+  work_email_blocked_extra: string[];
 };
 
 export const SETTINGS_FALLBACK: Settings = {
@@ -74,6 +81,7 @@ export const SETTINGS_FALLBACK: Settings = {
   // turned off the first time it did.
   anthropic_calls_per_day: 2500,
   coverage_ceiling_exempt_domains: [],
+  work_email_blocked_extra: [],
 };
 
 /** The two keys whose value is a list of engine names rather than a scalar. */
@@ -231,6 +239,7 @@ export function mergeSettings(
     scan_engines_free: [...SETTINGS_FALLBACK.scan_engines_free],
     scan_engines_gated: [...SETTINGS_FALLBACK.scan_engines_gated],
     coverage_ceiling_exempt_domains: [...SETTINGS_FALLBACK.coverage_ceiling_exempt_domains],
+    work_email_blocked_extra: [...SETTINGS_FALLBACK.work_email_blocked_extra],
   };
 
   for (const row of rows) {
@@ -257,6 +266,11 @@ export function mergeSettings(
 
     if (key === "coverage_ceiling_exempt_domains") {
       out[key] = mergeDomainList(key, row.value, warn);
+      continue;
+    }
+
+    if (key === "work_email_blocked_extra") {
+      out[key] = parseBlockedExtra(row.value);
       continue;
     }
 

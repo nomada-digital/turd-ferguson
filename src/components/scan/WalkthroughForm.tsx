@@ -6,6 +6,7 @@ import { SCAN_LIMITS } from "@/config/contact";
 import { T } from "@/config/tokens";
 import { track } from "@/lib/analytics";
 import type { WalkthroughOutcome } from "@/lib/scan/walkthrough-outcome";
+import { isWorkEmail, WORK_EMAIL_REFUSAL } from "@/lib/work-email";
 
 import { btn, field, label } from "./screens";
 
@@ -54,11 +55,15 @@ export default function WalkthroughForm(p: { token: string; back?: string; outco
   const [kind, setKind] = useState<"video" | "demo">(outcome === "demo" ? "demo" : "video");
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState(outcome === "bad" ? "That email does not look right." : outcome === "failed" ? "That did not go through. Please try again." : "");
+  const [err, setErr] = useState(outcome === "bad" ? "That email does not look right." : outcome === "personal" ? WORK_EMAIL_REFUSAL : outcome === "failed" ? "That did not go through. Please try again." : "");
   const [done, setDone] = useState(outcome === "video" ? "Thanks. Luke will send your Loom." : outcome === "demo" ? "Thanks. Danny will be in touch." : "");
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (email.trim() && !isWorkEmail(email)) {
+      setErr(WORK_EMAIL_REFUSAL);
+      return;
+    }
     setErr("");
     setBusy(true);
     try {

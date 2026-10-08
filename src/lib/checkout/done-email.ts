@@ -6,7 +6,7 @@
  *
  * Only a well-formed Session id is looked up. No row yet (the buyer can beat
  * the webhook back), no database, or a failed read all answer null, and the
- * page keeps its "your work email" wording: never fatal, and logged.
+ * page keeps its "your email" wording: never fatal, and logged.
  *
  * The fixture (the R163 pattern): `CHECKOUT_DONE_FIXTURE_EMAIL` set, with the
  * Session id `fixture`, answers that address so the page can be shot without a

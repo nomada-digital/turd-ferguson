@@ -249,7 +249,7 @@ export function orderEmailText(o: CompletedOrder, outcome: string, siteOrigin: s
     `Sector: ${o.sector || "-"}`,
     `Clusters: ${o.quantity}`,
     `Market: ${o.market || "unknown"}`,
-    `Work email: ${o.email ?? "none given"}`,
+    `Email: ${o.email ?? "none given"}`,
     `Keyword target: ${o.keyword || "-"}`,
     `First payment: ${amount}`,
     // Which path the signup took (R158, 1 Oct 2026): from the scan, or with no scan from the website.
