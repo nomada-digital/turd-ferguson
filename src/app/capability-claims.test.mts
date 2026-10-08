@@ -68,11 +68,22 @@ const NAMES = Object.keys(CAPABILITIES) as Capability[];
 /**
  * The words that claim each capability.
  *
- * Specific on purpose. Three near-misses this tree carries are true copy and
- * must not fire: "This tier is not white-labelled" on `/alwayseverywhere`; "The
- * host article's own ranking carries the linked page", which is about why a
- * placement moves a position, not about reporting one; and `/coverage-check`'s
- * upload, which is a public one-off tool and not the dashboard capability.
+ * Specific on purpose. Four near-misses this tree carries are true copy and
+ * must not fire: "This tier is not white-labelled" on `/alwayseverywhere`
+ * (gated on `dashboardBranding` since 8 Oct 2026 for what it implies about the
+ * other tiers, and true again the day it returns); "The host article's own
+ * ranking carries the linked page", which is about why a placement moves a
+ * position, not about reporting one; `/coverage-check`'s upload, which is a
+ * public one-off tool and not the dashboard capability; and "Selling it under
+ * your own name?" on both agency pages, which is the agency's own reselling,
+ * not a claim about whose name our surfaces carry.
+ *
+ * The two "under your name" tells came in on review, later on 8 Oct 2026:
+ * `/seo-agencies` said "run white-label under your name" in its description
+ * (so its OG card and `/llms.txt`) and "we run it under your name" in its
+ * hero, outside any gate, and none of the tells then knew the bare adjective
+ * or the phrase. This file was green with a live claim - the "what it cannot
+ * see" paragraph above, met in practice.
  */
 const TELLS: Record<Capability, RegExp[]> = {
   dashboardBranding: [
@@ -83,6 +94,8 @@ const TELLS: Record<Capability, RegExp[]> = {
     /\bnever finds out we exist\b/i,
     /\b(?:is|are) white[- ]label\b/i,
     /(?<!\bnot )\bwhite[- ]labell?ed\b/i,
+    /\bwhite[- ]label under your name\b/i,
+    /\bwe run it under your name\b/i,
     // `/compare`'s row is a label and a cell, so its claim is the pairing in
     // the source; as rendered text "White label for agencies" is also the
     // `/white-label` page's own title, which is not a claim.
@@ -199,17 +212,22 @@ test("every gate closes and names only capabilities that exist", () => {
 
 test("the walk and the gates are where they were, so a clean result below is a reading", () => {
   /**
-   * Floors, 8 Oct 2026: 353 source files, 28 gates in eleven files, 32
-   * withheld sentences for the built half to look for. A walk that stops
+   * Floors, 8 Oct 2026: 353 source files, 33 gates in twelve files, 38
+   * withheld sentences for the built half to look for. (First written as 28
+   * gates and 32 sentences, with the file floor asserted at 300 while this
+   * comment said 353 - a floor recorded one way and enforced another. Raised
+   * on review the same day, when `/seo-agencies`' two clauses, the
+   * `/alwayseverywhere` sentence, the "Placement summaries" row and the
+   * `/packages` foot link were gated.) A walk that stops
    * matching reports a clean tree, and a gate reader that stops finding calls
    * reports every claim as ungated - which fails loudly - or, if the tells rot
    * with it, nothing at all. A gate taken off without its claim going too is
    * also caught here first: `/compare`'s row has no tell a page can carry.
    * Move these deliberately, with the date.
    */
-  assert.ok(FILES.length >= 300, `the walk read ${FILES.length} source files`);
-  assert.ok(GATES.length >= 28, `only ${GATES.length} gates found - 28 on 8 Oct 2026`);
-  assert.ok(WITHHELD.length >= 32, `only ${WITHHELD.length} withheld sentences for the built half to look for - 32 on 8 Oct 2026`);
+  assert.ok(FILES.length >= 353, `the walk read ${FILES.length} source files - 353 on 8 Oct 2026`);
+  assert.ok(GATES.length >= 33, `only ${GATES.length} gates found - 33 on 8 Oct 2026`);
+  assert.ok(WITHHELD.length >= 38, `only ${WITHHELD.length} withheld sentences for the built half to look for - 38 on 8 Oct 2026`);
   for (const c of OFF) {
     assert.ok(
       GATES.some((g) => g.needs.includes(c)),

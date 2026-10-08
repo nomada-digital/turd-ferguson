@@ -20,7 +20,9 @@ import { D, PACKAGES_WASH } from "./dark";
  *
  * 8 Oct 2026, LB1/LB7: both of those wait on `dashboardBranding` - no tier's
  * dashboard carries the agency's brand yet, so "Your dashboards and your
- * branding" and "are white-label" are withheld until it does. "Placement
+ * branding" and "are white-label" are withheld until it does, and so is the
+ * foot's "How the line sits" link, whose "line" is the one that clause drew
+ * (on review, later that day: alone it read as a fragment). "Placement
  * opportunities, scored for difficulty" is narrowed to the free scan, the only
  * place a difficulty is scored (the dashboard's Cited page shows none, by its
  * brief), and "Rank tracking on the money keywords" is ticked for alwaystracked
@@ -331,10 +333,16 @@ export default function Packages({ full = false }: { full?: boolean }) {
         <div id="white-label" className="pkg-foot" style={{ marginTop: "18px", fontSize: "13.5px", lineHeight: 1.6, color: T.soft }}>
           <span>
             {onlyIf("dashboardBranding", <><TierName tier="tracked" /> to <TierName tier="cited" /> are white-label;{" "}</>)}
-            <TierName tier="everywhere" /> is sold to brands direct.{" "}
-            <a href="/white-label" style={{ fontWeight: 600, textDecoration: "none", color: T.ink }}>
-              How the line sits
-            </a>
+            <TierName tier="everywhere" /> is sold to brands direct.
+            {/* "The line" is the one the clause above draws, so the link waits with it (8 Oct 2026). */}
+            {onlyIf("dashboardBranding", (
+              <>
+                {" "}
+                <a href="/white-label" style={{ fontWeight: 600, textDecoration: "none", color: T.ink }}>
+                  How the line sits
+                </a>
+              </>
+            ))}
           </span>
           <span>
             <TierName tier="cited" /> is built and run by the senior team at{" "}

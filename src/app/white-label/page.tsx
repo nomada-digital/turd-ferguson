@@ -55,6 +55,14 @@ export const metadata: Metadata = {
  * own subscription; held by `consolidatedInvoicing`), and the invoice row's
  * "The one place our name appears", which is false while the dashboard and its
  * mail carry our name - it goes back by hand when AG-2 ships.
+ *
+ * Later the same day, on review: "Placement summaries: Yours" went the same
+ * way. A placement summary is the dashboard's Placements screen, drawn inside
+ * the shell whose Lockup carries our mark and the alwaystracked name; only the
+ * CSV export is unmarked. So no row is the agency's until AG-2 ships, and the
+ * page states only the surfaces that are not - recorded in
+ * `white-label-claims.test.mts`. With three rows, the grid is one full line,
+ * and the card titles are h2 under the h1 while the hero is withheld.
  */
 
 /** Northlight's brand colour and tint - a made-up agency, deliberately not ours. */
@@ -86,7 +94,9 @@ const PLACES: { t: string; u: string; by: number }[] = [
 const ROWS: { surface: string; brand: string; note: string }[] = [
   ...listIf("dashboardBranding", { surface: "The visibility dashboard", brand: "Yours", note: "Your logo and colours." }),
   ...listIf("reportBranding", { surface: "Monthly reporting", brand: "Yours", note: "Generated from the same data, none of our marks on it." }),
-  { surface: "Placement summaries", brand: "Yours", note: "What went live, where, and what it moved." },
+  // The placement summary is the dashboard's Placements screen, inside the
+  // same shell as every other page of it; only its CSV is unmarked.
+  ...listIf("dashboardBranding", { surface: "Placement summaries", brand: "Yours", note: "What went live, where, and what it moved." }),
   { surface: "Outreach to publishers", brand: "Ours", note: "We approach the title. Your client is never named unless you ask." },
   { surface: "The published article", brand: "Publisher", note: "Their words. Neither of us is in the byline." },
   { surface: "Invoices and contracts", brand: "Ours, to you", note: "Your client never sees it." },
@@ -176,8 +186,10 @@ export default function WhiteLabelPage() {
       </div>
     </div>
   ));
-  // With the hero withheld, the table's heading is the page's one h1.
+  // With the hero withheld, the table's heading is the page's one h1, and the
+  // cards under it step up a level so the outline does not skip h2.
   const Heading = hero ? "h2" : "h1";
+  const CardTitle = hero ? "h3" : "h2";
 
   return (
     <div style={{ ...SHELL, paddingTop: "72px", paddingBottom: "72px" }}>
@@ -202,7 +214,7 @@ export default function WhiteLabelPage() {
           {ROWS.map((r) => (
             <div key={r.surface} className="ac-row" style={{ ...CARD, borderRadius: "16px", padding: "18px 20px" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px" }}>
-                <h3 style={{ margin: 0, fontSize: "14.5px", fontWeight: 700, color: T.ink }}>{r.surface}</h3>
+                <CardTitle style={{ margin: 0, fontSize: "14.5px", fontWeight: 700, color: T.ink }}>{r.surface}</CardTitle>
                 <span style={r.brand === "Yours" ? pill(T.goodFg, T.goodBg) : pill(T.soft, T.chip)}>{r.brand}</span>
               </div>
               <div style={{ fontSize: "13px", lineHeight: 1.5, color: T.soft, marginTop: "8px" }}>{r.note}</div>

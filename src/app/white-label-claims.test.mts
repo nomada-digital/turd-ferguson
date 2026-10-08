@@ -74,6 +74,18 @@ import { blocksOf, headClaims, pageText, PRERENDER_DIR, schemaClaims, sweptPages
  * must render, and a withheld row must not. `capability-claims.test.mts` is
  * the check against the product. The fact moved from "three rows are the
  * agency's" to one - "Placement summaries" - and is recorded below.
+ *
+ * **Later on 8 Oct 2026, on review: to none.** "Placement summaries: Yours"
+ * was the third row the audit cited, and it is the same claim: the summary is
+ * the dashboard's Placements screen, inside the shell whose Lockup draws our
+ * mark and the alwaystracked name in every mode, and only its CSV export is
+ * unmarked. It waits on `dashboardBranding` with the dashboard row. So today
+ * the table names no surface as the agency's, and `/white-label` states only
+ * the ones that are not. That is recorded as a fact below rather than read as
+ * a failure: the three "Yours" rows are still declared, withheld, and return
+ * in their own words when AG-2 and RP-1 ship. The prohibitions all derive
+ * from the not-the-agency's rows, which are unchanged, so none of them goes
+ * quiet.
  */
 
 const PAGE = "src/app/white-label/page.tsx";
@@ -213,21 +225,24 @@ test("the parse reads every row the page declares, so this file cannot go blind"
   assert.equal(new Set(ROWS.map((r) => r.surface)).size, ROWS.length, "two rows parsed with the same surface");
 });
 
-test("the rows the product cannot back are withheld - two, as of 8 Oct 2026", () => {
+test("the rows the product cannot back are withheld - three, as of 8 Oct 2026", () => {
   /**
-   * The dated fact. "The visibility dashboard" waits on `dashboardBranding`
-   * (AG-2) and "Monthly reporting" on `reportBranding` (RP-1). When either
-   * ships, its flag flips in `config/capabilities.ts`, the row returns in its
-   * own words, and this list moves with the date - one edit beside the
-   * evidence, not a silent change in what the rules below derive from.
+   * The dated fact. "The visibility dashboard" and "Placement summaries" wait
+   * on `dashboardBranding` (AG-2) and "Monthly reporting" on `reportBranding`
+   * (RP-1). "Placement summaries" joined the list later on 8 Oct 2026: the
+   * summary is the dashboard's Placements screen, which carries our mark like
+   * every other screen of it. When either capability ships, its flag flips in
+   * `config/capabilities.ts`, the rows return in their own words, and this
+   * list moves with the date - one edit beside the evidence, not a silent
+   * change in what the rules below derive from.
    */
   assert.deepEqual(
     WITHHELD.map((r) => r.surface),
-    ["The visibility dashboard", "Monthly reporting"],
+    ["The visibility dashboard", "Monthly reporting", "Placement summaries"],
   );
   assert.deepEqual(
     AGENCY.map((r) => r.surface),
-    ["Placement summaries"],
+    [],
     "the agency's live rows moved - record it here with the reason and the date",
   );
 });
@@ -252,7 +267,21 @@ test("the table still names a surface that is not the agency's", () => {
     NOT_AGENCY.length > 0,
     "every row of the white-label table is the agency's, so the page no longer states a line at all",
   );
-  assert.ok(AGENCY.length > 0, "no row is the agency's, so the page is not describing white labelling");
+  // The agency's side of the line. Until 8 Oct 2026 this asserted a live
+  // "Yours" row. Since then none is live - each claims a capability the
+  // product lacks and is withheld (recorded above) - so the property is held
+  // where it still means something: the table still DECLARES the agency's
+  // surfaces, ready to return when the capability ships, rather than having
+  // dropped them. Live, it is the dated fact that none is the agency's today.
+  assert.ok(
+    ROWS.some((r) => r.brand === "Yours"),
+    "the table declares no surface as the agency's, even withheld, so the page is not describing white labelling",
+  );
+  assert.equal(
+    AGENCY.length,
+    0,
+    "a live row is the agency's again - the capability it claims shipped, so move the dated record above and this line with it",
+  );
 });
 
 test("the table's surfaces are on the rendered page, not only in the source", () => {
