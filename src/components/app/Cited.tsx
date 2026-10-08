@@ -13,6 +13,8 @@ import type { Compare, OverviewData } from "@/lib/tracking/overview-data";
 import type { PlacementRow } from "@/lib/tracking/placement-figures";
 import { partialRunNote } from "@/lib/tracking/run-note";
 
+import ChipRow from "./ChipRow";
+import { ClearFilters, ClearSearch } from "./ClearLinks";
 import DatePicker from "./DatePicker";
 import { appPath } from "@/lib/app-host";
 
@@ -101,6 +103,10 @@ export default function Cited({
   const shown = all ? rows : rows.slice(0, NAMED_TOP);
   const total = rows.reduce((s, p) => s + p.count, 0);
   const span = (p: { first: Day; last: Day }) => (p.first === p.last ? formatDay(p.first) : `${formatDay(p.first)} - ${formatDay(p.last)}`);
+  // Audit mobile-4 (8 Oct 2026): the headline said nothing of the filters, whose chips load out of sight
+  // on a phone - "5 pages cited 47 times." for one cluster on one engine read as the whole account.
+  const filters = `${picked ? ` in the "${picked.keyword ?? picked.name}" cluster` : ""}${engine ? `, ${ENGINE_SPECS[engine].label} only` : ""}${kind === "yours" ? ", your site only" : kind === "others" ? ", other sites only" : ""}`;
+  const filteredView = Boolean(picked || engine || kind !== "all" || term);
 
   return (
     <div className="app-col" style={{ display: "flex", flexDirection: "column", gap: "20px", minWidth: 0 }}>
@@ -126,7 +132,7 @@ export default function Cited({
 
       <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
         {cards.length ? (
-          <nav aria-label="Filter by cluster" className="app-nm-filters" style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+          <ChipRow label="Filter by cluster" current={picked?.id ?? ""}>
             <Link href={href({ cluster: null, open: null })} aria-current={!picked ? "true" : undefined} style={PILL(!picked)}>
               All clusters
             </Link>
@@ -135,9 +141,9 @@ export default function Cited({
                 {c.keyword ?? c.name}
               </Link>
             ))}
-          </nav>
+          </ChipRow>
         ) : null}
-        <nav aria-label="Filter by engine" className="app-nm-filters" style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+        <ChipRow label="Filter by engine" current={engine ?? ""}>
           <Link href={href({ engine: null, open: null })} aria-current={!engine ? "true" : undefined} style={PILL(!engine)}>
             All engines
           </Link>
@@ -147,8 +153,8 @@ export default function Cited({
               {ENGINE_SPECS[e].label}
             </Link>
           ))}
-        </nav>
-        <nav aria-label="Filter by site" className="app-nm-filters" style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+        </ChipRow>
+        <ChipRow label="Filter by site" current={kind}>
           {(
             [
               ["all", "All sites"],
@@ -160,7 +166,7 @@ export default function Cited({
               {label}
             </Link>
           ))}
-        </nav>
+        </ChipRow>
         <form method="get" role="search" className="app-search" style={{ display: "flex", alignItems: "center", gap: "8px", width: "320px", maxWidth: "100%", height: "44px", boxSizing: "border-box", padding: "0 12px", border: `1px solid ${T.line}`, borderRadius: "12px", background: T.surface }}>
           <input id="ct-from" type="hidden" name="from" value={range.from} />
           <input id="ct-to" type="hidden" name="to" value={range.to} />
@@ -175,19 +181,24 @@ export default function Cited({
           <label htmlFor="ct-search" className="sr-only">
             Search cited pages
           </label>
-          <input id="ct-search" name="q" defaultValue={q} maxLength={APP_LIMITS.search} placeholder="Search pages, e.g. a site name" style={{ flexGrow: 1, minWidth: 0, border: 0, outline: 0, fontFamily: "inherit", fontSize: "14px", color: T.ink, background: "transparent" }} />
+          {/* Audit mobile-6 (8 Oct 2026): a search key on the phone's keyboard, and site names left as typed rather than autocorrected. */}
+          <input id="ct-search" type="search" name="q" defaultValue={q} maxLength={APP_LIMITS.search} placeholder="Search pages, e.g. a site name" enterKeyHint="search" autoCapitalize="none" autoCorrect="off" spellCheck={false} style={{ flexGrow: 1, minWidth: 0, border: 0, outline: 0, fontFamily: "inherit", fontSize: "14px", color: T.ink, background: "transparent" }} />
+          {term ? <ClearSearch href={href({ q: null, open: null })} /> : null}
         </form>
       </div>
 
       <section aria-labelledby="ct-h" style={{ background: T.surface, border: `1px solid ${T.line}`, borderRadius: "18px", overflow: "hidden" }}>
-        <h2 id="ct-h" style={{ margin: 0, padding: "18px 24px 14px", fontSize: "15px", fontWeight: 600, color: T.ink }}>
-          {/* DS45 (2 Oct 2026): a search that keeps nothing still counts what it searched, as Who is named does - pages were cited. */}
-          {rows.length
-            ? `${term ? `${rows.length.toLocaleString("en-GB")} of ${filtered.length.toLocaleString("en-GB")} pages match "${q.trim()}", cited` : `${rows.length.toLocaleString("en-GB")} page${rows.length === 1 ? "" : "s"} cited`} ${total.toLocaleString("en-GB")} time${total === 1 ? "" : "s"}.`
-            : term && filtered.length
-              ? `0 of ${filtered.length.toLocaleString("en-GB")} pages match "${q.trim()}".`
-              : "No pages cited in this range."}
-        </h2>
+        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: "4px 16px", flexWrap: "wrap", padding: "18px 24px 14px" }}>
+          <h2 id="ct-h" style={{ margin: 0, fontSize: "15px", fontWeight: 600, color: T.ink }}>
+            {/* DS45 (2 Oct 2026): a search that keeps nothing still counts what it searched, as Who is named does - pages were cited. */}
+            {rows.length
+              ? `${term ? `${rows.length.toLocaleString("en-GB")} of ${filtered.length.toLocaleString("en-GB")} pages match "${q.trim()}", cited` : `${rows.length.toLocaleString("en-GB")} page${rows.length === 1 ? "" : "s"} cited`} ${total.toLocaleString("en-GB")} time${total === 1 ? "" : "s"}${filters}.`
+              : term && filtered.length
+                ? `0 of ${filtered.length.toLocaleString("en-GB")} pages match "${q.trim()}"${filters}.`
+                : `No pages cited in this range${filters}.`}
+          </h2>
+          {filteredView ? <ClearFilters href={`?${new URLSearchParams(base)}`} /> : null}
+        </div>
         {rows.length ? (
           <>
             <div className="app-ct-grid app-hide-sm" style={{ display: "grid", gridTemplateColumns: GRID, gap: "16px", padding: "10px 24px", borderTop: `1px solid ${T.line}` }}>

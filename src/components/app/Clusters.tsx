@@ -28,6 +28,7 @@ import { type Facts, type PromptCta, pickPrompt, promptCopy } from "@/lib/tracki
 
 import { Chip } from "./Overview";
 import UpgradePrompt from "./UpgradePrompt";
+import { ClearSearch } from "./ClearLinks";
 import { appPath, siteHref } from "@/lib/app-host";
 
 /**
@@ -214,7 +215,9 @@ export default function Clusters({
             <label htmlFor="q-search" className="sr-only">
               Search clusters and prompts
             </label>
-            <input id="q-search" name="q" defaultValue={q} maxLength={APP_LIMITS.search} placeholder="Search keywords and prompts" style={{ flexGrow: 1, minWidth: 0, border: 0, outline: 0, fontFamily: "inherit", fontSize: "14px", color: T.ink, background: "transparent" }} />
+            {/* Audit mobile-6 (8 Oct 2026): a search key on the phone's keyboard, and keywords left as typed rather than autocorrected. */}
+            <input id="q-search" type="search" name="q" defaultValue={q} maxLength={APP_LIMITS.search} placeholder="Search keywords and prompts" enterKeyHint="search" autoCapitalize="none" autoCorrect="off" spellCheck={false} style={{ flexGrow: 1, minWidth: 0, border: 0, outline: 0, fontFamily: "inherit", fontSize: "14px", color: T.ink, background: "transparent" }} />
+            {q ? <ClearSearch href={`?${new URLSearchParams({ ...base, ...(filter === "all" ? {} : { filter }) })}`} /> : null}
           </form>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "14px", flexWrap: "wrap" }}>

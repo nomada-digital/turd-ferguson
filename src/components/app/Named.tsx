@@ -11,8 +11,10 @@ import { NAMED_TOP, citedWithBrand, namedPage } from "@/lib/tracking/named-figur
 import type { Compare, OverviewData } from "@/lib/tracking/overview-data";
 import { partialRunNote } from "@/lib/tracking/run-note";
 
+import ChipRow from "./ChipRow";
 import DatePicker from "./DatePicker";
 import { Chip } from "./Overview";
+import { ClearFilters, ClearSearch } from "./ClearLinks";
 import { appPath } from "@/lib/app-host";
 
 /**
@@ -96,10 +98,14 @@ export default function Named({
   // (Overview.tsx `across`) - a pilot with a cluster not yet read had "560 answers in 0 clusters".
   const loose = picked || !cards.length ? 0 : ungroupedRead(data.questions, data.answers, range);
   const looseWords = `${loose} ungrouped prompt${loose === 1 ? "" : "s"}`;
-  const inWhat = !cards.length ? "" : loose && !clustersCounted ? looseWords : `${clustersCounted} cluster${clustersCounted === 1 ? "" : "s"}${loose ? ` and ${looseWords}` : ""}`;
+  // Audit mobile-4 (8 Oct 2026): a picked cluster read "in 1 cluster" and an engine not at all, so a
+  // shared link to ?cluster=c8 - whose chip loads out of sight on a phone - looked like the whole account.
+  const inWhat = picked ? `the "${picked.keyword ?? picked.name}" cluster` : !cards.length ? "" : loose && !clustersCounted ? looseWords : `${clustersCounted} cluster${clustersCounted === 1 ? "" : "s"}${loose ? ` and ${looseWords}` : ""}`;
+  const onlyEngine = engine ? `, ${ENGINE_SPECS[engine].label} only` : "";
   const headline = page.answers
-    ? `${term ? `${rows.length} of ${page.rows.length} brands match "${q.trim()}", named` : `${page.brands} brand${page.brands === 1 ? "" : "s"} named`} across ${page.answers.toLocaleString("en-GB")} answers${inWhat ? ` in ${inWhat}` : ""}.`
+    ? `${term ? `${rows.length} of ${page.rows.length} brands match "${q.trim()}", named` : `${page.brands} brand${page.brands === 1 ? "" : "s"} named`} across ${page.answers.toLocaleString("en-GB")} answers${inWhat ? ` in ${inWhat}` : ""}${onlyEngine}.`
     : null;
+  const filtered = Boolean(picked || engine || term);
 
   return (
     <div className="app-col" style={{ display: "flex", flexDirection: "column", gap: "20px", minWidth: 0 }}>
@@ -126,7 +132,7 @@ export default function Named({
 
       <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
         {cards.length ? (
-          <nav aria-label="Filter by cluster" className="app-nm-filters" style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+          <ChipRow label="Filter by cluster" current={picked?.id ?? ""}>
             <Link href={href({ cluster: null, open: null })} aria-current={!picked ? "true" : undefined} style={PILL(!picked)}>
               All clusters
             </Link>
@@ -135,9 +141,9 @@ export default function Named({
                 {c.keyword ?? c.name}
               </Link>
             ))}
-          </nav>
+          </ChipRow>
         ) : null}
-        <nav aria-label="Filter by engine" className="app-nm-filters" style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+        <ChipRow label="Filter by engine" current={engine ?? ""}>
           <Link href={href({ engine: null, open: null })} aria-current={!engine ? "true" : undefined} style={PILL(!engine)}>
             All engines
           </Link>
@@ -147,7 +153,7 @@ export default function Named({
               {ENGINE_SPECS[e].label}
             </Link>
           ))}
-        </nav>
+        </ChipRow>
         <form method="get" role="search" className="app-search" style={{ display: "flex", alignItems: "center", gap: "8px", width: "320px", maxWidth: "100%", height: "44px", boxSizing: "border-box", padding: "0 12px", border: `1px solid ${T.line}`, borderRadius: "12px", background: T.surface }}>
           <input id="nm-from" type="hidden" name="from" value={range.from} />
           <input id="nm-to" type="hidden" name="to" value={range.to} />
@@ -161,14 +167,19 @@ export default function Named({
           <label htmlFor="nm-search" className="sr-only">
             Search brands
           </label>
-          <input id="nm-search" name="q" defaultValue={q} maxLength={APP_LIMITS.search} placeholder="Search brands" style={{ flexGrow: 1, minWidth: 0, border: 0, outline: 0, fontFamily: "inherit", fontSize: "14px", color: T.ink, background: "transparent" }} />
+          {/* Audit mobile-6 (8 Oct 2026): a search key on the phone's keyboard, and brand names left as typed rather than autocorrected. */}
+          <input id="nm-search" type="search" name="q" defaultValue={q} maxLength={APP_LIMITS.search} placeholder="Search brands" enterKeyHint="search" autoCapitalize="none" autoCorrect="off" spellCheck={false} style={{ flexGrow: 1, minWidth: 0, border: 0, outline: 0, fontFamily: "inherit", fontSize: "14px", color: T.ink, background: "transparent" }} />
+          {term ? <ClearSearch href={href({ q: null, open: null })} /> : null}
         </form>
       </div>
 
       <section aria-labelledby="nm-h" style={{ background: T.surface, border: `1px solid ${T.line}`, borderRadius: "18px", overflow: "hidden" }}>
-        <h2 id="nm-h" style={{ margin: 0, padding: "18px 24px 14px", fontSize: "15px", fontWeight: 600, color: T.ink }}>
-          {headline ?? "No answers in this range yet."}
-        </h2>
+        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: "4px 16px", flexWrap: "wrap", padding: "18px 24px 14px" }}>
+          <h2 id="nm-h" style={{ margin: 0, fontSize: "15px", fontWeight: 600, color: T.ink }}>
+            {headline ?? (picked || engine ? `No answers in this range${picked ? ` in the "${picked.keyword ?? picked.name}" cluster` : ""}${onlyEngine}.` : "No answers in this range yet.")}
+          </h2>
+          {filtered ? <ClearFilters href={`?${new URLSearchParams(base)}`} /> : null}
+        </div>
         {headline ? (
           <>
             <div className="app-nm-grid app-hide-sm" style={{ display: "grid", gridTemplateColumns: GRID, gap: "16px", padding: "10px 24px", borderTop: `1px solid ${T.line}` }}>
