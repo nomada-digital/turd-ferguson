@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { longDate } from "./long-date.ts";
+
 /**
  * Case studies published from the Nomada agency hub.
  *
@@ -94,11 +96,8 @@ export async function caseStudy(id: string): Promise<CaseStudy | null> {
   return (await publishedCaseStudies()).find((s) => s.id === id) ?? null;
 }
 
-/** "1 October 2026" from an ISO date. */
-export function longDate(iso: string): string {
-  const d = new Date(iso.slice(0, 10) + "T12:00:00Z");
-  return d.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
-}
+// "1 October 2026" from an ISO date - moved to a pure module for the shared charts (M3, 8 Oct 2026).
+export { longDate };
 
 /** The window a study was measured over, in words: "24 June 2026 to 1 October 2026". */
 export function windowOf(s: CaseStudy): string | null {
