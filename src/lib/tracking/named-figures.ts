@@ -27,6 +27,13 @@ export type NamedRow = {
   answers: number;
   share: Rate;
   delta: number | null;
+  /**
+   * 8 Oct 2026 (audit ia-3): answers naming the brand, of every answer in the
+   * range - the Overview headline's basis, so "Ledgerline 61%" sits beside
+   * "Tallyroo 27%" on one footing - and the same in the comparison range.
+   */
+  reach: Rate;
+  reachBefore: Rate | null;
   /** Named in range but not in the comparison range. */
   isNew: boolean;
   engines: string[];
@@ -51,7 +58,13 @@ export function namedPage(input: { answers: AnswerRow[]; range: Range; before: R
   const named = new Map<string, Map<string, Set<string>>>();
   const answered = new Map<string, Set<string>>();
   let total = 0;
+  let totalBefore = 0;
+  let youBefore = 0;
   for (const a of rows) {
+    if (a.answered && input.before && within(a.run_date, input.before)) {
+      totalBefore++;
+      if (a.named) youBefore++;
+    }
     if (!a.answered || !within(a.run_date, input.range)) continue;
     total++;
     const days = answered.get(a.question_id) ?? new Set<string>();
@@ -78,6 +91,8 @@ export function namedPage(input: { answers: AnswerRow[]; range: Range; before: R
     answers: b.share.num,
     share: b.share,
     delta: b.delta,
+    reach: rate(b.share.num, total),
+    reachBefore: input.before ? rate(b.before ?? 0, totalBefore) : null,
     isNew: b.before === 0,
     engines: [...(engines.get(b.key) ?? [])],
     prompts: [...(named.get(b.key) ?? new Map<string, Set<string>>()).entries()]
@@ -89,7 +104,7 @@ export function namedPage(input: { answers: AnswerRow[]; range: Range; before: R
   // The client's own row is always first, drawn at 0 when no answer named them.
   const own: NamedRow = mine
     ? toRow(mine)
-    : { key: youKey, name: input.you, you: true, answers: 0, share: rate(0, board.reduce((s, b) => s + b.share.num, 0)), delta: null, isNew: false, engines: [], prompts: [] };
+    : { key: youKey, name: input.you, you: true, answers: 0, share: rate(0, board.reduce((s, b) => s + b.share.num, 0)), delta: null, reach: rate(0, total), reachBefore: input.before ? rate(youBefore, totalBefore) : null, isNew: false, engines: [], prompts: [] };
   const others = board.filter((b) => !b.you).map(toRow);
   return { rows: [own, ...others], answers: total, brands: board.length };
 }

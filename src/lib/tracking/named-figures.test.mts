@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
+import { clusterCards, clusterSummary } from "./cluster-figures.ts";
 import { expandFixture } from "./fixture-mode.ts";
-import { type AnswerRow, brandBoard, comparisonRange, shareOfVoice } from "./figures.ts";
+import { type AnswerRow, brandBoard, comparisonRange, overview, shareOfVoice } from "./figures.ts";
 import { CITED_WITH_TOP, NAMED_TOP, citedWithBrand, namedPage, openKey } from "./named-figures.ts";
 
 /**
@@ -106,4 +107,21 @@ test("?open= takes a folded key only", () => {
   assert.equal(openKey("Xero"), null);
   assert.equal(openKey("<x>"), null);
   assert.equal(openKey(["xero"]), null);
+});
+
+test("8 Oct 2026 (audit ia-3): the Overview's card reads answers naming each brand, of the headline's own answers", () => {
+  const o = overview({ range, compare: "prev", startedOn: fx.client.started_on, engines: [], questions: fx.data.questions, answers: fx.data.answers, serp: fx.data.serp, keywordCount: 9 });
+  const cs = clusterSummary(clusterCards({ ...fx.data, range, before: o.compare, today: fx.today, engines: [] }));
+  const page = namedPage({ answers: fx.data.answers, range, before, you });
+  // One denominator for the headline and the card: 4,760 answers.
+  assert.equal(page.answers, o.named.den);
+  assert.equal(page.answers, cs.now.den, "the headline by cluster");
+  const row = (name: string) => page.rows.find((r) => r.name === name)!;
+  assert.deepEqual(row(you).reach, cs.now, "the client's row is the headline's 27%, 1,272 of 4,760");
+  // On the mention basis the card read Ledgerline 34% (22% on the long state) and Tallyroo 15% - under a headline of 27%.
+  assert.deepEqual([row("Ledgerline").reach.num, row("Ledgerline").reach.den, row("Ledgerline").reach.pct], [2924, 4760, 61]);
+  assert.equal(row("Brightbook").reach.pct, 50);
+  assert.deepEqual([row("Ledgerline").share.num, row("Ledgerline").share.pct, row(you).share.pct], [2924, 34, 15], "/named's share of mentions is unchanged");
+  // Each row's reach counts the same answers as its Answers column on /named.
+  for (const r of page.rows) assert.equal(r.reach.num, r.answers, r.name);
 });

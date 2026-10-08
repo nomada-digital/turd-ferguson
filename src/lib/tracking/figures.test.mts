@@ -1,15 +1,25 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
+
+import { SERP_DEPTH } from "../scan/dataforseo-request.ts";
+import { expandFixture, fixtureState } from "./fixture-mode.ts";
 
 import {
   type AnswerRow,
+  FIRST_WEEK_DAYS,
+  UNRANKED_AS,
+  addDays,
   basis,
   brandBoard,
   checkGrid,
   citedPages,
+  comparisonLabel,
   comparisonRange,
   daysIn,
+  firstWeek,
   keywordRows,
+  keywordsIn,
   keywordsOnPage1,
   liveThroughout,
   movers,
@@ -17,6 +27,7 @@ import {
   overview,
   pointsDelta,
   questionsNamed,
+  resolveComparison,
   shareOfVoice,
   sparkPoints,
   ungroupedRead,
@@ -94,11 +105,17 @@ test("like-for-like counts only questions live all of both periods", () => {
   assert.equal(pointsDelta(o.lfl!.now, o.lfl!.before), 100);
 });
 
-test("a comparison reaching before tracking began is hidden, with the line that says so", () => {
+test("a comparison reaching before tracking began is the first week; one inside the first week is hidden, with the line that says so", () => {
+  // 8 Oct 2026 (audit data-10): this used to hide the comparison outright, so a client saw no change for its
+  // first 55 days. Now the first week stands in, and only a range ending inside it has nothing to compare.
   const o = overview({ range: { from: "2026-09-02", to: "2026-09-29" }, compare: "prev", startedOn: "2026-09-10", engines: [], questions: [], answers: [], serp: [], keywordCount: 10 });
-  assert.equal(o.compare, null);
-  assert.equal(o.lfl, null);
-  assert.match(o.compareHidden ?? "", /^Tracking began 10 Sep/);
+  assert.deepEqual(o.compare, { from: "2026-09-10", to: "2026-09-16" });
+  assert.equal(o.compareKind, "start");
+  assert.equal(o.compareHidden, null);
+  const early = overview({ range: { from: "2026-09-02", to: "2026-09-15" }, compare: "prev", startedOn: "2026-09-10", engines: [], questions: [], answers: [], serp: [], keywordCount: 10 });
+  assert.equal(early.compare, null);
+  assert.equal(early.lfl, null);
+  assert.match(early.compareHidden ?? "", /^Tracking began 10 Sep, so there is no earlier period to compare with yet\. From 17 Sep the changes are against your first week\.$/);
 });
 
 test("questions named, share of voice with rank, keywords on page 1", () => {
@@ -117,7 +134,9 @@ test("questions named, share of voice with rank, keywords on page 1", () => {
     r,
     10,
   );
-  assert.deepEqual([kw.num, kw.den, kw.avg], [2, 10, 5.5]);
+  // 8 Oct 2026 (audit data-7): k3, read and outside the top 20, counts as #21 - it was left out, averaging 5.5.
+  assert.deepEqual([kw.num, kw.den, kw.avg, kw.ranked, kw.unranked], [2, 10, 10.7, 2, 1]);
+  assert.equal(UNRANKED_AS, SERP_DEPTH + 1, "one place below the deepest read");
 });
 
 test("movers sort by the size of the change; the brand board counts the client as one brand among them", () => {
@@ -209,4 +228,50 @@ test("a failed google_aio read (stored answered=false) never counts as not named
   // Positive control: the same row counted as an answer would have moved the rate.
   const asAnswer = overview({ ...base, answers: [...good, { ...failed, answered: true }] });
   assert.notDeepEqual(asAnswer.named, clean.named);
+});
+
+const fx = expandFixture(JSON.parse(readFileSync(new URL("./fixture.json", import.meta.url), "utf8")));
+const fxRange = { from: addDays(fx.today, -27), to: fx.today };
+const fxOverview = (data: typeof fx.data, startedOn = fx.client.started_on, range = fxRange) =>
+  overview({ range, compare: "prev", startedOn, engines: [], questions: data.questions, answers: data.answers, serp: data.serp, keywordCount: keywordsIn(data.keywords, range), keywords: data.keywords });
+
+test("8 Oct 2026 (audit data-4): every key figure's change is like-for-like - the 40 prompts tracked all of both periods", () => {
+  const o = fxOverview(fx.data);
+  assert.equal(o.lfl?.questions, 40);
+  // Answers naming you: 27% overall, 28% vs 25% like-for-like - the chip is +3, as the headline's.
+  assert.deepEqual([o.named.pct, o.lfl!.now.pct, o.lfl!.before.pct], [27, 28, 25]);
+  assert.equal(o.change?.named, 3);
+  assert.equal(pointsDelta(o.named, o.namedBefore), 2, "the overall difference the flat strip used to print beside the headline's +3");
+  // Prompts named in: 37 of 40 in both periods - no change, where the strip read "40 of 45, was 37 of 40".
+  assert.deepEqual([o.change!.questions!.now.num, o.change!.questions!.now.den, o.change!.questions!.before.num, o.change!.questions!.before.den], [37, 40, 37, 40]);
+  // Share of voice: 16% vs 14% on the same prompts (+2); all prompts read +1.
+  assert.equal(o.change?.sov, 2);
+  assert.equal(pointsDelta(o.sov, o.sovBefore), 1);
+  // Keywords on page 1: the 8 keywords tracked all of both periods, 5 now and 3 then.
+  assert.deepEqual(o.change?.keywords, { now: 5, before: 3, of: 8 });
+  // No comparison, no change.
+  assert.equal(overview({ range: fxRange, compare: "none", startedOn: fx.client.started_on, engines: [], questions: fx.data.questions, answers: fx.data.answers, serp: fx.data.serp, keywordCount: 9 }).change, null);
+});
+
+test("8 Oct 2026 (audit data-10): a young client compares with its first week - the first seven days read", () => {
+  const y = fixtureState(fx, { TRACKING_FIXTURE_STATE: "young" });
+  const start = y.client.started_on;
+  const c = resolveComparison(fxRange, "prev", start);
+  const read = [...new Set(y.data.answers.filter((a) => a.answered).map((a) => a.run_date))].sort();
+  assert.equal(c.kind, "start");
+  assert.deepEqual(c.range, firstWeek(start));
+  assert.deepEqual(daysIn(c.range!), read.slice(0, FIRST_WEEK_DAYS), "the first 7 read days");
+  assert.equal(comparisonLabel(c.range!, c.kind), "vs your first week, 20 Sep - 26 Sep");
+  const o = fxOverview(y.data, start);
+  assert.equal(o.compareKind, "start");
+  assert.equal(o.compareHidden, null);
+  assert.ok(o.lfl && o.lfl.questions >= 40, "every prompt it began with is like-for-like");
+  assert.notEqual(o.change?.named, null, "a change to show in the trial, where before there was none until day 56");
+  // The previous period, where it exists, is untouched: an older client still compares with the 28 days before.
+  assert.deepEqual(resolveComparison(fxRange, "prev", fx.client.started_on), { range: { from: "2026-08-05", to: "2026-09-01" }, kind: "prev", hidden: null });
+  assert.deepEqual(resolveComparison(fxRange, "none", start), { range: null, kind: null, hidden: null });
+  // Before its first week is over there is nothing to compare yet, and it says when there will be.
+  const day3 = resolveComparison({ from: addDays(start, -25), to: addDays(start, 2) }, "prev", start);
+  assert.equal(day3.range, null);
+  assert.match(day3.hidden ?? "", /From 27 Sep the changes are against your first week\.$/);
 });

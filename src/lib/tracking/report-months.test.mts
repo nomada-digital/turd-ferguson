@@ -68,3 +68,13 @@ test("an ungrouped client's card reads flat, as its Overview does", () => {
   assert.deepEqual(card.prompts, o.questions);
   assert.equal(card.page1.num, o.keywords.num);
 });
+
+test("8 Oct 2026 (audit data-10): a young client's month compares with its first week, and says so; an older one's with the period before", () => {
+  const young = fixtureState(fx, { TRACKING_FIXTURE_STATE: "young" });
+  const sept = { from: "2026-09-01", to: young.today };
+  const card = monthFigures(young.data, sept, { startedOn: young.client.started_on, today: young.today, engines });
+  assert.ok(card.lfl, "its first month had no change: the period before it was before tracking began");
+  assert.equal(card.lfl!.firstWeek, true);
+  const older = monthFigures(fx.data, sept, { startedOn: fx.client.started_on, today: fx.today, engines });
+  assert.equal(older.lfl?.firstWeek, false);
+});

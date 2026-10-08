@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
-import { FIXTURE_STATES, expandFixture, fixtureLive, fixtureMode, fixtureState, fixtureUnreadable } from "./fixture-mode.ts";
+import { FIXTURE_STATES, PARTIAL_EARLIER_DAYS, YOUNG_DAYS, expandFixture, fixtureLive, fixtureMode, fixtureState, fixtureUnreadable } from "./fixture-mode.ts";
 import { addDays, overview } from "./figures.ts";
 import { ANGLES, PROMPTS_PER_CLUSTER, namesBrandIn } from "./limits.ts";
 
@@ -123,9 +123,25 @@ test("R151: TRACKING_FIXTURE_STATE=partial is today's run with every Google AI O
   const aio = today.filter((a) => a.engine === "google_aio");
   assert.ok(aio.length > 0 && aio.every((a) => !a.answered && !a.named && !a.brands.length && !a.citations.length));
   assert.ok(today.filter((a) => a.engine !== "google_aio").every((a) => a.answered), "the other engines landed");
-  assert.ok(p.data.answers.filter((a) => a.run_date < fx.today).every((a) => a.answered), "earlier days untouched");
+  // 8 Oct 2026 (audit data-3): one earlier day in the range lost its Google AI Overview reads too, so the range
+  // note's list is swept; every other earlier day is untouched.
+  const earlier = addDays(fx.today, -PARTIAL_EARLIER_DAYS);
+  assert.ok(p.data.answers.filter((a) => a.run_date === earlier && a.engine === "google_aio").every((a) => !a.answered));
+  assert.ok(p.data.answers.filter((a) => a.run_date < fx.today && a.run_date !== earlier).every((a) => a.answered), "other earlier days untouched");
   assert.ok(!Object.keys(p.texts).some((k) => k.endsWith(" google_aio")), "no answer text for a read that failed");
   assert.equal(p.data.answers.length, fx.data.answers.length);
+  // Its runs as the runner leaves them: partial with the error line naming the engine, every other day complete.
+  const lost = p.data.runs!.filter((r) => r.status !== "complete");
+  assert.deepEqual(lost.map((r) => [r.run_date, r.status]), [[fx.today, "partial"], [earlier, "partial"]]);
+  assert.ok(lost.every((r) => / of \d+ reads failed - google_aio: \d+ x /.test(r.error ?? "")));
+});
+
+test("8 Oct 2026 (audit data-3): the fixture has one complete run per day read, newest first, as tracking_runs holds them", () => {
+  const days = [...new Set(fx.data.answers.map((a) => a.run_date))];
+  assert.equal(fx.data.runs!.length, days.length);
+  assert.equal(fx.data.runs![0]!.run_date, fx.today);
+  assert.ok(fx.data.runs!.every((r) => r.status === "complete" && r.error === null));
+  assert.deepEqual(fixtureState(fx, { TRACKING_FIXTURE_STATE: "new" }).data.runs, [], "day zero has no run");
 });
 
 test("R151: TRACKING_FIXTURE_STATE=failed is a run where no read landed - nothing answered today, last check the day before", () => {
@@ -134,8 +150,16 @@ test("R151: TRACKING_FIXTURE_STATE=failed is a run where no read landed - nothin
   assert.equal(f.data.lastRun?.status, "complete");
   const today = f.data.answers.filter((a) => a.run_date === fx.today);
   assert.ok(today.length > 0 && today.every((a) => !a.answered && !a.named));
-  assert.deepEqual(f.texts, {});
   assert.ok(fx.data.answers.filter((a) => a.run_date === fx.today).every((a) => a.answered), "the default fixture is untouched");
+  // 8 Oct 2026 (audit data-3): today's run is a failed row, and Latest answers shows the last good day's words -
+  // the state's yesterday reads what the default's today reads, so its words (textsOn) match its verdicts.
+  // The words were dropped before, so the tab showed four blanks for the failed day instead.
+  assert.deepEqual(f.data.runs!.find((r) => r.run_date === fx.today)?.status, "failed");
+  assert.equal(f.textsOn, addDays(fx.today, -1));
+  assert.deepEqual(f.texts, fx.texts);
+  const was = new Map(fx.data.answers.filter((a) => a.run_date === fx.today).map((a) => [`${a.question_id} ${a.engine}`, a.named]));
+  const lastGood = f.data.answers.filter((a) => a.run_date === f.textsOn && was.has(`${a.question_id} ${a.engine}`));
+  assert.ok(lastGood.length > 0 && lastGood.every((a) => a.named === was.get(`${a.question_id} ${a.engine}`)), "the last good day's verdicts are the ones its words were written for");
 });
 
 test("R151: TRACKING_FIXTURE_STATE=stopped is one prompt in the first cluster stopped today, read today, gone tomorrow", () => {
@@ -228,4 +252,15 @@ test("8 Oct 2026: the trial states carry a trial end in real time, a cancel, or 
   const e = fixtureState(fx, { TRACKING_FIXTURE_STATE: "ended" });
   assert.equal(e.client.status, "ended");
   assert.equal(fx.client.status, undefined, "the default client carries no status, as before");
+});
+
+test("8 Oct 2026 (audit data-10): TRACKING_FIXTURE_STATE=young began tracking nine days ago, every day since read", () => {
+  assert.ok(FIXTURE_STATES.includes("young"));
+  const y = fixtureState(fx, { TRACKING_FIXTURE_STATE: "young" });
+  const start = addDays(fx.today, -YOUNG_DAYS);
+  assert.equal(y.client.started_on, start);
+  assert.ok(y.data.answers.length > 0 && y.data.answers.every((a) => a.run_date >= start));
+  assert.equal(new Set(y.data.answers.map((a) => a.run_date)).size, YOUNG_DAYS + 1, "every day from the start to today read");
+  assert.ok(y.data.clusters.every((c) => c.started_on >= start) && y.data.questions.every((q) => q.added_on >= start) && y.data.keywords.every((k) => k.added_on >= start));
+  assert.ok(y.data.serp.every((x) => x.run_date >= start) && y.data.runs!.every((r) => r.run_date >= start));
 });

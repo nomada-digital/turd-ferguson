@@ -71,6 +71,14 @@ export type OverviewData = {
   answers: (AnswerRow & CitationRow)[];
   serp: SerpRow[];
   lastRun: { run_date: Day; status: string; finished_at: string | null } | null;
+  /**
+   * Every run from the range's first day on, any status, newest first (8 Oct
+   * 2026, audit data-3 / reliability-3): today's even when it failed or has
+   * not finished, and the range's partial and failed days. lastRun reads only
+   * complete and partial runs, so a failed one looked like one still to come.
+   * Optional: the parity fixture predates it.
+   */
+  runs?: { run_date: Day; status: string; error: string | null }[];
   notes: { note_date: Day; text: string }[];
 };
 
@@ -78,7 +86,9 @@ export type OverviewData = {
  * "Latest answers" (T7 part 3b, 30 Sep 2026): one prompt's rows at its latest
  * check on or before `to` - at most one per engine, so two small reads and
  * no paging. The overview's read leaves `response_text` out; only this page
- * needs the words.
+ * needs the words. The day is the latest with an answer (8 Oct 2026, audit
+ * data-3): a failed run still stores its reads, unanswered, and picked by
+ * any row it replaced yesterday's real answers with four blank tabs.
  */
 export async function loadLatestAnswers(clientId: string, questionId: string, to: Day): Promise<LatestAnswers> {
   const db = supabaseAdmin();
@@ -87,6 +97,7 @@ export async function loadLatestAnswers(clientId: string, questionId: string, to
     .select("run_date")
     .eq("client_domain_id", clientId)
     .eq("question_id", questionId)
+    .eq("answered", true)
     .lte("run_date", to)
     .order("run_date", { ascending: false })
     .limit(1);
@@ -159,8 +170,12 @@ export async function loadOverview(clientId: string, range: Range, compare: Comp
       db.from("tracking_serp").select("run_date, keyword_id, position").eq("client_domain_id", clientId).gte("run_date", earliest).lte("run_date", range.to).order("id").range(lo, hi),
     "the keyword positions",
   );
+  const runsP = paged(
+    (lo, hi) => db.from("tracking_runs").select("run_date, status, error").eq("client_domain_id", clientId).gte("run_date", range.from).order("run_date", { ascending: false }).range(lo, hi),
+    "the runs",
+  );
   // A throw below must not leave these rejecting unobserved; each await still throws.
-  for (const p of [clustersP, questionsP, keywordsP, answersP, serpP]) p.catch(() => {});
+  for (const p of [clustersP, questionsP, keywordsP, answersP, serpP, runsP]) p.catch(() => {});
   const [{ data: runRows, error: runErr }, { data: noteRows, error: noteErr }] = await Promise.all([
     db.from("tracking_runs").select("run_date, status, finished_at").eq("client_domain_id", clientId).in("status", ["complete", "partial"]).order("run_date", { ascending: false }).limit(1),
     db.from("tracking_notes").select("note_date, text").eq("client_domain_id", clientId).gte("note_date", range.from).lte("note_date", range.to).order("note_date"),
@@ -172,6 +187,7 @@ export async function loadOverview(clientId: string, range: Range, compare: Comp
   const keywords = await keywordsP;
   const answers = await answersP;
   const serp = await serpP;
+  const runs = await runsP;
 
   return {
     clusters: clusters as OverviewData["clusters"],
@@ -188,6 +204,7 @@ export async function loadOverview(clientId: string, range: Range, compare: Comp
     })),
     serp: serp as SerpRow[],
     lastRun: (runRows?.[0] as OverviewData["lastRun"]) ?? null,
+    runs: runs as NonNullable<OverviewData["runs"]>,
     notes: (noteRows ?? []) as OverviewData["notes"],
   };
 }
