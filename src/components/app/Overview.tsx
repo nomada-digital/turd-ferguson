@@ -6,6 +6,7 @@ import { CLOSE_WASH, D } from "@/components/home/dark";
 import { T } from "@/config/tokens";
 import { ENGINE_SPECS, type Engine } from "@/lib/scan/engines";
 import {
+  keywordsIn,
   type Day,
   type Range,
   type Rate,
@@ -159,7 +160,7 @@ export default function Overview({
   clusterLimit?: number;
 }) {
   const where = market === "UK" ? "the United Kingdom" : "the United States";
-  const o = overview({ range, compare: compareMode, startedOn, engines, questions: data.questions, answers: data.answers, serp: data.serp, keywordCount: data.keywords.filter((k) => k.stopped_on === null).length });
+  const o = overview({ range, compare: compareMode, startedOn, engines, questions: data.questions, answers: data.answers, serp: data.serp, keywordCount: keywordsIn(data.keywords, range) });
   // BRIEF-3 T4b part 3 (30 Sep 2026): the headline, heat map and four figures
   // read by cluster (boards-3/Main.dc.html). A client with no cluster rows yet
   // keeps the flat T4 reading rather than print 0 of 0. `?.` because

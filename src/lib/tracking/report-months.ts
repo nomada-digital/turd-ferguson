@@ -1,5 +1,5 @@
 import { clusterCards, clusterSummary } from "./cluster-figures.ts";
-import { type Day, type Rate, type Range, overview, pointsDelta, ungroupedRead } from "./figures.ts";
+import { type Day, type Rate, type Range, keywordsIn, overview, pointsDelta, ungroupedRead } from "./figures.ts";
 import type { OverviewData } from "./overview-data.ts";
 
 /**
@@ -48,7 +48,7 @@ export type MonthFigures = {
 
 /** One month's figures, read exactly as the Overview reads `range` on its default comparison. */
 export function monthFigures(data: OverviewData, range: Range, opts: { startedOn: Day | null; today: Day; engines: readonly string[] }): MonthFigures {
-  const o = overview({ range, compare: "prev", startedOn: opts.startedOn, engines: opts.engines, questions: data.questions, answers: data.answers, serp: data.serp, keywordCount: data.keywords.filter((k) => k.stopped_on === null).length });
+  const o = overview({ range, compare: "prev", startedOn: opts.startedOn, engines: opts.engines, questions: data.questions, answers: data.answers, serp: data.serp, keywordCount: keywordsIn(data.keywords, range) });
   // The Overview's own test for reading by cluster (Overview.tsx clusterInput).
   if (data.clusters?.length && data.questions.some((q) => q.cluster_id)) {
     const cs = clusterSummary(clusterCards({ clusters: data.clusters, questions: data.questions, keywords: data.keywords, answers: data.answers, serp: data.serp, range, before: o.compare, today: opts.today, engines: opts.engines }));

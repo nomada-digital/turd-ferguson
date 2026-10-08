@@ -422,3 +422,13 @@ export function formatDay(d: Day, year = false): string {
 export function pointsDelta(now: Rate, before: Rate | null): number | null {
   return before && now.pct !== null && before.pct !== null ? now.pct - before.pct : null;
 }
+
+/**
+ * Keywords tracked at some point in the range (8 Oct 2026, audit data-1): added
+ * by its end and not stopped before its start. The flat "Google keywords on
+ * page 1, n of m" counted tomorrow's keyword in m, and a keyword stopped in
+ * June in every later month.
+ */
+export function keywordsIn(keywords: readonly { added_on: Day; stopped_on: Day | null }[], range: Range): number {
+  return keywords.filter((k) => k.added_on <= range.to && (k.stopped_on === null || k.stopped_on > range.from)).length;
+}

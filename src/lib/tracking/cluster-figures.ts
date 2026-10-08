@@ -49,6 +49,8 @@ export type ClusterPrompt = {
   stoppedOn: Day | null;
   /** Has any reading at all, so its text is fixed (limits.ts `refuseEdit`) - in a pending cluster, a prompt moved in from ungrouped (DS3, 2 Oct 2026). */
   fixed: boolean;
+  /** Added after the range ends - tomorrow's prompt on a range ending today. Listed, never counted (8 Oct 2026, audit data-1). */
+  pending: boolean;
 };
 
 export type ClusterCard = {
@@ -141,8 +143,9 @@ export function clusterSummary(cards: ClusterCard[]): ClusterSummary {
   };
   const lflNow = sum(lfl, (c) => c.now) ?? rate(0, 0);
   const lflBefore = lfl.length && lfl.every((c) => c.before) ? sum(lfl, (c) => c.before) : null;
-  const prompts = read.flatMap((c) => c.prompts);
-  const promptsLfl = lfl.flatMap((c) => c.prompts);
+  // A prompt not yet asked counts in no denominator (audit data-1).
+  const prompts = read.flatMap((c) => c.prompts.filter((p) => !p.pending));
+  const promptsLfl = lfl.flatMap((c) => c.prompts.filter((p) => !p.pending));
   const ranked = read.map((c) => c.position).filter((p): p is number => p !== null);
   const hasBefore = lfl.length > 0 && lfl.some((c) => c.positionBefore !== null);
   return {
@@ -156,7 +159,7 @@ export function clusterSummary(cards: ClusterCard[]): ClusterSummary {
     promptsLfl: promptsLfl.length,
     promptsNamed: rate(prompts.filter((p) => p.now.num > 0).length, prompts.length),
     promptsNamedBefore: promptsLfl.every((p) => p.before) && promptsLfl.length ? rate(promptsLfl.filter((p) => p.before!.num > 0).length, promptsLfl.length) : null,
-    never: read.flatMap((c) => c.prompts.filter((p) => p.now.den > 0 && p.now.num === 0).map((p) => ({ cluster: c.keyword ?? c.name, text: p.text }))),
+    never: read.flatMap((c) => c.prompts.filter((p) => !p.pending && p.now.den > 0 && p.now.num === 0).map((p) => ({ cluster: c.keyword ?? c.name, text: p.text }))),
     page1: { ...rate(ranked.filter((p) => p <= 10).length, read.length), avg: ranked.length ? Math.round((ranked.reduce((s, p) => s + p, 0) / ranked.length) * 10) / 10 : null },
     page1Before: hasBefore ? lfl.filter((c) => c.positionBefore !== null && c.positionBefore <= 10).length : null,
     offPage1: read.filter((c) => c.position !== null && c.position >= 11 && c.position <= 20).map((c) => c.keyword ?? c.name),
@@ -221,11 +224,15 @@ export function clusterCards(input: ClusterInput): ClusterCard[] {
   const days = daysIn(range);
   const earliest = before && before.from < range.from ? before.from : range.from;
 
+  // 8 Oct 2026 (audit data-1): a past range counted clusters and prompts that
+  // started after it ended - August read "37 of 45" when there were 40. Only a
+  // range that ends today shows what starts tomorrow, as pending, uncounted.
+  const current = range.to >= today;
   return input.clusters
-    .filter((c) => c.stopped_on === null || c.stopped_on > range.from)
+    .filter((c) => (c.stopped_on === null || c.stopped_on > range.from) && (current || c.started_on <= range.to))
     .map((c) => {
       const kw = input.keywords.find((k) => k.id === c.keyword_id) ?? null;
-      const prompts = input.questions.filter((q) => q.cluster_id === c.id && (q.stopped_on === null || q.stopped_on > range.from));
+      const prompts = input.questions.filter((q) => q.cluster_id === c.id && (q.stopped_on === null || q.stopped_on > range.from) && (current || q.added_on <= range.to));
       const ids = new Set(prompts.map((q) => q.id));
       const status: ClusterStatus = c.started_on > today ? "pending" : c.started_on > earliest ? "added" : "live";
 
@@ -278,7 +285,7 @@ export function clusterCards(input: ClusterInput): ClusterCard[] {
         now,
         before: wasRate,
         delta: pointsDelta(now, wasRate),
-        promptsNamed: rate(byPrompt.size, prompts.length),
+        promptsNamed: rate(byPrompt.size, prompts.filter((q) => q.added_on <= range.to).length),
         position,
         positionBefore,
         positionChange: position !== null && positionBefore !== null ? positionBefore - position : null,
@@ -297,6 +304,7 @@ export function clusterCards(input: ClusterInput): ClusterCard[] {
             daysNamed: engines.map((e) => ({ engine: e, days: namedDays.get(`${q.id} ${e}`)?.size ?? 0, of: engineDays.get(`${q.id} ${e}`)?.size ?? 0 })),
             stoppedOn: q.stopped_on,
             fixed: input.answers.some((a) => a.question_id === q.id),
+            pending: q.added_on > range.to,
           };
         }),
         heat: days.map((d) => {

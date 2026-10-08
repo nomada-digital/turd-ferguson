@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import { clusterCards, clusterChart, clusterDetail, daysOfLine, clusterSearch, clusterSummary, filterClusters, pendingBasis, promptBrands, promptIndex, promptStrip, searchPrompts } from "./cluster-figures.ts";
-import { comparisonRange } from "./figures.ts";
+import { addDays, comparisonRange, keywordsIn } from "./figures.ts";
 import { expandFixture, fixtureState } from "./fixture-mode.ts";
 
 /**
@@ -262,4 +262,34 @@ test("T7 brands: answers naming each brand for one prompt, the client always lis
   const row = (q: string, answered: boolean, named: boolean, brands: string[]) => ({ run_date: "2026-09-01", question_id: q, engine: "chatgpt", answered, named, brands });
   const s = promptBrands({ answers: [row("p", true, false, ["Acme", "acme", "Zed"]), row("p", true, true, ["Zed"]), row("p", false, false, ["Acme"]), row("x", true, false, ["Acme"])], range: r }, "p", "Me");
   assert.deepEqual(s, { answers: 2, rows: [{ name: "Zed", you: false, n: 2 }, { name: "Me", you: true, n: 1 }, { name: "Acme", you: false, n: 1 }] });
+});
+
+test("8 Oct 2026 (audit data-1): a past range counts only the clusters, prompts and keywords that existed in it", () => {
+  // c9 (5 prompts, k9) started 16 Sep and c10 starts tomorrow; August knew neither.
+  const aug = { from: "2026-08-05", to: "2026-09-01" };
+  const august = clusterCards({ ...fx.data, range: aug, before: null, today: fx.today, engines: [] });
+  assert.ok(!august.some((c) => c.id === "c9" || c.id === "c10"), "no card for a cluster that started after the range");
+  const s = clusterSummary(august);
+  assert.equal(s.clusters, 8);
+  assert.equal(s.prompts, 40);
+  assert.equal(`${s.promptsNamed.num} of ${s.promptsNamed.den}`, "37 of 40");
+  assert.equal(s.page1.den, 8);
+  // The flat path's keyword count, for an ungrouped client.
+  assert.equal(keywordsIn(fx.data.keywords, aug), 8);
+  assert.equal(keywordsIn(fx.data.keywords, { from: addDays(fx.today, -27), to: fx.today }), 9, "tomorrow's k10 is not counted today");
+});
+
+test("8 Oct 2026 (audit data-1): a prompt added for tomorrow is listed but counts in no denominator", () => {
+  const range = { from: addDays(fx.today, -27), to: fx.today };
+  const before = { from: addDays(fx.today, -55), to: addDays(fx.today, -28) };
+  const base = clusterSummary(clusterCards({ ...fx.data, range, before, today: fx.today, engines: [] }));
+  const tomorrow = addDays(fx.today, 1);
+  const added = { ...fx.data.questions.find((q) => q.cluster_id === "c1")!, id: "q1-new", text: "A prompt asked from tomorrow", added_on: tomorrow, stopped_on: null };
+  const cards = clusterCards({ ...fx.data, questions: [...fx.data.questions, added], range, before, today: fx.today, engines: [] });
+  const c1 = cards.find((c) => c.id === "c1")!;
+  assert.ok(c1.prompts.some((p) => p.id === "q1-new" && p.pending), "listed as pending");
+  assert.equal(c1.promptsNamed.den, cards.find((c) => c.id === "c1")!.prompts.filter((p) => !p.pending).length);
+  const s = clusterSummary(cards);
+  assert.equal(s.promptsNamed.den, base.promptsNamed.den, "the headline denominator does not move for tomorrow's prompt");
+  assert.deepEqual(s.promptsNamedBefore, base.promptsNamedBefore, "the 'was' line is kept");
 });

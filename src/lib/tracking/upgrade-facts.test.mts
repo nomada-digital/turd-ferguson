@@ -6,7 +6,7 @@ import { neverNamedFacts, offPageOneFacts } from "./upgrade-facts.ts";
 import { pickPrompt, promptCopy } from "./upgrade-prompts.ts";
 
 const r = (num: number, den: number) => ({ num, den, pct: den ? Math.round((100 * num) / den) : null });
-const prompt = (id: string, num: number, den: number, stoppedOn: string | null = null): ClusterPrompt => ({ id, text: id, angle: null, now: r(num, den), before: null, namedBy: [], daysChecked: 0, daysNamed: [], stoppedOn, fixed: den > 0 });
+const prompt = (id: string, num: number, den: number, stoppedOn: string | null = null): ClusterPrompt => ({ id, text: id, angle: null, now: r(num, den), before: null, namedBy: [], daysChecked: 0, daysNamed: [], stoppedOn, fixed: den > 0 , pending: false});
 const card = (id: string, over: Partial<ClusterCard>): ClusterCard => ({
   id,
   name: id,
