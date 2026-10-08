@@ -9,7 +9,7 @@ import { fixtureMode } from "@/lib/tracking/fixture-mode";
 import { clientsFor, sessionEmail } from "@/lib/tracking/member";
 import { readKept } from "@/lib/tracking/stop";
 import { recordUsage } from "@/lib/tracking/usage-record";
-import { dashPath } from "@/lib/tracking/app-redirect";
+import { dashPath, dashUrl } from "@/lib/tracking/app-redirect";
 import { appPath } from "@/lib/app-host";
 
 export const runtime = "nodejs";
@@ -40,16 +40,16 @@ export async function POST(req: Request, ctx: { params: Promise<{ client: string
   const view = about ? Object.fromEntries(Object.entries(kept).filter(([k]) => k === "from" || k === "to" || k === "compare")) : kept;
   const done = (r: "sent" | "refused" | "capped", extra: Record<string, string> = {}) =>
     NextResponse.redirect(
-      new URL(
+      dashUrl(
+        req,
         about ? appPath(`/${slug}/settings?${new URLSearchParams({ ...view, ask: r, ...extra })}`) : appPath(`/${slug}/clusters?${new URLSearchParams({ ...view, ...(cta === "mentioned" ? { filter: "never" } : {}), ask: r, ...extra })}`),
-        req.url,
       ),
       303,
     );
   if (fixtureMode()) return done("refused");
 
   const email = await sessionEmail();
-  if (!email) return NextResponse.redirect(new URL(dashPath(req, "/login"), req.url), 303);
+  if (!email) return NextResponse.redirect(dashUrl(req, dashPath(req, "/login")), 303);
   const client = (await clientsFor(email)).find((c) => c.slug === slug);
   if (!client) return NextResponse.json({ error: "Not found." }, { status: 404 });
 

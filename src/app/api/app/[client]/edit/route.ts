@@ -9,7 +9,7 @@ import { clientsFor, sessionEmail } from "@/lib/tracking/member";
 import { writeFixture } from "@/lib/tracking/repo";
 import { slotWhyOf } from "@/lib/tracking/slot";
 import { readStopForm, stopReturn } from "@/lib/tracking/stop";
-import { dashPath } from "@/lib/tracking/app-redirect";
+import { dashPath, dashUrl } from "@/lib/tracking/app-redirect";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,7 +29,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ client: string
   if (!f || f.kind !== "cluster") return NextResponse.json({ error: "Not a cluster this page can edit." }, { status: 400 });
   // R151 (3 Oct 2026): a rule's refusal carries its code (slot.ts SLOT_WHY), so the toast says why.
   const back = (done: "saved" | "refused", message = "") =>
-    NextResponse.redirect(new URL(stopReturn(slug, { ...f, back: { ...f.back, open: f.id } }, done, undefined, slotWhyOf(message)), req.url), 303);
+    NextResponse.redirect(dashUrl(req, stopReturn(slug, { ...f, back: { ...f.back, open: f.id } }, done, undefined, slotWhyOf(message))), 303);
   const form = await req.formData().catch(() => null);
   const edits = form ? readEdits(form.entries()) : [];
   if (fixtureMode()) {
@@ -40,7 +40,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ client: string
   }
 
   const email = await sessionEmail();
-  if (!email) return NextResponse.redirect(new URL(dashPath(req, "/login"), req.url), 303);
+  if (!email) return NextResponse.redirect(dashUrl(req, dashPath(req, "/login")), 303);
   const client = (await clientsFor(email)).find((c) => c.slug === slug);
   if (!client) return NextResponse.json({ error: "Not found." }, { status: 404 });
 

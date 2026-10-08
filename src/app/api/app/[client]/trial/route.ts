@@ -5,7 +5,7 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import { fixtureMode } from "@/lib/tracking/fixture-mode";
 import { cancelTrial } from "@/lib/tracking/limits";
 import { clientsFor, sessionEmail } from "@/lib/tracking/member";
-import { dashPath } from "@/lib/tracking/app-redirect";
+import { dashPath, dashUrl } from "@/lib/tracking/app-redirect";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,13 +20,13 @@ export const dynamic = "force-dynamic";
 export async function POST(req: Request, ctx: { params: Promise<{ client: string }> }) {
   const { client: slug } = await ctx.params;
   if (!/^[A-Za-z0-9-]{1,64}$/.test(slug)) return NextResponse.json({ error: "Not found." }, { status: 404 });
-  const back = (done: "cancelled" | "refused") => NextResponse.redirect(new URL(dashPath(req, `/${slug}/settings?trial=${done}`), req.url), 303);
+  const back = (done: "cancelled" | "refused") => NextResponse.redirect(dashUrl(req, dashPath(req, `/${slug}/settings?trial=${done}`)), 303);
   const form = await req.formData().catch(() => null);
   if (form?.get("confirm") !== "1") return back("refused");
   if (fixtureMode()) return back("refused");
 
   const email = await sessionEmail();
-  if (!email) return NextResponse.redirect(new URL(dashPath(req, "/login"), req.url), 303);
+  if (!email) return NextResponse.redirect(dashUrl(req, dashPath(req, "/login")), 303);
   const client = (await clientsFor(email)).find((c) => c.slug === slug);
   if (!client) return NextResponse.json({ error: "Not found." }, { status: 404 });
 

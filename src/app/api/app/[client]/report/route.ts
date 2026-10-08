@@ -8,7 +8,7 @@ import { placementsScreen } from "@/lib/tracking/placements-screen";
 import { answersCsv, isReportKind, keywordsCsv, placementsCsv, reportFilename } from "@/lib/tracking/report-csv";
 import { trackingRepo } from "@/lib/tracking/repo";
 import { recordUsage } from "@/lib/tracking/usage-record";
-import { dashPath } from "@/lib/tracking/app-redirect";
+import { dashPath, dashUrl } from "@/lib/tracking/app-redirect";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,7 +29,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ client: string 
 
   const repo = trackingRepo();
   const email = await repo.sessionEmail();
-  if (!email) return NextResponse.redirect(new URL(dashPath(req, "/login"), req.url), 303);
+  if (!email) return NextResponse.redirect(dashUrl(req, dashPath(req, "/login")), 303);
   const client = (await repo.clientsFor(email)).find((c) => c.slug === slug);
   if (!client) return NextResponse.json({ error: "Not found." }, { status: 404 });
 

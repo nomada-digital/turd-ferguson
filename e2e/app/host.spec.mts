@@ -40,6 +40,8 @@ let browser: Browser;
 before(async () => {
   process.env.TRACKING_FIXTURE = "1";
   process.env.TRACKING_FIXTURE_STATE = "long";
+  // Writable in memory, so Stop and Undo answer as they would live.
+  process.env.TRACKING_FIXTURE_WRITE = "1";
   process.env.VERCEL_ENV = "development";
   process.env.APP_HOST = `app.localhost:${PORT}`;
   const { default: next } = await import("next");
@@ -147,4 +149,46 @@ test("the app host is closed to crawlers and has no /admin", async () => {
     }).on("error", reject).end();
   });
   assert.ok(status === 401 || status === 503, `main host /admin answered ${status}, not Basic auth (401, or 503 with no credentials)`);
+});
+
+/** A form post as a browser without script makes it: the dashboard's Host, no fetch headers. */
+function post(path: string, body = ""): Promise<{ status: number; location: string }> {
+  return new Promise((resolve, reject) => {
+    const r = request(`${MAIN}${path}`, { method: "POST", headers: { host: `app.localhost:${PORT}`, "content-type": "application/x-www-form-urlencoded" } }, (res) => {
+      res.resume();
+      resolve({ status: res.statusCode ?? 0, location: String(res.headers.location ?? "") });
+    });
+    r.on("error", reject);
+    r.end(body);
+  });
+}
+
+// Audit interactions-1 (8 Oct 2026): every 303 went to the host the server listened on, which the CSP refused.
+test("form posts on the app host answer on the app host: stop, undo, login, logout", async () => {
+  for (const [path, body, want] of [
+    ["/api/app/tallyroo/stop?kind=prompt&id=q2-1", "", /^\/tallyroo\/clusters\?/],
+    ["/api/app/tallyroo/stop?kind=prompt&id=q2-1&undo=1", "", /^\/tallyroo\/clusters\?/],
+    ["/api/app/login", new URLSearchParams({ email: "owner@example.com" }).toString(), /^\/login\?/],
+    ["/api/app/logout", "", /^\/login\?out=/],
+  ] as const) {
+    const r = await post(path, body);
+    assert.equal(r.status, 303, path);
+    const to = new URL(r.location, APP);
+    assert.equal(to.host, `app.localhost:${PORT}`, `${path} redirected to ${r.location}`);
+    assert.match(to.pathname + to.search, want, path);
+  }
+});
+
+test("Stop on the app host, clicked in Chromium, lands back with its toast and no CSP refusal", async () => {
+  const { ctx, page } = await open();
+  const refused: string[] = [];
+  (page as unknown as { on(e: "console", f: (m: { text(): string }) => void): void }).on("console", (m) => { if (/Content Security Policy/.test(m.text())) refused.push(m.text()); });
+  await page.goto(`${APP}/tallyroo/clusters?open=c2`, { waitUntil: "networkidle" });
+  await page.click("form[action*='/stop'] button[type=submit]");
+  await page.waitForURL((u) => u.searchParams.has("done"));
+  const u = new URL(page.url());
+  assert.equal(u.host, `app.localhost:${PORT}`);
+  assert.equal(u.pathname, "/tallyroo/clusters");
+  assert.deepEqual(refused, []);
+  await ctx.close();
 });

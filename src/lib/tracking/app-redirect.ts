@@ -1,4 +1,4 @@
-import { appPath } from "../app-host.ts";
+import { appHost, appOrigin, appPath } from "../app-host.ts";
 
 /**
  * Where a dashboard route handler sends somebody (M1, 5 Oct 2026).
@@ -13,4 +13,18 @@ import { appPath } from "../app-host.ts";
  */
 export function dashPath(_req: Request, rest: string): string {
   return appPath(rest);
+}
+
+/**
+ * The absolute URL a dashboard route redirects to (8 Oct 2026, audit
+ * interactions-1). Built on the dashboard's own origin once it has one, never
+ * on req.url alone: a server's req.url can carry the host it listens on rather
+ * than the one the browser asked, and a 303 to the marketing host after a form
+ * post on the dashboard's host is refused by the CSP's form-action 'self'
+ * there - Stop, Undo, Invite, login and logout all failed silently on
+ * app.localhost. With APP_HOST unset this is `new URL(path, req.url)`, as
+ * every call site wrote before.
+ */
+export function dashUrl(req: Request, path: string, env?: { APP_HOST?: string }): URL {
+  return new URL(path, appHost(env) ? appOrigin(new URL(req.url).origin, env) : req.url);
 }

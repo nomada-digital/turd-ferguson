@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 
+import { dashUrl } from "@/lib/tracking/app-redirect";
+
 import { SCAN_LIMITS } from "@/config/contact";
 import { isPlausibleEmail, normalizeEmail } from "@/lib/email-address";
 import { clientIp, hashIp } from "@/lib/scan/ip";
@@ -45,7 +47,7 @@ export async function POST(req: Request) {
     const q = new URLSearchParams(json.ok ? { sent: "1" } : json.error === "bad_email" ? { email: "bad" } : { failed: "1" });
     const back = safeNext(body.next);
     if (back) q.set("next", back);
-    return NextResponse.redirect(new URL(`${appPath("/login")}?${q}`, req.url), 303);
+    return NextResponse.redirect(dashUrl(req, `${appPath("/login")}?${q}`), 303);
   };
   const email = normalizeEmail(body.email ?? "");
   if (email.length > SCAN_LIMITS.email || !isPlausibleEmail(email)) {

@@ -10,7 +10,7 @@ import { writeFixture } from "@/lib/tracking/repo";
 import { slotWhyOf } from "@/lib/tracking/slot";
 import { BULK_ID, type BulkCount, type StopDone, readBulkIds, readStopForm, stop, stopReturn, undoStop } from "@/lib/tracking/stop";
 import { recordUsage } from "@/lib/tracking/usage-record";
-import { dashPath } from "@/lib/tracking/app-redirect";
+import { dashPath, dashUrl } from "@/lib/tracking/app-redirect";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -33,7 +33,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ client: string
   const f = readStopForm((k) => sp.get(k), APP_LIMITS.search);
   if (!f) return NextResponse.json({ error: "Not a stop this page can make." }, { status: 400 });
   // R151 (3 Oct 2026): a one-row refusal carries its code (slot.ts SLOT_WHY), so the toast says why; a batch keeps its counts.
-  const back = (done: StopDone, count?: BulkCount, message = "") => NextResponse.redirect(new URL(stopReturn(slug, f, done, count, slotWhyOf(message)), req.url), 303);
+  const back = (done: StopDone, count?: BulkCount, message = "") => NextResponse.redirect(dashUrl(req, stopReturn(slug, f, done, count, slotWhyOf(message))), 303);
   if (f.id === BULK_ID) {
     // DS13: the Ungrouped bulk form. Each ticked prompt goes through the one-row stop, so each is judged on its own.
     if (f.kind !== "prompt" || f.undo) return NextResponse.json({ error: "Not a stop this page can make." }, { status: 400 });
@@ -49,7 +49,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ client: string
       return back(n ? "stopped" : "refused", { n, of: ids.length });
     }
     const email = await sessionEmail();
-    if (!email) return NextResponse.redirect(new URL(dashPath(req, "/login"), req.url), 303);
+    if (!email) return NextResponse.redirect(dashUrl(req, dashPath(req, "/login")), 303);
     const client = (await clientsFor(email)).find((c) => c.slug === slug);
     if (!client) return NextResponse.json({ error: "Not found." }, { status: 404 });
     const today = trackingDay();
@@ -69,7 +69,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ client: string
   }
 
   const email = await sessionEmail();
-  if (!email) return NextResponse.redirect(new URL(dashPath(req, "/login"), req.url), 303);
+  if (!email) return NextResponse.redirect(dashUrl(req, dashPath(req, "/login")), 303);
   const client = (await clientsFor(email)).find((c) => c.slug === slug);
   if (!client) return NextResponse.json({ error: "Not found." }, { status: 404 });
 

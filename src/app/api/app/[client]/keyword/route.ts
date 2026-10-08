@@ -10,7 +10,7 @@ import { clientsFor, sessionEmail } from "@/lib/tracking/member";
 import { changeKeyword } from "@/lib/tracking/rekey";
 import { writeFixture } from "@/lib/tracking/repo";
 import { type StopDone, readStopForm, stopReturn } from "@/lib/tracking/stop";
-import { dashPath } from "@/lib/tracking/app-redirect";
+import { dashPath, dashUrl } from "@/lib/tracking/app-redirect";
 import { appPath } from "@/lib/app-host";
 
 export const runtime = "nodejs";
@@ -43,7 +43,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ client: string
       ? // R151 (3 Oct 2026): a refusal drops the fragment so the card's field can take focus (a fragment target stops autofocus).
         appPath(`/${encodeURIComponent(slug)}/setup?${new URLSearchParams({ card: f.id, rekey: done })}${done === "refused" ? "" : `#card-${encodeURIComponent(f.id)}`}`)
       : stopReturn(slug, { ...f, back: { ...f.back, open: f.id } }, done);
-    return NextResponse.redirect(new URL(to, req.url), 303);
+    return NextResponse.redirect(dashUrl(req, to), 303);
   };
   if (fixtureMode()) {
     // R168: on the writable fixture the change is held in memory, verified against the fixture's own check signature.
@@ -53,7 +53,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ client: string
   }
 
   const email = await sessionEmail();
-  if (!email) return NextResponse.redirect(new URL(dashPath(req, "/login"), req.url), 303);
+  if (!email) return NextResponse.redirect(dashUrl(req, dashPath(req, "/login")), 303);
   const client = (await clientsFor(email)).find((c) => c.slug === slug);
   if (!client) return NextResponse.json({ error: "Not found." }, { status: 404 });
 

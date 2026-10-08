@@ -15,7 +15,7 @@ import { clientsFor, sessionEmail } from "@/lib/tracking/member";
 import { writeFixture } from "@/lib/tracking/repo";
 import { readKept } from "@/lib/tracking/stop";
 import { type TeamDone, type TeamWhy, changeRole, invite, inviteMail, invitesToday, readTeam, readTeamForm, refuseActor, refuseChange, refuseInvite, removeMember, teamReturn, teamWhy } from "@/lib/tracking/team";
-import { dashPath } from "@/lib/tracking/app-redirect";
+import { dashPath, dashUrl } from "@/lib/tracking/app-redirect";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -36,7 +36,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ client: string
   // DS40: the form's action carries the page's stated range; only from, to and compare come back.
   const sp = new URL(req.url).searchParams;
   const kept = readKept((k) => sp.get(k), 0);
-  const back = (done: TeamDone, why: TeamWhy | null = null) => NextResponse.redirect(new URL(teamReturn(slug, done, f?.email ?? null, kept, why), req.url), 303);
+  const back = (done: TeamDone, why: TeamWhy | null = null) => NextResponse.redirect(dashUrl(req, teamReturn(slug, done, f?.email ?? null, kept, why)), 303);
   // R151 (3 Oct 2026): an invite whose address fails the shape check says so on its field.
   if (!f) return back("refused", form?.get("op") === "invite" ? "email" : null);
   if (fixtureMode()) {
@@ -47,7 +47,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ client: string
   }
 
   const email = await sessionEmail();
-  if (!email) return NextResponse.redirect(new URL(dashPath(req, "/login"), req.url), 303);
+  if (!email) return NextResponse.redirect(dashUrl(req, dashPath(req, "/login")), 303);
   const client = (await clientsFor(email)).find((c) => c.slug === slug);
   if (!client) return NextResponse.json({ error: "Not found." }, { status: 404 });
   const refused = (why: string) => {

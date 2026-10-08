@@ -5,7 +5,7 @@ import { trackingDay } from "@/lib/tracking/decide";
 import { fixtureMode } from "@/lib/tracking/fixture-mode";
 import { clientsFor, sessionEmail } from "@/lib/tracking/member";
 import { type NoteState, addNote, noteCodeOf, noteReturn, readNote } from "@/lib/tracking/note";
-import { dashPath } from "@/lib/tracking/app-redirect";
+import { dashPath, dashUrl } from "@/lib/tracking/app-redirect";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,13 +22,13 @@ export async function POST(req: Request, ctx: { params: Promise<{ client: string
   const sp = new URL(req.url).searchParams;
   const back = noteReturn(slug, sp);
   if (!back) return NextResponse.json({ error: "Not a cluster this page can note." }, { status: 400 });
-  const done = (r: NoteState) => NextResponse.redirect(new URL(`${back}&note=${r}`, req.url), 303);
+  const done = (r: NoteState) => NextResponse.redirect(dashUrl(req, `${back}&note=${r}`), 303);
   const form = await req.formData().catch(() => null);
   const note = readNote(form?.get("text"));
   if (fixtureMode()) return done(typeof note === "string" ? noteCodeOf(note) : "refused");
 
   const email = await sessionEmail();
-  if (!email) return NextResponse.redirect(new URL(dashPath(req, "/login"), req.url), 303);
+  if (!email) return NextResponse.redirect(dashUrl(req, dashPath(req, "/login")), 303);
   const client = (await clientsFor(email)).find((c) => c.slug === slug);
   if (!client) return NextResponse.json({ error: "Not found." }, { status: 404 });
 

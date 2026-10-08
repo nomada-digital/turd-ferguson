@@ -6,7 +6,7 @@ import { safeNext } from "@/lib/tracking/next-path";
 import { loadSetupConfirmed } from "@/lib/tracking/setup-data";
 import { landingAfterAuth, needsSetup } from "@/lib/tracking/setup-landing";
 import { SESSION_TTL_MS, hashToken, isTokenShape, newToken, sessionCookie } from "@/lib/tracking/session";
-import { dashPath } from "@/lib/tracking/app-redirect";
+import { dashPath, dashUrl } from "@/lib/tracking/app-redirect";
 import { appPath } from "@/lib/app-host";
 
 export const runtime = "nodejs";
@@ -26,13 +26,13 @@ export const dynamic = "force-dynamic";
 export async function POST(req: Request) {
   const form = await req.formData().catch(() => null);
   const token = form?.get("token");
-  if (!isTokenShape(token)) return NextResponse.redirect(new URL(dashPath(req, "/login?link=expired"), req.url), 303);
+  if (!isTokenShape(token)) return NextResponse.redirect(dashUrl(req, dashPath(req, "/login?link=expired")), 303);
   // R163: back to the link's own page, which reads the token and says spent
   // (with a one-click new link) or, with failed=1, shows the button rather
   // than submitting itself again.
   const next = safeNext(form?.get("next"));
   const back = next ? `&next=${encodeURIComponent(next)}` : "";
-  const failed = NextResponse.redirect(new URL(appPath(`/auth?token=${token}&failed=1${back}`), req.url), 303);
+  const failed = NextResponse.redirect(dashUrl(req, appPath(`/auth?token=${token}&failed=1${back}`)), 303);
 
   const db = supabaseAdmin();
   const { data: claimed, error } = await db
@@ -79,7 +79,7 @@ export async function POST(req: Request) {
   const unconfirmed = first && needsSetup(first) ? (await loadSetupConfirmed(first.id)) === false : false;
   const clients = listed ? listed.map((c, i) => ({ slug: c.slug, confirmed: !(i === 0 && unconfirmed) })) : null;
   const to = landingAfterAuth({ next, clients });
-  const res = NextResponse.redirect(new URL(to, req.url), 303);
+  const res = NextResponse.redirect(dashUrl(req, to), 303);
   res.cookies.set(sessionCookie(session));
   return res;
 }

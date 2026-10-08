@@ -9,7 +9,7 @@ import { clientsFor, sessionEmail } from "@/lib/tracking/member";
 import { writeFixture } from "@/lib/tracking/repo";
 import { slotWhyOf } from "@/lib/tracking/slot";
 import { BULK_ID, type StopDone, readBulkIds, readStopForm, stopReturn } from "@/lib/tracking/stop";
-import { dashPath } from "@/lib/tracking/app-redirect";
+import { dashPath, dashUrl } from "@/lib/tracking/app-redirect";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -38,7 +38,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ client: string
   // R151 (3 Oct 2026): a refusal carries its code (slot.ts SLOT_WHY), so the toast says why - for a batch only when none
   // moved, from the last refusal; a batch that partly moved keeps its counts.
   let why = "";
-  const back = (done: StopDone, n = 0) => NextResponse.redirect(new URL(stopReturn(slug, f, done, bulk ? { n, of: ids.length } : undefined, slotWhyOf(why)), req.url), 303);
+  const back = (done: StopDone, n = 0) => NextResponse.redirect(dashUrl(req, stopReturn(slug, f, done, bulk ? { n, of: ids.length } : undefined, slotWhyOf(why))), 303);
   // The bulk bar's cluster pick cannot be `required` - its Stop button shares the form - so a missing pick comes back as a toast.
   if (bulk && (!ids.length || !ID.test(clusterId))) return back("unselected");
   if (!ID.test(clusterId)) return NextResponse.json({ error: "Not a move this page can make." }, { status: 400 });
@@ -56,7 +56,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ client: string
   }
 
   const email = await sessionEmail();
-  if (!email) return NextResponse.redirect(new URL(dashPath(req, "/login"), req.url), 303);
+  if (!email) return NextResponse.redirect(dashUrl(req, dashPath(req, "/login")), 303);
   const client = (await clientsFor(email)).find((c) => c.slug === slug);
   if (!client) return NextResponse.json({ error: "Not found." }, { status: 404 });
 
