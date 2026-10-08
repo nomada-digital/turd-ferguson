@@ -10,7 +10,7 @@ import { T } from "@/config/tokens";
 import { type Inline, parseAnswer } from "@/components/scan/answer-markdown";
 import { ENGINE_SPECS, type Engine } from "@/lib/scan/engines";
 import { type ClusterDetail, type ClusterInput, clusterChart, daysOfLine, promptBrands, promptStrip } from "@/lib/tracking/cluster-figures";
-import { type Day, type Range, type Rate, basis as basisLine, comparisonRange, daysIn, formatDay, pointsDelta } from "@/lib/tracking/figures";
+import { type Day, type Range, type Rate, basis as basisLine, brandGaps, comparisonRange, daysIn, formatDay, pointsDelta } from "@/lib/tracking/figures";
 import { type AnswerTab, type LatestAnswers, answerTabs, brandRuns } from "@/lib/tracking/latest-answers";
 import { NOTE_SAID, type NoteState } from "@/lib/tracking/note";
 import type { ClusterNote, Compare, OverviewData } from "@/lib/tracking/overview-data";
@@ -116,6 +116,8 @@ export default function OneCluster({
   const P = c.prompts[prompt] ?? null;
   const strip = P ? promptStrip({ answers: data.answers, range, engines }, P.id) : [];
   const brands = P ? promptBrands({ answers: data.answers, range }, P.id, brand) : null;
+  // 8 Oct 2026 (audit data-6): promptBrands leaves out answers whose other brands were not read.
+  const brandsUnread = P ? brandGaps(data.answers.filter((a) => a.question_id === P.id), range).reduce((s, g) => s + g.answers, 0) : 0;
   const top = Math.max(1, ...(brands?.rows.map((b) => b.n) ?? []));
   const tabs = latest?.day ? answerTabs(latest.rows, engines, brand) : [];
   const tab = tabs.find((t) => t.engine === engine) ?? tabs[0] ?? null;
@@ -418,7 +420,7 @@ export default function OneCluster({
             <h2 id="al-h" style={H2}>
               Named in answers to this prompt
             </h2>
-            <p style={LEDE}>{`Out of ${brands.answers} answers this period.`}</p>
+            <p style={LEDE}>{`Out of ${brands.answers} answers this period${brandsUnread ? `. ${brandsUnread} more ${brandsUnread === 1 ? "is" : "are"} left out: the other brands in ${brandsUnread === 1 ? "it were" : "them were"} not read` : ""}.`}</p>
           </div>
           {brands.rows.map((b) => (
             <div key={b.name} style={{ display: "grid", gridTemplateColumns: "100px minmax(0, 1fr) 40px", alignItems: "center", gap: "12px" }}>
@@ -530,8 +532,10 @@ function Answer({ tab, brand, day, today, unsure }: { tab: AnswerTab; brand: str
               ))}
             </div>
           ) : (
-            <span style={{ fontSize: "14px", color: T.soft }}>{tab.named === null ? "-" : "None"}</span>
+            <span style={{ fontSize: "14px", color: T.soft }}>{tab.named === null ? "-" : tab.othersRead ? "None" : "Not read at this check"}</span>
           )}
+          {/* 8 Oct 2026 (audit data-6): brand extraction failed for this answer, so the list may be short - never "None". */}
+          {tab.brands.length && !tab.othersRead ? <span style={{ fontSize: "13px", color: T.soft }}>Other brands were not read at this check, so this list may be short.</span> : null}
         </div>
       </div>
     </div>

@@ -2,7 +2,7 @@ import "server-only";
 
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
-import { trackingDay } from "./decide.ts";
+import { missingColumn, trackingDay } from "./decide.ts";
 import type { LatestAnswers, LatestRow } from "./latest-answers.ts";
 import type { Angle } from "./limits.ts";
 import { type AnswerRow, type CitationRow, type Day, type Range, type SerpRow, addDays, comparisonRange } from "./figures.ts";
@@ -63,6 +63,25 @@ async function paged<R>(query: (lo: number, hi: number) => PromiseLike<{ data: R
   }
 }
 
+/**
+ * tracking_answers.brands_ok arrives with 20261008020000 (8 Oct 2026, audit
+ * reliability-1 / data-6). A deploy can land before its migration, and a
+ * select naming a column the table lacks fails the page, so the read goes
+ * again without it: every row then reads as read, which is what the
+ * column's default says of the rows written before it.
+ */
+async function withBrandsOk<T>(read: (cols: string) => PromiseLike<T>, cols: string): Promise<T> {
+  try {
+    return await read(`${cols}, brands_ok`);
+  } catch (err) {
+    if (!missingColumn(err, "brands_ok")) throw err;
+    return read(cols);
+  }
+}
+
+/** False only when the row says so; absent is read. */
+const brandsOkOf = (a: Record<string, unknown>): { brands_ok?: false } => (a.brands_ok === false ? { brands_ok: false } : {});
+
 export type OverviewData = {
   /** One row per cluster (BRIEF-3; R117 T9 step, 30 Sep 2026): named for its keyword, joined through keyword_id. */
   clusters: { id: string; name: string; keyword_id: string | null; tier: string; started_on: Day; stopped_on: Day | null }[];
@@ -70,7 +89,8 @@ export type OverviewData = {
   keywords: { id: string; keyword: string; added_on: Day; stopped_on: Day | null; search_volume: number | null; intent: string | null }[];
   answers: (AnswerRow & CitationRow)[];
   serp: SerpRow[];
-  lastRun: { run_date: Day; status: string; finished_at: string | null } | null;
+  /** `error` is the run's failureSummary line, read only to tell a brand-only partial from lost reads (run-note.ts lostReads). */
+  lastRun: { run_date: Day; status: string; finished_at: string | null; error?: string | null } | null;
   notes: { note_date: Day; text: string }[];
 };
 
@@ -93,21 +113,21 @@ export async function loadLatestAnswers(clientId: string, questionId: string, to
   if (lastErr) throw new Error(`could not read the latest check: ${lastErr.message}`);
   const day = (last?.[0]?.run_date as Day | undefined) ?? null;
   if (!day) return { day: null, rows: [] };
-  const { data, error } = await db
-    .from("tracking_answers")
-    .select("engine, answered, named, response_text, brands, citations, created_at")
-    .eq("client_domain_id", clientId)
-    .eq("question_id", questionId)
-    .eq("run_date", day);
-  if (error) throw new Error(`could not read the latest answers: ${error.message}`);
+  const read = async (cols: string) => {
+    const { data, error } = await db.from("tracking_answers").select(cols).eq("client_domain_id", clientId).eq("question_id", questionId).eq("run_date", day);
+    if (error) throw new Error(`could not read the latest answers: ${error.message}`);
+    return (data ?? []) as unknown as Record<string, unknown>[];
+  };
+  const rows = await withBrandsOk(read, "engine, answered, named, response_text, brands, citations, created_at");
   return {
     day,
-    rows: ((data ?? []) as Record<string, unknown>[]).map((a) => ({
+    rows: rows.map((a) => ({
       engine: a.engine as string,
       answered: a.answered as boolean,
       named: a.named as boolean,
       text: typeof a.response_text === "string" ? a.response_text : null,
       brands: Array.isArray(a.brands) ? (a.brands as unknown[]).filter((b): b is string => typeof b === "string") : [],
+      ...brandsOkOf(a),
       citations: Array.isArray(a.citations) ? (a.citations as LatestRow["citations"]) : [],
       at: typeof a.created_at === "string" ? a.created_at : null,
     })),
@@ -142,17 +162,21 @@ export async function loadOverview(clientId: string, range: Range, compare: Comp
   const clustersP = paged((lo, hi) => db.from("tracked_clusters").select("id, name, keyword_id, tier, started_on, stopped_on").eq("client_domain_id", clientId).order("started_on").range(lo, hi), "the clusters");
   const questionsP = paged((lo, hi) => db.from("tracked_questions").select("id, text, added_on, stopped_on, cluster_id, angle").eq("client_domain_id", clientId).order("added_on").range(lo, hi), "the questions");
   const keywordsP = paged((lo, hi) => db.from("tracked_keywords").select("id, keyword, added_on, stopped_on, search_volume, intent").eq("client_domain_id", clientId).order("added_on").range(lo, hi), "the keywords");
-  const answersP = paged(
-    (lo, hi) =>
-      db
-        .from("tracking_answers")
-        .select("run_date, question_id, engine, answered, named, brands, citations")
-        .eq("client_domain_id", clientId)
-        .gte("run_date", earliest)
-        .lte("run_date", range.to)
-        .order("id")
-        .range(lo, hi),
-    "the answers",
+  const answersP = withBrandsOk(
+    (cols) =>
+      paged(
+        (lo, hi) =>
+          db
+            .from("tracking_answers")
+            .select(cols)
+            .eq("client_domain_id", clientId)
+            .gte("run_date", earliest)
+            .lte("run_date", range.to)
+            .order("id")
+            .range(lo, hi),
+        "the answers",
+      ),
+    "run_date, question_id, engine, answered, named, brands, citations",
   );
   const serpP = paged(
     (lo, hi) =>
@@ -162,7 +186,7 @@ export async function loadOverview(clientId: string, range: Range, compare: Comp
   // A throw below must not leave these rejecting unobserved; each await still throws.
   for (const p of [clustersP, questionsP, keywordsP, answersP, serpP]) p.catch(() => {});
   const [{ data: runRows, error: runErr }, { data: noteRows, error: noteErr }] = await Promise.all([
-    db.from("tracking_runs").select("run_date, status, finished_at").eq("client_domain_id", clientId).in("status", ["complete", "partial"]).order("run_date", { ascending: false }).limit(1),
+    db.from("tracking_runs").select("run_date, status, finished_at, error").eq("client_domain_id", clientId).in("status", ["complete", "partial"]).order("run_date", { ascending: false }).limit(1),
     db.from("tracking_notes").select("note_date, text").eq("client_domain_id", clientId).gte("note_date", range.from).lte("note_date", range.to).order("note_date"),
   ]);
   if (runErr) throw new Error(`could not read the runs: ${runErr.message}`);
@@ -177,13 +201,15 @@ export async function loadOverview(clientId: string, range: Range, compare: Comp
     clusters: clusters as OverviewData["clusters"],
     questions: questions as OverviewData["questions"],
     keywords: keywords as OverviewData["keywords"],
-    answers: (answers as Record<string, unknown>[]).map((a) => ({
+    // `select(cols)` takes a built string, which supabase-js cannot type; the rows are the columns named.
+    answers: (answers as unknown as Record<string, unknown>[]).map((a) => ({
       run_date: a.run_date as Day,
       question_id: a.question_id as string,
       engine: a.engine as string,
       answered: a.answered as boolean,
       named: a.named as boolean,
       brands: Array.isArray(a.brands) ? (a.brands as unknown[]).filter((b): b is string => typeof b === "string") : [],
+      ...brandsOkOf(a),
       citations: Array.isArray(a.citations) ? (a.citations as CitationRow["citations"]) : [],
     })),
     serp: serp as SerpRow[],

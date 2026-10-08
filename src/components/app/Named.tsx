@@ -6,10 +6,10 @@ import { T } from "@/config/tokens";
 import { ENGINE_SPECS, type Engine } from "@/lib/scan/engines";
 import { clusterCards } from "@/lib/tracking/cluster-figures";
 import { rangeLabel } from "@/lib/tracking/date-range";
-import { type CitedPageRow, type Day, type Range, type Rate, basis as basisLine, comparisonRange, formatDay, ungroupedRead } from "@/lib/tracking/figures";
+import { type CitedPageRow, type Day, type Range, type Rate, basis as basisLine, brandGaps, comparisonRange, formatDay, ungroupedRead } from "@/lib/tracking/figures";
 import { NAMED_TOP, citedWithBrand, namedPage } from "@/lib/tracking/named-figures";
 import type { Compare, OverviewData } from "@/lib/tracking/overview-data";
-import { partialRunNote } from "@/lib/tracking/run-note";
+import { brandGapNote, partialRunNote } from "@/lib/tracking/run-note";
 
 import DatePicker from "./DatePicker";
 import { Chip } from "./Overview";
@@ -72,6 +72,8 @@ export default function Named({
   const picked = cluster ? cards.find((c) => c.id === cluster) ?? null : null;
   const only = picked ? new Set(picked.prompts.map((p) => p.id)) : null;
   const page = namedPage({ answers: data.answers, range, before, you: brand, only, engine });
+  // 8 Oct 2026 (audit data-6): namedPage leaves out answers whose other brands were not read; say so, for the same filters.
+  const gapNote = brandGapNote(brandGaps(data.answers.filter((a) => (!only || only.has(a.question_id)) && (!engine || a.engine === engine)), range));
 
   // Each prompt's cluster keyword and its place on the one-cluster page (`?prompt=` is that index).
   const where = new Map<string, { clusterId: string; keyword: string; index: number }>();
@@ -108,6 +110,7 @@ export default function Named({
           <h1 style={{ margin: 0, fontSize: "28px", fontWeight: 700, letterSpacing: "-0.03em", color: T.ink }}>Who is named</h1>
           <p style={{ margin: 0, fontSize: "14px", lineHeight: 1.5, color: T.soft, maxWidth: "680px" }}>Every brand the engines name in answers to your prompts, with its share of every brand mention.</p>
           {partial ? <p style={{ margin: 0, fontSize: "14px", lineHeight: 1.5, color: T.soft, maxWidth: "680px" }}>{partial}</p> : null}
+          {gapNote ? <p style={{ margin: 0, fontSize: "14px", lineHeight: 1.5, color: T.soft, maxWidth: "680px" }}>{gapNote}</p> : null}
         </div>
         <DatePicker range={range} compare={compareMode} today={today} startedOn={startedOn} grow={false}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={T.ink} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

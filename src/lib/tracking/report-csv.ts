@@ -28,6 +28,10 @@ const within = (d: string, r: Range) => d >= r.from && d <= r.to;
 // BRIEF-3 T8 (R106 step 10, 30 Sep 2026): the answers file carries the cluster's
 // keyword beside its name and the prompt's angle, joined through keyword_id; the
 // keywords file names the cluster each keyword heads. Rows are unchanged.
+// 8 Oct 2026 (audit data-6): an answer whose other brands were not read says so
+// in "brands named" rather than leaving it blank, which reads as "none".
+export const BRANDS_NOT_READ = "(other brands not read)";
+
 export function answersCsv(data: Pick<OverviewData, "answers" | "questions" | "clusters" | "keywords">, range: Range): string {
   const q = new Map(data.questions.map((x) => [x.id, x]));
   const k = new Map((data.keywords ?? []).map((x) => [x.id, x.keyword]));
@@ -38,7 +42,7 @@ export function answersCsv(data: Pick<OverviewData, "answers" | "questions" | "c
     .map((a) => {
       const p = q.get(a.question_id);
       const c = p?.cluster_id ? cluster.get(p.cluster_id) : undefined;
-      return line([a.run_date, c?.name || null, (c?.keyword_id && k.get(c.keyword_id)) || null, p?.angle ?? null, p?.text ?? null, a.engine, a.answered ? "yes" : "no", a.answered ? (a.named ? "yes" : "no") : null, a.brands.join("; ") || null, a.citations.map((x) => x.url || x.source_domain).filter(Boolean).join(" ") || null]);
+      return line([a.run_date, c?.name || null, (c?.keyword_id && k.get(c.keyword_id)) || null, p?.angle ?? null, p?.text ?? null, a.engine, a.answered ? "yes" : "no", a.answered ? (a.named ? "yes" : "no") : null, [...a.brands, ...(a.answered && a.brands_ok === false ? [BRANDS_NOT_READ] : [])].join("; ") || null, a.citations.map((x) => x.url || x.source_domain).filter(Boolean).join(" ") || null]);
     });
   return [line(["date", "cluster", "cluster keyword", "angle", "prompt", "engine", "answered", "named you", "brands named", "pages cited"]), ...rows].join("\r\n") + "\r\n";
 }

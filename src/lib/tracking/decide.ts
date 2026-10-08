@@ -340,6 +340,16 @@ export function failureSummary(reads: number, failures: readonly { engine: strin
 }
 
 /**
+ * Whether a partial run's error line (failureSummary) says reads failed, not
+ * only a brand gap. No line is read failures: that is all partial meant
+ * before 8 Oct 2026, and the fixture's runs carry none. The screens say "some
+ * reads did not come back" only when this is true.
+ */
+export function readsFailedIn(error: string | null | undefined): boolean {
+  return !error || !error.startsWith("brand extraction failed");
+}
+
+/**
  * A keyword read's outcome. An empty SERP (no organic results at all) is a
  * failed read with a reason, never a silent null; null stays "not in the top
  * SERP_DEPTH", which is a real finding. `rankOf` returns undefined for empty.

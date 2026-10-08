@@ -3,7 +3,8 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import { FIXTURE_STATES, expandFixture, fixtureLive, fixtureMode, fixtureState, fixtureUnreadable } from "./fixture-mode.ts";
-import { addDays, overview } from "./figures.ts";
+import { addDays, brandGaps, overview } from "./figures.ts";
+import { readsFailedIn } from "./decide.ts";
 import { ANGLES, PROMPTS_PER_CLUSTER, namesBrandIn } from "./limits.ts";
 
 /**
@@ -228,4 +229,20 @@ test("8 Oct 2026: the trial states carry a trial end in real time, a cancel, or 
   const e = fixtureState(fx, { TRACKING_FIXTURE_STATE: "ended" });
   assert.equal(e.client.status, "ended");
   assert.equal(fx.client.status, undefined, "the default client carries no status, as before");
+});
+
+test("8 Oct 2026 (audit reliability-1): TRACKING_FIXTURE_STATE=brands-unread is today's run with ChatGPT's brand extraction failed", () => {
+  assert.ok(FIXTURE_STATES.includes("brands-unread"));
+  const u = fixtureState(fx, { TRACKING_FIXTURE_STATE: "brands-unread" });
+  assert.equal(u.data.lastRun?.status, "partial");
+  assert.equal(readsFailedIn(u.data.lastRun?.error), false, "partial for the brand gap only: no read was lost");
+  assert.match(u.data.lastRun?.error ?? "", /^brand extraction failed - chatgpt: other brands not read in 45 of 45 answers/);
+  const today = u.data.answers.filter((a) => a.run_date === fx.today);
+  assert.ok(today.every((a) => a.answered), "every read landed");
+  const chat = today.filter((a) => a.engine === "chatgpt");
+  assert.ok(chat.length > 0 && chat.every((a) => a.brands_ok === false && !a.brands.length));
+  assert.ok(chat.some((a) => a.named), "named is still known");
+  assert.ok(u.data.answers.filter((a) => a.run_date < fx.today || a.engine !== "chatgpt").every((a) => a.brands_ok === undefined), "nothing else marked");
+  assert.deepEqual(brandGaps(u.data.answers, { from: "2026-09-02", to: fx.today }), [{ day: fx.today, engine: "chatgpt", answers: chat.length }]);
+  assert.deepEqual(u.texts, fx.texts, "the words are all there");
 });

@@ -20,6 +20,8 @@ export type LatestRow = {
   named: boolean;
   text: string | null;
   brands: string[];
+  /** False when the runner's brand extraction failed for this answer (tracking_answers.brands_ok, 8 Oct 2026); absent is read. */
+  brands_ok?: boolean;
   citations: { source_domain: string; url: string | null }[];
   /** When the answer was stored, ISO. */
   at: string | null;
@@ -35,12 +37,14 @@ export type AnswerTab = {
   pages: string[];
   /** The client first if named, then the others in the order the engine gave them. */
   brands: { name: string; you: boolean }[];
+  /** False when the other brands were not read at this check, so `brands` may be short of them - never "None". */
+  othersRead: boolean;
 };
 
 export function answerTabs(rows: LatestRow[], engines: readonly string[], you: string): AnswerTab[] {
   return engines.map((engine) => {
     const r = rows.find((x) => x.engine === engine && x.answered);
-    if (!r) return { engine, named: null, text: null, time: null, pages: [], brands: [] };
+    if (!r) return { engine, named: null, text: null, time: null, pages: [], brands: [], othersRead: true };
     const seen = new Set<string>();
     const pages: string[] = [];
     for (const c of r.citations) {
@@ -59,6 +63,7 @@ export function answerTabs(rows: LatestRow[], engines: readonly string[], you: s
       time: r.at ? checkTime(r.at) : null,
       pages,
       brands: [...(r.named ? [{ name: you, you: true }] : []), ...[...others.values()].map((name) => ({ name, you: false }))],
+      othersRead: r.brands_ok !== false,
     };
   });
 }
