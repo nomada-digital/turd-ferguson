@@ -10,8 +10,9 @@ import { T } from "@/config/tokens";
 import { ENGINE_SPECS, type Engine } from "@/lib/scan/engines";
 import { KEYWORDS_PER_CLUSTER, PROMPTS_PER_CLUSTER } from "@/lib/tracking/limits";
 
+import MenuCloser from "./MenuCloser";
 import { CLUSTER_NAV, CLUSTER_TABS, NAV, PLACEMENTS_ITEM, TABS, navHref } from "./nav";
-import { appPath } from "@/lib/app-host";
+import { appPath, siteHref } from "@/lib/app-host";
 
 const WORDS = ["no", "one", "two", "three", "four", "five"];
 
@@ -72,6 +73,14 @@ const ICONS: Record<string, ReactNode> = {
 };
 // boards-3/Placements.dc.html draws Placements with the link mark.
 ICONS[PLACEMENTS_ITEM] = ICONS["Cited pages"];
+// The phone's fifth tab (audit mobile-10): the pages the four tabs leave out.
+ICONS.More = (
+  <>
+    <circle cx="5" cy="12" r="1.6" />
+    <circle cx="12" cy="12" r="1.6" />
+    <circle cx="19" cy="12" r="1.6" />
+  </>
+);
 
 function NavIcon({ item, size }: { item: string; size: number }) {
   return (
@@ -174,7 +183,11 @@ export default function Sidebar({
     return href && href + keep;
   };
   const more = nav.filter((item) => !tabs.includes(item) && hrefOf(item));
+  // Audit mobile-10 (8 Oct 2026): on Who is named, Cited pages or Placements no tab was current and
+  // More looked idle, so nothing on a phone said where you were. More is the fifth tab and is current then.
+  const moreOn = more.includes(current);
   const chip: React.CSSProperties = { display: "flex", alignItems: "center", gap: "8px", height: "44px", padding: "0 10px", border: `1px solid ${T.line}`, borderRadius: "10px", fontSize: "14px", fontWeight: 700, boxSizing: "border-box", minWidth: 0 };
+  const tab: React.CSSProperties = { flex: "1 1 0", display: "flex", flexDirection: "column", alignItems: "center", gap: "4px", padding: "10px 0 6px", fontSize: "11px", fontWeight: 600, textDecoration: "none" };
   const chipName = (
     <>
       <Initial name={name} size={22} />
@@ -219,34 +232,9 @@ export default function Sidebar({
             </nav>
           </details>
         ) : (
-          <span style={chip}>{chipName}</span>
+          // With one client there is nothing to switch to, so the name is a label, not a bordered control (audit mobile-10).
+          <span style={{ ...chip, border: 0, padding: 0 }}>{chipName}</span>
         )}
-        {/* DS6 (2 Oct 2026, R172 pass 1): the four tabs are Mobile.dc.html's; the sidebar items they
-            leave out (Who is named, Cited pages, Placements) and Log out had no way in on the phone
-            but the Overview's "See all". */}
-        {more.length ? (
-          <details className="app-more" style={{ position: "relative", flexShrink: 0 }}>
-            <summary style={{ ...chip, fontWeight: 600 }}>More</summary>
-            <nav aria-label="More of the dashboard" style={{ position: "absolute", right: 0, top: "calc(100% + 6px)", zIndex: 30, minWidth: "200px", display: "grid", padding: "6px", background: T.surface, border: `1px solid ${T.line}`, borderRadius: "12px", boxSizing: "border-box" }}>
-              {more.map((item) => {
-                const on = item === current;
-                return (
-                  <Link key={item} href={hrefOf(item)!} aria-current={on ? "page" : undefined} style={{ display: "flex", alignItems: "center", gap: "10px", minHeight: "44px", padding: "0 10px", borderRadius: "8px", fontSize: "14px", fontWeight: on ? 600 : 500, color: on ? T.accent : T.ink, background: on ? T.wash : "transparent", textDecoration: "none" }}>
-                    <span style={{ display: "flex", color: on ? T.accent : T.soft }}>
-                      <NavIcon item={item} size={18} />
-                    </span>
-                    {item}
-                  </Link>
-                );
-              })}
-              <form method="post" action="/api/app/logout" style={{ margin: "4px 0 0", borderTop: `1px solid ${T.line}`, paddingTop: "4px" }}>
-                <button type="submit" style={{ width: "100%", minHeight: "44px", padding: "0 10px", textAlign: "left", background: "none", border: "none", borderRadius: "8px", fontSize: "14px", fontWeight: 500, color: T.accent, cursor: "pointer" }}>
-                  Log out
-                </button>
-              </form>
-            </nav>
-          </details>
-        ) : null}
         </span>
       </header>
 
@@ -338,7 +326,7 @@ export default function Sidebar({
           ) : null}
           {upsell && !ended && clusters && packPrice ? (
             // R151 (3 Oct 2026): was bare /contact, so the enquiry arrived with no plan; now "About <their tier>", as every tier's call does.
-            <a href={contactUrlFor(tier)} style={{ fontSize: "13px", fontWeight: 600, color: T.accent }}>
+            <a href={siteHref(contactUrlFor(tier))} style={{ fontSize: "13px", fontWeight: 600, color: T.accent }}>
               {`Add ${PACK_CLUSTERS} clusters for ${packPrice} a month`}
             </a>
           ) : null}
@@ -367,7 +355,6 @@ export default function Sidebar({
         {tabs.map((item) => {
           const on = item === current;
           const href = hrefOf(item);
-          const tab: React.CSSProperties = { flex: "1 1 0", display: "flex", flexDirection: "column", alignItems: "center", gap: "4px", padding: "10px 0 6px", fontSize: "11px", fontWeight: 600, textDecoration: "none" };
           if (!href) {
             return (
               <span key={item} aria-disabled="true" style={{ ...tab, gap: "2px", color: T.soft, cursor: "default" }}>
@@ -378,13 +365,46 @@ export default function Sidebar({
             );
           }
           return (
-            <Link key={item} href={href} aria-current={on ? "page" : undefined} style={{ ...tab, color: on ? T.accent : T.soft }}>
+            <Link key={item} href={href} aria-current={on ? "page" : undefined} className="app-tab" style={{ ...tab, color: on ? T.accent : T.soft }}>
               <NavIcon item={item} size={20} />
-              {item}
+              <span className="app-tab-label">{item}</span>
             </Link>
           );
         })}
+        {/* DS6 (2 Oct 2026, R172 pass 1): the sidebar items the four tabs leave out (Who is named,
+            Cited pages, Placements) and Log out. Audit mobile-10 (8 Oct 2026): this was a chip in the
+            top bar, which scrolled away - 3,000px down Placements, the only way to them was back up -
+            and never showed the page you were on. As the fifth tab it is always in reach and is
+            current on its pages. Still a <details>, so it opens with JS off; MenuCloser closes it. */}
+        {more.length ? (
+          <details className="app-more" style={{ flex: "1 1 0", minWidth: 0 }}>
+            <summary className="app-tab" style={{ ...tab, width: "100%", boxSizing: "border-box", color: moreOn ? T.accent : T.soft }}>
+              <NavIcon item="More" size={20} />
+              <span className="app-tab-label">More</span>
+              {moreOn ? <span className="sr-only">{`, current page: ${current}`}</span> : null}
+            </summary>
+            <nav aria-label="More of the dashboard" style={{ position: "absolute", right: "8px", bottom: "calc(100% + 8px)", zIndex: 30, minWidth: "220px", maxWidth: "calc(100vw - 16px)", display: "grid", padding: "6px", background: T.surface, border: `1px solid ${T.line}`, borderRadius: "12px", boxSizing: "border-box", boxShadow: `0 8px 24px color-mix(in srgb, ${T.ink} 12%, transparent)` }}>
+              {more.map((item) => {
+                const on = item === current;
+                return (
+                  <Link key={item} href={hrefOf(item)!} aria-current={on ? "page" : undefined} style={{ display: "flex", alignItems: "center", gap: "10px", minHeight: "44px", padding: "0 10px", borderRadius: "8px", fontSize: "14px", fontWeight: on ? 600 : 500, color: on ? T.accent : T.ink, background: on ? T.wash : "transparent", textDecoration: "none" }}>
+                    <span style={{ display: "flex", color: on ? T.accent : T.soft }}>
+                      <NavIcon item={item} size={18} />
+                    </span>
+                    {item}
+                  </Link>
+                );
+              })}
+              <form method="post" action="/api/app/logout" style={{ margin: "4px 0 0", borderTop: `1px solid ${T.line}`, paddingTop: "4px" }}>
+                <button type="submit" style={{ width: "100%", minHeight: "44px", padding: "0 10px", textAlign: "left", background: "none", border: "none", borderRadius: "8px", fontSize: "14px", fontWeight: 500, color: T.accent, cursor: "pointer" }}>
+                  Log out
+                </button>
+              </form>
+            </nav>
+          </details>
+        ) : null}
       </nav>
+      <MenuCloser selector="details.app-more, details.app-switch" />
     </>
   );
 }

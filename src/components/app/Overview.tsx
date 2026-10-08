@@ -36,6 +36,7 @@ import ClusterChart from "./ClusterChart";
 import DatePicker from "./DatePicker";
 import Fig from "./Fig";
 import OverviewChart, { type ChartDay } from "./OverviewChart";
+import ScrollCue from "./ScrollCue";
 import { SEE_ALL, navFrom } from "./nav";
 
 /** The Ungrouped prompts card's rows before it points to Clusters (DS58). */
@@ -642,8 +643,13 @@ export default function Overview({
                   </div>
                 ))}
               </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: "8px", minWidth: 0, flex: "0 1 auto" }}>
-                <svg width={gridDays.length * 14 - 3} height={heatRows.length * 14 - 3} viewBox={`0 0 ${gridDays.length * 14 - 3} ${heatRows.length * 14 - 3}`} style={{ maxWidth: "100%", height: "auto" }} role="img" aria-label={`Daily share of answers naming ${brand}, one row per cluster, ${formatDay(gridDays[0]!)} to ${formatDay(gridDays[gridDays.length - 1]!, true)}`}>
+              {/* Audit mobile-1 (8 Oct 2026): the grid scaled to fit (maxWidth 100%) while its labels kept
+                  their 14px rows, so at 600 and 900 the labels drifted 2px a row off theirs. It keeps its
+                  size now and scrolls, opening on Today (.app-heat-scroll); on a phone, where it has no
+                  labels, it still fits the card (.app-heat-fit). */}
+              <div id="ov-heat-scroll" className="app-heat-scroll app-heat-fit" role="group" aria-label="Daily checks by cluster" style={{ minWidth: 0, flex: "0 1 auto", overflowX: "auto" }}>
+              <div className="app-heat-in" style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                <svg width={gridDays.length * 14 - 3} height={heatRows.length * 14 - 3} viewBox={`0 0 ${gridDays.length * 14 - 3} ${heatRows.length * 14 - 3}`} style={{ display: "block" }} role="img" aria-label={`Daily share of answers naming ${brand}, one row per cluster, ${formatDay(gridDays[0]!)} to ${formatDay(gridDays[gridDays.length - 1]!, true)}`}>
                   {heatRows.map((c, row) =>
                     gridDays.map((d, col) => {
                       const cell = c.heat[gridFrom + col] ?? null;
@@ -666,16 +672,20 @@ export default function Overview({
                   <span>{gridDays[gridDays.length - 1] === today ? "Today" : formatDay(gridDays[gridDays.length - 1]!)}</span>
                 </div>
               </div>
+              </div>
             </div>
+            <ScrollCue target="ov-heat-scroll" color={D.quiet} phone={false}>{`Swipe for the earlier days, back to ${formatDay(gridDays[0]!)}.`}</ScrollCue>
             <div className="app-hide-sm" style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "12px", color: D.quiet, flexWrap: "wrap" }}>
               {/* DS74 (2 Oct 2026): "up to" once a shown day had fewer answers - a partial check or a stopped prompt - so the count is never one a cell was not read on. */}
               {`Share of the cluster's ${heatRows.some((c) => gridDays.some((_, col) => { const h = c.heat[gridFrom + col]; return h && h.den < 5 * engines.length; })) ? "up to " : ""}${5 * engines.length} answers naming you that day`}
-              <span style={{ display: "flex", gap: "3px" }} aria-hidden="true">
-                {[0, 15, 30, 45, 60].map((p) => (
-                  <span key={p} style={{ width: "11px", height: "11px", borderRadius: "3px", background: heat(p) }} />
-                ))}
+              <span style={{ display: "inline-flex", alignItems: "center", gap: "8px", whiteSpace: "nowrap" }}>
+                <span style={{ display: "flex", gap: "3px" }} aria-hidden="true">
+                  {[0, 15, 30, 45, 60].map((p) => (
+                    <span key={p} style={{ width: "11px", height: "11px", borderRadius: "3px", background: heat(p) }} />
+                  ))}
+                </span>
+                0 to 60%+
               </span>
-              0 to 60%+
               <span aria-hidden="true" style={{ display: "inline-flex", width: "10px", height: "10px", borderRadius: "2.5px", border: `1px solid ${D.quiet}`, opacity: 0.45, marginLeft: "6px" }} />
               {heatGap ? "no reading" : "not tracked yet"}
             </div>
@@ -683,16 +693,25 @@ export default function Overview({
         ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: "12px", flex: "0 1 auto", minWidth: 0 }}>
           <div style={{ fontSize: "13px", fontWeight: 600, color: D.cardHead }}>Every daily check, by engine</div>
+          {/* Audit mobile-1 (8 Oct 2026): at 390 the grid scaled to 194px wide - 5.7px squares, rows 7px
+              apart - beside labels still 17px apart, so ChatGPT's row sat by "Google AI Overviews" and
+              Gemini and Perplexity by the date axis. The grid keeps its size and scrolls, opening on
+              Today, so every row stays level with its label; on a phone each label is the engine's mark
+              (the name stays for a screen reader). */}
           <div style={{ display: "flex", gap: "12px", minWidth: 0 }}>
-            <div style={{ display: "flex", flexDirection: "column", gap: "3px" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: "3px", flexShrink: 0 }}>
               {engines.map((e) => (
-                <div key={e} style={{ height: "14px", display: "flex", alignItems: "center", justifyContent: "flex-end", fontSize: "12px", fontWeight: 500, color: D.cardHead, whiteSpace: "nowrap" }}>
-                  {ENGINE_SPECS[e].label}
+                <div key={e} data-heat-label="" title={ENGINE_SPECS[e].label} style={{ height: "14px", display: "flex", alignItems: "center", justifyContent: "flex-end", fontSize: "12px", fontWeight: 500, color: D.cardHead, whiteSpace: "nowrap" }}>
+                  <span className="app-heat-mark">
+                    <EngineLogo engine={e} size={14} />
+                  </span>
+                  <span className="app-heat-name">{ENGINE_SPECS[e].label}</span>
                 </div>
               ))}
             </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: "8px", minWidth: 0, flex: "1 1 auto" }}>
-              <svg width={gridDays.length * 17 - 3} height={engines.length * 17 - 3} viewBox={`0 0 ${gridDays.length * 17 - 3} ${engines.length * 17 - 3}`} style={{ maxWidth: "100%", height: "auto" }} role="img" aria-label={`Each engine's daily share of prompts naming ${brand}, ${formatDay(gridDays[0]!)} to ${formatDay(gridDays[gridDays.length - 1]!)}`}>
+            <div id="ov-heat-scroll" className="app-heat-scroll" role="group" aria-label="Daily checks by engine" style={{ minWidth: 0, flex: "0 1 auto", overflowX: "auto" }}>
+            <div className="app-heat-in" style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+              <svg width={gridDays.length * 17 - 3} height={engines.length * 17 - 3} viewBox={`0 0 ${gridDays.length * 17 - 3} ${engines.length * 17 - 3}`} style={{ display: "block" }} role="img" aria-label={`Each engine's daily share of prompts naming ${brand}, ${formatDay(gridDays[0]!)} to ${formatDay(gridDays[gridDays.length - 1]!)}`}>
                 {engines.map((e, row) =>
                   gridDays.map((d, col) => {
                     const cell = o.grid[e]?.[gridFrom + col] ?? null;
@@ -710,15 +729,20 @@ export default function Overview({
                 <span>{gridDays[gridDays.length - 1] === today ? "Today" : formatDay(gridDays[gridDays.length - 1]!)}</span>
               </div>
             </div>
+            </div>
           </div>
+          <ScrollCue target="ov-heat-scroll" color={D.quiet}>{`Swipe for the earlier days, back to ${formatDay(gridDays[0]!)}.`}</ScrollCue>
           <div style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "12px", color: D.quiet, flexWrap: "wrap" }}>
             Share of prompts naming you that day
-            <span style={{ display: "flex", gap: "3px" }} aria-hidden="true">
-              {[0, 15, 30, 45, 60].map((p) => (
-                <span key={p} style={{ width: "12px", height: "12px", borderRadius: "3px", background: heat(p) }} />
-              ))}
+            {/* mobile-1: the scale is one piece, so "0 to 60%+" never wraps away from its squares. */}
+            <span style={{ display: "inline-flex", alignItems: "center", gap: "8px", whiteSpace: "nowrap" }}>
+              <span style={{ display: "flex", gap: "3px" }} aria-hidden="true">
+                {[0, 15, 30, 45, 60].map((p) => (
+                  <span key={p} style={{ width: "12px", height: "12px", borderRadius: "3px", background: heat(p) }} />
+                ))}
+              </span>
+              0 to 60%+
             </span>
-            0 to 60%+
           </div>
         </div>
         )}

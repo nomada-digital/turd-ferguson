@@ -90,6 +90,41 @@ test("the marketing header and footer are not shown over the dashboard", async (
   }
 });
 
+/**
+ * Audit ia-2 (8 Oct 2026): the first test above only held nav links to "no
+ * /app prefix", never to resolving. The plan card's "Add 5 clusters" and
+ * Clusters' "Get cited" were relative marketing paths, which the proxy rewrote
+ * into the dashboard's 404. This follows every link a dashboard page draws -
+ * shown, or inside a closed menu - and fails on any that does not answer.
+ */
+test("no dashboard link 404s on the app host", async () => {
+  const pages = ["/tallyroo", "/tallyroo/clusters", "/tallyroo/clusters?add=1", "/tallyroo/clusters/c1", "/tallyroo/placements", "/tallyroo/named", "/tallyroo/cited", "/tallyroo/reports", "/tallyroo/settings"];
+  const found = new Map<string, string>();
+  for (const width of [1280, 390]) {
+    const { ctx, page } = await open(width);
+    for (const p of pages) {
+      const res = await page.goto(`${APP}${p}`, { waitUntil: "networkidle" });
+      assert.equal(res?.status(), 200, `${p} at ${width}`);
+      const links = await page.$$eval("a[href]", (as) => as.filter((a) => a.getClientRects().length > 0 || a.closest("details") !== null).map((a) => [(a as HTMLAnchorElement).href, `${a.getAttribute("href")} "${(a.textContent ?? "").trim().slice(0, 40)}"`]));
+      for (const [href, what] of links) if (!found.has(href)) found.set(href, `${what} on ${p} at ${width}`);
+    }
+    await ctx.close();
+  }
+  const local = [...found].filter(([href]) => {
+    const u = new URL(href);
+    return /^https?:$/.test(u.protocol) && (u.host === `app.localhost:${PORT}` || u.host === `localhost:${PORT}`) && !u.pathname.startsWith("/api/");
+  });
+  // Floors: a page that drew nothing would pass with no links followed.
+  assert.ok(local.length >= 40, `only ${local.length} links followed`);
+  assert.ok(local.some(([href]) => new URL(href).host === `localhost:${PORT}`), "no link reached the marketing site, so none was checked");
+  const broken: string[] = [];
+  for (const [href, what] of local) {
+    const r = await fetch(href, { redirect: "follow" });
+    if (r.status >= 400) broken.push(`${r.status} ${href} - ${what}`);
+  }
+  assert.deepEqual(broken, []);
+});
+
 test("moving between pages keeps the app host and the unprefixed path", async () => {
   const { ctx, page } = await open();
   await page.goto(`${APP}/tallyroo`, { waitUntil: "networkidle" });

@@ -3,6 +3,7 @@ import Link from "@/components/app/AppLink";
 
 import TierName from "@/components/TierName";
 import { TIERS } from "@/config/pricing";
+import { siteHref } from "@/lib/app-host";
 import { T } from "@/config/tokens";
 import type { PromptCopy, PromptCta } from "@/lib/tracking/upgrade-prompts";
 
@@ -51,7 +52,7 @@ export default function UpgradePrompt({ copy, cta, slug, items, keep = {} }: { c
       </div>
       <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
         {copy.button && tier ? (
-          <Link href={`${tier.href}?from=app`} data-usage="cta_click" data-usage-cta={cta} style={{ display: "flex", alignItems: "center", height: "44px", padding: "0 16px", borderRadius: "12px", background: T.accent, color: T.surface, fontSize: "14px", fontWeight: 600, textDecoration: "none" }}>
+          <Link href={siteHref(`${tier.href}?from=app`)} data-usage="cta_click" data-usage-cta={cta} style={{ display: "flex", alignItems: "center", height: "44px", padding: "0 16px", borderRadius: "12px", background: T.accent, color: T.surface, fontSize: "14px", fontWeight: 600, textDecoration: "none" }}>
             {tier.action}
           </Link>
         ) : null}

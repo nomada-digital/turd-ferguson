@@ -155,11 +155,41 @@ export function stripPrefix(pathname: string): string | null {
 export const SITE_ORIGIN = "https://alwayscited.com";
 
 /**
+ * The marketing site's origin as seen from the dashboard's host.
+ *
+ * In production that is SITE_ORIGIN. A development app host is the main
+ * development server under an `app.` label - `app.localhost:3100` is
+ * `localhost:3100`, same port - so a link from it stays on the server the run
+ * started, over http, rather than leaving for the live site (8 Oct 2026, audit
+ * ia-2: the e2e run has to be able to follow it).
+ */
+export function siteOrigin(host: string): string {
+  const h = host.trim().toLowerCase();
+  if (isLocal(h)) return `http://${h.replace(/^app\./, "")}`;
+  return SITE_ORIGIN;
+}
+
+/**
  * A link from the dashboard to a page on the marketing site (8 Oct 2026,
  * audit ia-2). Relative while the dashboard shares the site's host; absolute
- * once it has its own, where `/checkout` would otherwise be rewritten into the
- * dashboard tree and 404.
+ * once it has its own, where `/contact` or `/alwayscited` would otherwise be
+ * rewritten into the dashboard tree and 404 - as the plan card's pack link and
+ * the Clusters upgrade button did on app.localhost until they came through
+ * here. app-host.test.mts holds every such link in the dashboard to it.
  */
 export function siteHref(path: string, env?: { APP_HOST?: string }): string {
-  return appHost(env) ? `${SITE_ORIGIN}${path}` : path;
+  const host = appHost(env);
+  return host ? `${siteOrigin(host)}${path}` : path;
+}
+
+/**
+ * The same, decided in the browser, for a client component - which cannot
+ * read APP_HOST, because only NEXT_PUBLIC_ variables reach the client bundle.
+ * The page's own address says which host it is on: the dashboard is under
+ * `/app` only on the main host, and the proxy 308s that prefix away on the
+ * app host.
+ */
+export function siteHrefAt(path: string, here: { pathname: string; host: string }): string {
+  const onMain = here.pathname === APP_PREFIX || here.pathname.startsWith(`${APP_PREFIX}/`);
+  return onMain ? path : `${siteOrigin(here.host)}${path}`;
 }

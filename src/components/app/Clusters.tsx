@@ -28,7 +28,8 @@ import { type Facts, type PromptCta, pickPrompt, promptCopy } from "@/lib/tracki
 
 import { Chip } from "./Overview";
 import UpgradePrompt from "./UpgradePrompt";
-import { appPath } from "@/lib/app-host";
+import { ClearSearch } from "./ClearLinks";
+import { appPath, siteHref } from "@/lib/app-host";
 
 /**
  * The Clusters page (BRIEF-3 T6 part 1, 30 Sep 2026; boards-3/Questions.dc.html):
@@ -216,7 +217,9 @@ export default function Clusters({
             <label htmlFor="q-search" className="sr-only">
               Search clusters and prompts
             </label>
-            <input id="q-search" name="q" defaultValue={q} maxLength={APP_LIMITS.search} placeholder="Search keywords and prompts" style={{ flexGrow: 1, minWidth: 0, border: 0, outline: 0, fontFamily: "inherit", fontSize: "14px", color: T.ink, background: "transparent" }} />
+            {/* Audit mobile-6 (8 Oct 2026): a search key on the phone's keyboard, and keywords left as typed rather than autocorrected. */}
+            <input id="q-search" type="search" name="q" defaultValue={q} maxLength={APP_LIMITS.search} placeholder="Search keywords and prompts" enterKeyHint="search" autoCapitalize="none" autoCorrect="off" spellCheck={false} style={{ flexGrow: 1, minWidth: 0, border: 0, outline: 0, fontFamily: "inherit", fontSize: "14px", color: T.ink, background: "transparent" }} />
+            {q ? <ClearSearch href={`?${new URLSearchParams({ ...base, ...(filter === "all" ? {} : { filter }) })}`} /> : null}
           </form>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "14px", flexWrap: "wrap" }}>
@@ -258,7 +261,7 @@ export default function Clusters({
         )
       ) : null}
 
-      {canWrite && adding ? <AddPanel slug={slug} adding={adding} full={full} clusterLimit={clusterLimit} packPrice={packPrice} packHref={upgrade ? contactUrlFor(upgrade.tier) : CONTACT_URL} close={href({})} keep={keep} /> : null}
+      {canWrite && adding ? <AddPanel slug={slug} adding={adding} full={full} clusterLimit={clusterLimit} packPrice={packPrice} packHref={siteHref(upgrade ? contactUrlFor(upgrade.tier) : CONTACT_URL)} close={href({})} keep={keep} /> : null}
 
       <section aria-label="Clusters" style={{ background: T.surface, border: `1px solid ${T.line}`, borderRadius: "18px", overflow: "hidden" }}>
         <div className="app-cl-grid app-hide-sm" style={{ display: "grid", gridTemplateColumns: GRID, gap: "16px", padding: "14px 24px 12px" }}>

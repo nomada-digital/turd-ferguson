@@ -475,6 +475,9 @@ const CSS_GROUNDS: Record<string, string> = {
   // DS17, 2 Oct 2026: Fig.tsx's basis line, drawn above the figure with its own white text on it.
   ".app-fig:after": "var(--ink), the basis line's own ground on hover and focus only; its var(--surface) text is the only thing on it",
   ".app-pending": "var(--brand-purple), a 3px fixed bar along the top of the window while a dashboard navigation is pending; aria-hidden and empty, so nothing is drawn on it",
+  // 8 Oct 2026 (audit mobile-3): the one-cluster day strip's sticky columns.
+  ".app-strip-lab,.app-strip-n":
+    "var(--surface), the one-cluster day strip's sticky engine-mark and 'N of 28' columns, painted so no square shows round them as the days scroll under; the text on them is ink on the same white as the card",
   ".proc-schema": "var(--bg), the page ground, inside the white product panel on the cited tier - a code block, and the only place on the site that sets one",
   // 25 Sep 2026 (Q10): ScanResult.dc.html's switch - a chip track with the
   // chosen half raised in white. Was a surface card per option, wash when on.
