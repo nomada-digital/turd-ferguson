@@ -1867,6 +1867,24 @@ html[data-motion="on"] .app-pending { animation: appPending 1.1s ease-in-out inf
 .app-heat-scroll > * { direction: ltr; }
 .app-heat-in { width: max-content; margin-right: auto; }
 .app-heat-mark { display: none; }
+/* Audit mobile-2 (8 Oct 2026): the Overview's by-day chart (OverviewChart.tsx)
+   is a 1056-wide board whose 12px type scales with it - 2.6px at 320, 7.7px at
+   768, and with the sidebar still 5.6px at 880 and 7.3px at 1024. Below an
+   880px plot, where that type would fall under 10px, the card draws Compact,
+   whose words are HTML. A container query, so it follows the card's own width
+   at every window size, with JS or without. Its lede names the gesture the
+   pointer has. */
+.app-ovc { container-type: inline-size; }
+.app-ovc-sm { display: none; }
+@container (max-width: 879px) {
+  .app-ovc-sm { display: grid; }
+  .app-ovc-lg { display: none !important; }
+}
+.app-coarse { display: none; }
+@media (pointer: coarse) {
+  .app-fine { display: none; }
+  .app-coarse { display: inline; }
+}
 /* Shown only on a phone: the compact cluster chart (T4b mobile, Mobile.dc.html). */
 .app-show-sm { display: none; }
 @media (max-width: 560px) {
