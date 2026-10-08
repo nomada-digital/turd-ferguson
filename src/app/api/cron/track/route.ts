@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { constantTimeEqual } from "@/lib/constant-time";
+import { sweepLifecycleMailSafely } from "@/lib/email/lifecycle-cron";
 import { dispatchTrackingRuns } from "@/lib/tracking/runner";
 
 export const runtime = "nodejs";
@@ -22,6 +23,12 @@ export const maxDuration = 60;
  * (client, day) row: a second call the same day dispatches nothing.
  *
  * Vercel Cron calls this with Authorization: Bearer <CRON_SECRET>.
+ *
+ * After the dispatch, whatever it did, the lifecycle emails that go by the
+ * calendar (8 Oct 2026, audit activation-1): trial_midpoint, trial_ending and
+ * setup_reminder, each behind its own flag (off until Danny approves it) and
+ * once per client (lib/email/lifecycle-sweep.ts, wired to Resend in
+ * lifecycle-cron.ts). Never fatal to the answer.
  */
 export async function GET(req: Request) {
   const secret = process.env.CRON_SECRET;
@@ -31,16 +38,19 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
+  let answer: { body: Record<string, unknown>; status: number };
   try {
     // Dispatched to the canonical origin, never this request's own host: under
     // Vercel Cron that is not necessarily alwayscited.com, and on 30 Sep no run
     // dispatched from it was ever claimed (lib/tracking/dispatch.ts).
     const out = await dispatchTrackingRuns();
     if (out.refused) console.warn(`[track] daily check refused: ${out.refused}`);
-    return NextResponse.json({ ok: true, ...out });
+    answer = { body: { ok: true, ...out }, status: 200 };
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
     console.warn(`[track] daily check failed: ${error}`);
-    return NextResponse.json({ ok: false, error }, { status: 502 });
+    answer = { body: { ok: false, error }, status: 502 };
   }
+  const mail = await sweepLifecycleMailSafely();
+  return NextResponse.json({ ...answer.body, mail }, { status: answer.status });
 }

@@ -249,7 +249,9 @@ const SENDERS: { file: string; sends: number; why: string }[] = [
   {
     file: "src/lib/email/lifecycle-mail.ts",
     sends: 1,
-    why: "the lifecycle emails, 1 Oct 2026 (R159 part 3) - welcome and plan_ended to a dashboard owner, only from the signed Stripe webhook, each behind its email_<name>_enabled flag, all false",
+    // "only from the signed Stripe webhook" until 8 Oct 2026 (review of 7e133a7): the runner,
+    // the setup route and the daily cron call it too; lifecycle-mail.ts's header names each.
+    why: "the lifecycle emails, 1 Oct 2026 (R159 part 3) - to a dashboard owner or the member who confirmed setup, from the signed Stripe webhook, the tracking runner, the setup route and the CRON_SECRET-gated daily cron, each behind its email_<name>_enabled flag, all false",
   },
 ];
 

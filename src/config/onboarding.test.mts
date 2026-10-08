@@ -28,10 +28,13 @@ test("the strip is drawn on the tier pages, /packages and /checkout", () => {
   }
 });
 
-test("the welcome email lists the same three steps", () => {
-  const mail = welcome({ tier: "tracked", clusters: 1, domain: "example.com", link: "https://example.com/x" });
+// 8 Oct 2026 (audit activation-16): welcome takes the plan's clusterLimit, and its
+// trial version (trial_started) carries the same strip.
+test("the welcome email lists the same three steps, paid and on the trial", () => {
+  const paid = welcome({ tier: "tracked", clusters: 1, clusterLimit: 10, domain: "example.com", link: "https://example.com/x" });
+  const trial = welcome({ tier: "tracked", clusters: 1, clusterLimit: 10, domain: "example.com", link: "https://example.com/x", trial: { ends: "22 Oct 2026, 3:30pm ET", charge: "$1 a month", billing: "https://example.com/b" } });
   assert.equal(NEXT_STEPS.length, 3);
-  for (const step of NEXT_STEPS) assert.ok(mail.text.includes(step), `welcome text lacks "${step}"`);
+  for (const mail of [paid, trial]) for (const step of NEXT_STEPS) assert.ok(mail.text.includes(step), `welcome text lacks "${step}"`);
 });
 
 test("no placement timeline in the strip", () => {

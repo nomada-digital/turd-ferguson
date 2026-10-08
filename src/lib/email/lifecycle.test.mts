@@ -3,21 +3,42 @@ import fs from "node:fs";
 import { test } from "node:test";
 
 import { COMPANY_LINE, CONTACT_EMAIL } from "../../config/contact.ts";
+import { trialCharge, trialMoment } from "../../config/trial.ts";
 import { TIER_PLAIN } from "../tier-text.ts";
-import { flagFor, flagOn, LIFECYCLE_EMAILS, previews, welcome } from "./lifecycle.ts";
+import { flagFor, flagOn, LIFECYCLE_EMAILS, planEnded, previews, previewSets, setupReminder, welcome } from "./lifecycle.ts";
 
 /** R159 (1 Oct 2026): the lifecycle templates' shared rules, on the preview fixtures. Nothing is sent. */
 
-const all = previews();
+/**
+ * A made-up price, so these tests check that the charge is worded by
+ * trialCharge and never hold a second copy of TRACKED_PRICE (pricing.ts is
+ * not loadable here; the preview page passes the real one).
+ */
+const PRICE = { us: 101, uk: 77 };
+const all = previews(PRICE);
+const sets = previewSets(PRICE);
+/** Every case of every email, as the preview page draws them. */
+const every = Object.entries(sets).flatMap(([name, list]) => list.map((p) => [`${name} (${p.label})`, p.mail] as const));
 
+/**
+ * Six until 8 Oct 2026, when the trial's three joined (audit activation-1,
+ * copy-4): trial_started (the welcome for a trial order), trial_midpoint and
+ * trial_ending, each behind its own flag.
+ */
 test("every lifecycle email has a template and a preview, and its flag is email_<name>_enabled", () => {
   assert.deepEqual(Object.keys(all).sort(), [...LIFECYCLE_EMAILS].sort());
-  assert.equal(LIFECYCLE_EMAILS.length, 6);
-  for (const n of LIFECYCLE_EMAILS) assert.match(flagFor(n), /^email_[a-z_]+_enabled$/);
+  assert.deepEqual(Object.keys(sets).sort(), [...LIFECYCLE_EMAILS].sort());
+  assert.equal(LIFECYCLE_EMAILS.length, 9);
+  for (const n of LIFECYCLE_EMAILS) {
+    assert.match(flagFor(n), /^email_[a-z_]+_enabled$/);
+    assert.ok(sets[n].length >= 1, `${n} has no preview`);
+    assert.equal(new Set(sets[n].map((p) => p.label)).size, sets[n].length, `${n}: two previews share a label`);
+  }
+  assert.ok(every.length >= 15, `only ${every.length} preview cases: the sweep below is reading too few`);
 });
 
 test("each has one button, the help block and the footer company line, in HTML and plain text", () => {
-  for (const [name, m] of Object.entries(all)) {
+  for (const [name, m] of every) {
     assert.equal(m.html.match(/<td bgcolor=/g)?.length, 1, `${name}: one button`);
     for (const part of [m.html, m.text]) {
       assert.ok(part.includes(COMPANY_LINE), `${name}: company line`);
@@ -30,7 +51,7 @@ test("each has one button, the help block and the footer company line, in HTML a
 });
 
 test("the brand is lowercase and tiers are TIER_PLAIN, never a capitalised form", () => {
-  for (const [name, m] of Object.entries(all)) {
+  for (const [name, m] of every) {
     for (const part of [m.subject, m.html, m.text]) {
       assert.doesNotMatch(part, /AlwaysCited|Alwayscited|always cited|Always(tracked|mentioned|everywhere)/, name);
       assert.doesNotMatch(part, /tier-name__accent|--brand-purple/, `${name}: no tier colouring in mail`);
@@ -40,13 +61,113 @@ test("the brand is lowercase and tiers are TIER_PLAIN, never a capitalised form"
   assert.ok(all.plan_ended.subject.includes(TIER_PLAIN.cited));
 });
 
+// "with 1 cluster" was asserted here for tracked until 8 Oct 2026 - the defect
+// audit activation-16 names: the alwaystracked plan is 10 clusters, and 1 is
+// only what signup makes. A placements order still states what it bought.
 test("what the buyer typed is escaped in the HTML", () => {
-  const m = welcome({ tier: "tracked", clusters: 1, domain: `a<b>&"c.com`, link: "https://alwayscited.com/app/auth?token=x&y=1" });
+  const m = welcome({ tier: "mentioned", clusters: 1, clusterLimit: 10, domain: `a<b>&"c.com`, link: "https://alwayscited.com/app/auth?token=x&y=1" });
   assert.ok(!m.html.includes("a<b>"), "domain escaped");
   assert.ok(m.html.includes("a&lt;b&gt;&amp;&quot;c.com"));
   assert.ok(m.html.includes('href="https://alwayscited.com/app/auth?token=x&amp;y=1"'));
   assert.ok(m.text.includes(`a<b>&"c.com`), "plain text is as typed");
   assert.match(m.text, /with 1 cluster\./);
+});
+
+test("activation-16: the alwaystracked welcome states the plan's 10 clusters, and on the trial never says bought", () => {
+  const base = { tier: "tracked" as const, clusters: 1, clusterLimit: 10, domain: "example.com", link: "https://example.com/x" };
+  const paid = welcome(base);
+  assert.match(paid.text, /tracks up to 10 clusters/);
+  assert.doesNotMatch(paid.text, /with 1 cluster/);
+  const trial = welcome({ ...base, trial: { ends: "22 Oct 2026, 3:30pm ET", charge: "$101 a month", billing: "https://example.com/b#set-billing" } });
+  assert.match(trial.text, /10 clusters/);
+  assert.match(trial.subject, /free trial/);
+  assert.match(trial.text, /free trial/);
+  assert.doesNotMatch(trial.text, /\bbought\b/i);
+  assert.doesNotMatch(trial.text, /with 1 cluster/);
+});
+
+test("activation-16: the setup reminder says what the runner does - prompts are read whether or not setup is confirmed", () => {
+  const some = setupReminder({ tier: "tracked", domain: "example.com", link: "https://example.com/s", withPrompts: 1, clusterLimit: 10 });
+  assert.match(some.text, /are being checked, but 9 of your 10 clusters are still empty/);
+  assert.doesNotMatch(some.text + some.html, /Nothing is checked/);
+  const none = setupReminder({ tier: "tracked", domain: "example.com", link: "https://example.com/s", withPrompts: 0, clusterLimit: 10 });
+  assert.match(none.text, /Nothing is checked until your first cluster has prompts/);
+  assert.equal(sets.setup_reminder.length, 2, "both cases are drawn for approval");
+});
+
+/**
+ * activation-1 and copy-4 (8 Oct 2026): the trial's emails, on a tracked-tier
+ * trial in both zones. Each running-trial email names the end moment as
+ * trialMoment words it for the market, the charge as trialCharge words it,
+ * and the cancel route, linked to the client's Billing. None says bought or
+ * receipt. The ended trial says it was not charged and that there is no second trial.
+ */
+const US_END = trialMoment("2026-10-22T19:30:00Z", "US");
+const UK_END = trialMoment("2026-10-22T13:30:00Z", "UK");
+
+test("activation-1, copy-4: trial_started, trial_midpoint and trial_ending name the end in the market's zone, the charge and the cancel route", () => {
+  assert.equal(US_END, "22 Oct 2026, 3:30pm ET");
+  assert.equal(UK_END, "22 Oct 2026, 14:30 UK time");
+  for (const name of ["trial_started", "trial_midpoint", "trial_ending"] as const) {
+    const cases = sets[name];
+    // Exactly a US and a UK case each until 8 Oct 2026 (review of 7e133a7), when the
+    // trial_midpoint and trial_ending previews grew a case per recap body. The zone is
+    // now read off each label, and both zones must still be drawn for every email.
+    const zone = (label: string) => /, (US|UK)$/.exec(label)?.[1];
+    assert.deepEqual([...new Set(cases.map((c) => zone(c.label)))].sort(), ["UK", "US"], `${name}: a US and a UK case, each labelled with its zone`);
+    for (const { label, mail } of cases) {
+      const [end, charge] = zone(label) === "US" ? [US_END, trialCharge("US", PRICE)] : [UK_END, trialCharge("UK", PRICE)];
+      const where = `${name} (${label})`;
+      assert.ok(mail.text.includes(end), `${where}: names ${end}`);
+      assert.ok(mail.text.includes(charge), `${where}: names ${charge}`);
+      assert.match(mail.text, /cancel[^\n]*Settings > Billing \(https:\/\/alwayscited\.com\/app\/tallyroo-com\/settings#set-billing\)/i, `${where}: the cancel route, linked`);
+      assert.match(mail.html, /<a href="https:\/\/alwayscited\.com\/app\/tallyroo-com\/settings#set-billing"[^>]*>Settings &gt; Billing<\/a>/, `${where}: the link in the HTML`);
+      assert.doesNotMatch(mail.subject + mail.text, /You bought|\bbought\b|receipt/i, where);
+    }
+  }
+  assert.match(sets.trial_started[0]!.mail.subject, /^Your 14-day free trial of alwaystracked has started$/);
+  assert.match(sets.trial_ending[0]!.mail.text, /To keep tracking, there is nothing to do\./);
+  assert.match(sets.trial_midpoint[0]!.mail.text, /named in 7 of 60 AI answers\. The other brand named most often: Xero, in 31 answers\./);
+  assert.match(sets.trial_midpoint[0]!.mail.text, /You are using 2 of your 10 clusters\./);
+  assert.match(sets.trial_midpoint[1]!.mail.text, /Nothing has been checked yet: no cluster has prompts\./);
+});
+
+/**
+ * Review of 7e133a7 (8 Oct 2026): /admin/emails says it draws every case a
+ * flag would send, and trial_ending drew one of the three bodies its recap
+ * can take, trial_midpoint two. Danny would have approved trial_ending
+ * without seeing "No check has finished yet" or "Nothing has been checked
+ * yet". Each preview must match exactly one body, so a reworded body fails
+ * here until it is named. What this cannot see: a fourth branch added to
+ * recapLines that no preview reaches.
+ */
+test("every recap body of trial_midpoint and trial_ending is drawn for approval", () => {
+  const BODIES = {
+    "checks read": /Since the first check on [^,]+, tallyroo\.com was named in \d+ of /,
+    "prompts live, no check finished": /No check has finished yet\. You are using \d+ of your \d+ clusters\./,
+    "nothing set up": /Nothing has been checked yet: no cluster has prompts\./,
+  };
+  for (const name of ["trial_midpoint", "trial_ending"] as const) {
+    for (const [body, re] of Object.entries(BODIES)) {
+      assert.ok(sets[name].some((p) => re.test(p.mail.text)), `${name}: the "${body}" body is not among its previews`);
+    }
+    for (const p of sets[name]) {
+      assert.equal(Object.values(BODIES).filter((re) => re.test(p.mail.text)).length, 1, `${name} (${p.label}): exactly one recap body`);
+    }
+  }
+});
+
+test("copy-4: plan_ended for a trial that ended uncharged - no receipt, not charged, no second trial; the paid one sends the owner to ask us", () => {
+  const trial = planEnded({ tier: "tracked", domain: "example.com", billing: "https://example.com/b", trial: true });
+  assert.match(trial.text, /You were not charged/);
+  assert.match(trial.text, /no second free trial/);
+  assert.doesNotMatch(trial.subject + trial.text, /receipt|pick the plan again|You bought/i);
+  const paid = planEnded({ tier: "cited", domain: "example.com", billing: "https://example.com/b" });
+  // "To restart, pick the plan again; the dashboard picks up where it stopped" until 8 Oct 2026:
+  // a new order cannot bring an ended client back (cbdffad), so it asks us, as the ended banner does.
+  assert.doesNotMatch(paid.text, /pick the plan again|picks up where it stopped/);
+  for (const m of [trial, paid]) assert.match(m.html, />Ask us to restart it<\/a>/);
+  assert.ok(sets.plan_ended.some((p) => /trial/.test(p.label)), "the trial case is drawn for approval");
 });
 
 test("the welcome carries the sign-in link on its one button and the 3-step strip", () => {
@@ -59,8 +180,11 @@ test("the welcome carries the sign-in link on its one button and the 3-step stri
 });
 
 test("the templates do not send: no mail client, network or flag write in the module", async () => {
-  const src = await import("node:fs").then((fs) => fs.readFileSync(new URL("./lifecycle.ts", import.meta.url), "utf8"));
-  assert.doesNotMatch(src, /resend|fetch\(|\.from\(|process\.env/i);
+  // lifecycle-schedule.ts joined 8 Oct 2026: it decides when, and must not send either.
+  for (const file of ["./lifecycle.ts", "./lifecycle-schedule.ts"]) {
+    const src = fs.readFileSync(new URL(file, import.meta.url), "utf8");
+    assert.doesNotMatch(src, /resend|fetch\(|\.from\(|process\.env/i, file);
+  }
 });
 
 test("a flag is on only for jsonb true; a missing row or any other value is off", () => {
@@ -80,7 +204,8 @@ test("every flag ships off, and each send site asks its flag before sending", as
   }
   const signup = read("../checkout/signup.ts");
   assert.equal(signup.match(/sendLifecycle\(/g)?.length, 2, "welcome and plan_ended are the two send sites");
-  assert.match(signup, /lifecycleOn\(db, "welcome"\)[\s\S]{0,300}sendLifecycle\(\{ memberEmail: o\.email, mail: welcome\(/);
+  // 8 Oct 2026 (audit activation-1): a trial order's welcome asks trial_started's flag, never welcome's.
+  assert.match(signup, /lifecycleOn\(db, trial \? "trial_started" : "welcome"\)[\s\S]{0,300}sendLifecycle\(\{ memberEmail: o\.email, mail: welcome\(/);
   assert.match(signup, /lifecycleOn\(db, "plan_ended"\)[\s\S]{0,800}sendLifecycle\(\{ memberEmail: m\.email as string, mail \}\)/);
   assert.match(signup, /: await sendLoginLink\(\{ memberEmail: o\.email, link \}\)/, "the login link stays the default while welcome is off");
   // The invite: branded only outside agency mode and with its flag on, else the plain inviteMail as before.
@@ -102,4 +227,40 @@ test("first_reading: flag first, the client's only finished run, no agency, the 
 test("the invite names who added you and the role", () => {
   const t = all.invite.text;
   assert.match(t, /sam@tallyroo\.com added you to the tallyroo\.com dashboard as a viewer/);
+});
+
+/**
+ * 8 Oct 2026 (audit activation-1): the cron's sends - trial_midpoint,
+ * trial_ending, setup_reminder - and Stripe's trial_will_end, read off the
+ * source the way first_reading is above. Each asks its flag before any read,
+ * claims its dashboard_events row before the send, mails live owners only and
+ * never in agency mode; the cron runs it after the dispatch and cannot fail on it.
+ */
+test("the lifecycle sweep: flags first, claim before send, live owners, no agency, after the dispatch", () => {
+  const sweep = fs.readFileSync(new URL("./lifecycle-sweep.ts", import.meta.url), "utf8");
+  const body = sweep.slice(sweep.indexOf("export async function sweepLifecycleMail("));
+  assert.ok(body.length > 500, "sweepLifecycleMail is gone from lifecycle-sweep.ts");
+  const flags = ["trial_midpoint", "trial_ending", "setup_reminder"].map((n) => body.indexOf(`lifecycleOn(db, "${n}")`));
+  for (const at of flags) assert.ok(at >= 0 && at < body.indexOf('.from("client_domains")'), "a flag is asked before the first read");
+  assert.match(body, /if \(!on\.trial_midpoint && !on\.trial_ending && !on\.setup_reminder\) return out;/);
+  assert.match(body, /if \(!due \|\| !on\[due\]\) continue;/, "a trial email goes only with its own flag on");
+  const deliver = sweep.slice(sweep.indexOf("async function deliver("), sweep.indexOf("export async function sweepLifecycleMail("));
+  // The send was sendLifecycle( until 8 Oct 2026 (review of 7e133a7): the sweep now takes its
+  // sender as io.send so lifecycle-sweep.test.mts can run it, and lifecycle-cron.ts hands it
+  // sendLifecycle - asserted below, with the sweep importing no sender of its own.
+  const claimAt = deliver.indexOf(".insert({ client_domain_id: c.id");
+  assert.ok(claimAt >= 0 && claimAt < deliver.indexOf("io.send("), "the claim is written before the send");
+  assert.doesNotMatch(sweep, /^import [^;]*(?:"resend"|lifecycle-mail|"server-only")/m, "the sweep sends only through the io it is handed");
+  const cronIo = fs.readFileSync(new URL("./lifecycle-cron.ts", import.meta.url), "utf8");
+  assert.match(cronIo, /return \{ send: sendLifecycle, origin: siteUrl\(\), price: TRACKED_PRICE \};/, "the live io is Resend, the canonical origin and the real price");
+  assert.match(cronIo, /sweepLifecycleMail\(supabaseAdmin\(\), lifecycleIo\(\)\)/);
+  assert.match(fs.readFileSync(new URL("../checkout/signup.ts", import.meta.url), "utf8"), /return mailTrialEnding\(db, lifecycleIo\(\), clientId\);/, "trial_will_end sends with the same io");
+  assert.match(deliver, /\.from\("dashboard_members"\)\.select\("email"\)\.eq\("account_id", c\.account_id\)\.eq\("role", "owner"\)\.is\("removed_at", null\)/);
+  assert.equal(body.match(/if \(agency\.has\(c\.account_id\)\) continue;/g)?.length, 2, "both loops skip agency mode");
+  const ending = sweep.slice(sweep.indexOf("export async function mailTrialEnding("));
+  assert.ok(ending.indexOf('lifecycleOn(db, "trial_ending")') >= 0 && ending.indexOf('lifecycleOn(db, "trial_ending")') < ending.indexOf("deliver("), "trial_will_end asks the flag first");
+  const cron = fs.readFileSync(new URL("../../app/api/cron/track/route.ts", import.meta.url), "utf8");
+  assert.ok(cron.indexOf("await dispatchTrackingRuns()") < cron.indexOf("await sweepLifecycleMailSafely()"), "the sweep runs after the dispatch");
+  const hook = fs.readFileSync(new URL("../../app/api/stripe/webhook/route.ts", import.meta.url), "utf8");
+  assert.match(hook, /trialWillEnd: \(sub\) => onTrialWillEnd\(supabaseAdmin\(\), sub\)/);
 });

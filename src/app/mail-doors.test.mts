@@ -190,14 +190,29 @@ const SENDERS: Record<
    * Part 5, same day: first_reading from runTrackingDay, once per client ever
    * (only when the run is the client's one finished run), the runner being
    * started only by the cron's signed dispatch - see link-mail.ts's entry.
+   * 8 Oct 2026 (audit activation-1): the trial's emails and the setup
+   * reminder from lifecycle-sweep.ts, called by the CRON_SECRET-gated
+   * /api/cron/track after its dispatch, and trial_ending also from Stripe's
+   * trial_will_end. Each once per client, claimed in dashboard_events before
+   * the send (a unique index in 20261008040000 makes the claim exact). The
+   * reach stays "signed by Stripe" as first_reading's did: every caller is
+   * behind a signature or the cron secret, and the evidence is the webhook's.
+   * Same day, review of 7e133a7: the sweep now takes its sender as an
+   * argument and lifecycle-cron.ts hands it sendLifecycle. And setup_confirmed
+   * (R166, 2 Oct 2026) was missing from this bound and from the module's own
+   * header, which said "only from the signed Stripe webhook": it goes from the
+   * setup route, to the signed-in owner or editor who confirmed, once a
+   * client. Both copies now name every caller.
    */
   "src/lib/email/lifecycle-mail.ts": {
     reach: "signed by Stripe",
     bound:
-      "Mails only a dashboard owner the webhook stored or read back with removed_at null. Sent only " +
-      "from the Stripe webhook after the signature verifies and the event id is newly recorded in " +
-      "stripe_events, or from a claimed tracking run when it is the client's first finished one, and " +
-      "only when its email_<name>_enabled flag is true; every flag starts false.",
+      "Mails only a dashboard owner the webhook stored or read back with removed_at null, or the signed-in " +
+      "owner or editor who confirmed setup. Sent only from the Stripe webhook after the signature verifies " +
+      "and the event id is newly recorded in stripe_events, from a claimed tracking run when it is the " +
+      "client's first finished one, from the setup route after its one setup_confirmed row, or from " +
+      "the daily cron behind CRON_SECRET once per client per email (a dashboard_events row claimed " +
+      "before the send), and only when its email_<name>_enabled flag is true; every flag starts false.",
     evidence: /if \(!verifyStripeSignature\(raw, signature, secret, nowS\)\) return/,
     where: "src/lib/checkout/webhook.ts",
   },

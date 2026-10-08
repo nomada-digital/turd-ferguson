@@ -10,14 +10,20 @@ import { isPlausibleDomain, normalizeDomain } from "../scan/domain.ts";
  * recorded fixture and never a live call: the signature is checked against
  * the raw body before anything is parsed; with no secret the door answers
  * 503 and acts on nothing, never skips the check; the event id is recorded
- * first and a replay answers 200 and does nothing; only the three events the
+ * first and a replay answers 200 and does nothing; only the events the
  * endpoint is registered for are acted on.
  */
 
 /** Stripe's own default tolerance for a signature's timestamp. */
 export const SIGNATURE_TOLERANCE_S = 300;
 
-export const HANDLED_EVENTS = ["checkout.session.completed", "customer.subscription.updated", "customer.subscription.deleted"] as const;
+/**
+ * customer.subscription.trial_will_end joined on 8 Oct 2026 (audit
+ * activation-1): Stripe sends it three days before a trial ends, and it is
+ * trial_ending's fallback trigger beside the daily cron. Acted on only once
+ * the Stripe endpoint is subscribed to it - until then Stripe never posts it.
+ */
+export const HANDLED_EVENTS = ["checkout.session.completed", "customer.subscription.updated", "customer.subscription.deleted", "customer.subscription.trial_will_end"] as const;
 export type HandledEvent = (typeof HANDLED_EVENTS)[number];
 
 function hmacHex(secret: string, data: string): string {
@@ -213,6 +219,7 @@ export type WebhookDeps = {
   /** `previous` is the event's previous_attributes, which is how a trial's conversion is seen. */
   updated: (sub: Record<string, unknown>, previous: Record<string, unknown>) => Promise<boolean>;
   deleted: (sub: Record<string, unknown>) => Promise<boolean>;
+  trialWillEnd: (sub: Record<string, unknown>) => Promise<boolean>;
 };
 
 export type WebhookAnswer = { status: number; body: { ok?: true; ignored?: string; error?: string } };
@@ -238,7 +245,13 @@ export async function handleWebhook(raw: string, signature: string | null, secre
   const obj = event.data.object;
   const type = event.type as HandledEvent;
   const done =
-    type === "checkout.session.completed" ? await deps.completed(completedOrder(obj), event.id) : type === "customer.subscription.updated" ? await deps.updated(obj, event.data.previous_attributes ?? {}) : await deps.deleted(obj);
+    type === "checkout.session.completed"
+      ? await deps.completed(completedOrder(obj), event.id)
+      : type === "customer.subscription.updated"
+        ? await deps.updated(obj, event.data.previous_attributes ?? {})
+        : type === "customer.subscription.trial_will_end"
+          ? await deps.trialWillEnd(obj)
+          : await deps.deleted(obj);
   if (!done) {
     await deps.forget(event.id);
     return { status: 500, body: { error: "handler_failed" } };
@@ -275,9 +288,44 @@ export function orderEmailText(o: CompletedOrder, outcome: string, siteOrigin: s
 
 /**
  * A trial that just became a paying subscription: customer.subscription.updated
- * with status active where it was trialing. Logged and nothing else - the
- * client, its limits and its trial_ends_at stay as they are.
+ * with status active where it was trialing. Logged; the client's
+ * trial_ends_at follows Stripe's trial_end through trialEndsAtAfter below.
  */
 export function trialConverted(sub: Record<string, unknown>, previous: Record<string, unknown>): boolean {
   return str(previous.status) === "trialing" && str(sub.status) === "active";
+}
+
+/**
+ * What client_domains.trial_ends_at becomes after a
+ * customer.subscription.updated, or undefined to leave it (8 Oct 2026, review
+ * of 7e133a7).
+ *
+ * The column was Stripe's trial_end as signup read it, and nothing moved it
+ * afterwards. A trial ended early in Stripe - charged on day 5 - still read
+ * as running, so the daily cron would have sent trial_midpoint and
+ * trial_ending to a paying client ("cancel before then and nothing is
+ * charged"), and the sidebar and Settings kept the trial line and its Cancel.
+ * Stripe's trial_end is the one source: it moves when a trial is extended,
+ * and becomes the moment it ended when one is ended early. Once the
+ * subscription has left its trial the column is never later than now, so
+ * nothing reads the trial as running. An update that touches neither the
+ * status out of trialing nor trial_end - a pack bought - leaves it alone.
+ */
+export function trialEndsAtAfter(sub: Record<string, unknown>, previous: Record<string, unknown>, nowMs: number = Date.now()): string | null | undefined {
+  const left = str(previous.status) === "trialing" && str(sub.status) !== "trialing";
+  const moved = Object.prototype.hasOwnProperty.call(previous, "trial_end");
+  if (!left && !moved) return undefined;
+  const end = typeof sub.trial_end === "number" ? sub.trial_end * 1000 : null;
+  if (left) return new Date(Math.min(end ?? nowMs, nowMs)).toISOString();
+  return end === null ? null : new Date(end).toISOString();
+}
+
+/**
+ * trial_will_end is worth acting on only for a subscription still in its
+ * trial: Stripe also sends it when a trial is ended early, and then the
+ * reminder would arrive after the charge. `nowMs` for the tests.
+ */
+export function trialStillRunning(sub: Record<string, unknown>, nowMs: number = Date.now()): boolean {
+  if (str(sub.status) !== "trialing") return false;
+  return typeof sub.trial_end !== "number" || sub.trial_end * 1000 > nowMs;
 }

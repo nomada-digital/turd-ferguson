@@ -1,5 +1,5 @@
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { onCheckoutCompleted, onSubscriptionDeleted, onSubscriptionUpdated } from "@/lib/checkout/signup";
+import { onCheckoutCompleted, onSubscriptionDeleted, onSubscriptionUpdated, onTrialWillEnd } from "@/lib/checkout/signup";
 import { handleWebhook } from "@/lib/checkout/webhook";
 
 export const runtime = "nodejs";
@@ -8,7 +8,9 @@ export const dynamic = "force-dynamic";
 /**
  * Stripe's webhook (BRIEF-3 C4, R92/R110/R117, 30 Sep 2026). Registered in
  * Stripe for checkout.session.completed, customer.subscription.updated and
- * customer.subscription.deleted. The raw body is verified against
+ * customer.subscription.deleted; customer.subscription.trial_will_end is
+ * handled from 8 Oct 2026 (trial_ending's fallback) and is acted on once the
+ * endpoint is subscribed to it in the Stripe Dashboard. The raw body is verified against
  * STRIPE_WEBHOOK_SECRET before it is parsed; unset, the door answers 503 and
  * acts on nothing. The event id goes into stripe_events first, so a replay is
  * a 200 that does nothing. The rules are in lib/checkout/webhook.ts, the
@@ -32,6 +34,7 @@ export async function POST(req: Request) {
     completed: (order, eventId) => onCheckoutCompleted(supabaseAdmin(), order, eventId),
     updated: (sub, previous) => onSubscriptionUpdated(supabaseAdmin(), sub, previous),
     deleted: (sub) => onSubscriptionDeleted(supabaseAdmin(), sub),
+    trialWillEnd: (sub) => onTrialWillEnd(supabaseAdmin(), sub),
   });
   return Response.json(answer.body, { status: answer.status });
 }
