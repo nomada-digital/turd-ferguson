@@ -378,23 +378,68 @@ test("Placements draws the same from its cluster's prompts, without brands, as f
  * it as an empty list, and say zero.
  */
 const src = (p: string) => readFileSync(new URL(p, import.meta.url), "utf8");
-const USES: [string, string, RegExp, string[]][] = [
-  ["the one-cluster page", "../../components/app/OneCluster.tsx", /data\.answers/g, ["answers: data.answers, serp: data.serp, range, before, today, engines", "promptStrip({ answers: data.answers", "promptBrands({ answers: data.answers",
-    // 8 Oct 2026 (merge of audit packages A and C): the picked prompt's unread brand answers - its own answers, inside the narrow read.
-    "brandGaps(data.answers.filter((a) => a.question_id === P.id), range)"]],
-  ["the placements screen", "./placements-screen.ts", /data\.answers/g, ["answers: data.answers, serp: data.serp, range, before: null", "cites: citeRows(data.answers)"]],
-  ["Reports", "../../app/app/[client]/reports/page.tsx", /(?<![-\w])data\b(?!\.clusters)/g, ["monthFigures(monthSlice(data, m.range)",
-    // 8 Oct 2026 (merge of audit packages B and C): the range's lost checks, compared above on the verdicts read.
-    "note={runNote(data, range, today)}"]],
+/**
+ * Review of the integration of audit packages A, B and C (8 Oct 2026): `data` handed on whole is a use of its
+ * answers too. OneCluster's runNote(data, ...) reads them through storedAnswers, and /data\.answers/ never saw
+ * it - which is how B's note passed this census on C's narrow read and said "none of its reads came back" of a
+ * pending cluster. So the one-cluster page and the placements screen also count a bare `data` that is not a
+ * member read, a JSX attribute or a type (`data.questions`, `data={{`, `data: OverviewData`): the structure,
+ * runs and positions are read whole on every shape, so their member reads are not uses. `binds` is the
+ * destructure that names `data`, which is not a use. Each recorded use is paired with the line above that
+ * compares it, so dropping a comparison fails here too.
+ */
+const WHOLE = /data\.answers|(?<![-\w.])data\b(?![-\w.]|\s*[:=])/g;
+const USES: { what: string; path: string; use: RegExp; binds: number; lines: [page: string, compared: string][] }[] = [
+  {
+    what: "the one-cluster page",
+    path: "../../components/app/OneCluster.tsx",
+    use: WHOLE,
+    binds: 1,
+    lines: [
+      ["answers: data.answers, serp: data.serp, range, before, today, engines", "chart: clusterChart(input, id)"],
+      ["promptStrip({ answers: data.answers", "promptStrip({ answers: data.answers, range, engines }, p.id)"],
+      ["promptBrands({ answers: data.answers", "promptBrands({ answers: data.answers, range }, p.id, f.client.brand)"],
+      // 8 Oct 2026 (merge of audit packages A and C): the picked prompt's unread brand answers - its own answers, inside the narrow read.
+      ["brandGaps(data.answers.filter((a) => a.question_id === P.id), range)", "brandGaps(data.answers.filter((a) => a.question_id === p.id), range)"],
+      // 8 Oct 2026 (review of the integration): the range's lost checks, on the days the cluster's prompts were asked.
+      ["runNote(data, range, today, { askedOn })", "note: runNote(data, range, f.today, { askedOn: askedOnFor(data.questions, id) })"],
+    ],
+  },
+  {
+    what: "the placements screen",
+    path: "./placements-screen.ts",
+    use: WHOLE,
+    binds: 0,
+    lines: [
+      ["answers: data.answers, serp: data.serp, range, before: null", "answers: data.answers, serp: data.serp, range, before: null, today: f.today, engines }, id)"],
+      ["cites: citeRows(data.answers)", "cites: citeRows(data.answers), engines"],
+    ],
+  },
+  {
+    what: "Reports",
+    path: "../../app/app/[client]/reports/page.tsx",
+    use: /(?<![-\w])data\b(?!\.clusters)/g,
+    binds: 1,
+    lines: [
+      ["monthFigures(monthSlice(data, m.range)", "monthFigures(monthSlice(narrow, m.range), m.range, opts)"],
+      // 8 Oct 2026 (merge of audit packages B and C): the range's lost checks, compared above on the verdicts read.
+      ["note={runNote(data, range, today)}", "assert.equal(runNote(narrow, range, f.today), note"],
+    ],
+  },
 ];
 
 test("census: the pages on a narrow read use their answers only where compared above", () => {
-  for (const [what, path, use, lines] of USES) {
+  // The comparisons are this file's own lines above the census, so a recorded pair cannot match itself.
+  const self = src("./read-shape.test.mts");
+  const compared = self.slice(0, self.indexOf("const WHOLE = "));
+  for (const { what, path, use, binds, lines } of USES) {
     const text = src(path);
     const hits = [...text.matchAll(use)].length;
-    for (const l of lines) assert.ok(text.includes(l), `${what}: "${l}" is gone - check its figures above and update this census`);
-    // Reports also binds `data` in its destructure; the rest are the uses.
-    const expected = what === "Reports" ? lines.length + 1 : lines.length;
+    for (const [l, c] of lines) {
+      assert.ok(text.includes(l), `${what}: "${l}" is gone - check its figures above and update this census`);
+      assert.ok(compared.includes(c), `${what}: "${l}" is no longer compared above ("${c}") - compare it again before updating this census`);
+    }
+    const expected = lines.length + binds;
     assert.equal(hits, expected, `${what} uses its answers ${hits} times, ${expected} recorded`);
   }
   const reports = src("../../app/app/[client]/reports/page.tsx");
