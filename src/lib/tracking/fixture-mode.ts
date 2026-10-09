@@ -5,6 +5,8 @@ import { PROMPTS_PER_CLUSTER } from "./limits.ts";
 import type { OrderPick } from "./order-keyword.ts";
 import type { ClusterNote, OverviewData } from "./overview-data.ts";
 import type { PlacementRow } from "./placement-figures.ts";
+import { sees } from "./scope.ts";
+import type { SettingsData } from "./settings-data.ts";
 
 /**
  * The T9 fixture switch (R93, 29 Sep 2026; BRIEF-2 T9). `TRACKING_FIXTURE=1`
@@ -43,9 +45,12 @@ export type Fixture = {
   members: FixtureMember[];
   /** R180: the newest order's typed keyword and scan, as orders stores them; only the signup-typed state has one. */
   order?: OrderPick | null;
+  /** AG-1 (9 Oct 2026): the account's other clients, beside `client`. They have no readings. */
+  others?: Fixture["client"][];
 };
 
-export type FixtureMember = { email: string; name: string | null; role: string; last_login_at: string | null; removed_at?: string | null };
+/** `clients` (AG-1, 9 Oct 2026): the client ids a member is limited to, as dashboard_member_clients lists them; absent is every client. */
+export type FixtureMember = { email: string; name: string | null; role: string; last_login_at: string | null; removed_at?: string | null; clients?: string[] };
 
 /** A placement as fixture.json stores it; url_key is computed on read, as the admin writer computes it. */
 export type FixturePlacement = Omit<PlacementRow, "url_key"> & { cluster_id: string };
@@ -93,6 +98,38 @@ export function fixtureUnreadable(env: Record<string, string | undefined> = proc
  */
 /** Every TRACKING_FIXTURE_STATE, unset being `default`. Anything else serves the default. */
 export const FIXTURE_STATES = ["default", "signup", "signup-typed", "new", "young", "partial", "failed", "unreadable", "stopped", "ungrouped", "pilot-mixed", "uncited", "long", "trial", "trial-ending", "trial-cancelled", "ended", "brands-unread"] as const;
+
+/** Every client on the fixture's account, the main one first, as clientsFor orders them (oldest first). */
+export function fixtureAccount(f: Fixture): Fixture["client"][] {
+  return [f.client, ...(f.others ?? [])];
+}
+
+/**
+ * Settings' read on the fixture, as loadSettings answers it: removed members
+ * stay in the file, as the table keeps them, and are skipped as every read
+ * skips them; so is a member limited to the account's other clients (AG-1).
+ */
+export function fixtureSettings(f: Fixture, clientId: string): SettingsData {
+  const account = fixtureAccount(f);
+  if (!account.some((c) => c.id === clientId)) return { aliases: [], members: [], accountClients: 1, scoping: true };
+  return {
+    accountClients: account.length,
+    scoping: true,
+    aliases: clientId === f.client.id ? f.aliases : [],
+    members: f.members
+      .filter((m) => !m.removed_at && sees(m.clients, clientId))
+      .map((m) => ({ email: m.email, name: m.name, role: m.role, last_login_at: m.last_login_at, clients: m.clients?.length ?? null })),
+  };
+}
+
+/** The clients this email sees on the fixture, with its role: none unless it is the live session, and only its scope's when it has one. */
+export function fixtureClients(f: Fixture, email: string): (Fixture["client"] & { role: string })[] {
+  if (!fixtureLive(f, email)) return [];
+  const scope = f.members.find((m) => m.email === email && !m.removed_at)?.clients;
+  return fixtureAccount(f)
+    .filter((c) => sees(scope, c.id))
+    .map((c) => ({ ...c, role: f.member.role }));
+}
 
 /**
  * The alwaystracked trial and its end (8 Oct 2026, audit activation-14): the

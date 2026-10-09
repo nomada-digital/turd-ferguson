@@ -155,7 +155,8 @@ const RECORDED: Record<string, string> = {
   // 29 Sep 2026, T2. Both render only on /admin/tracking, behind the /admin
   // Basic auth; the requester is Nomada, and the id is used only to group
   // members and post it back as a hidden field to the admin's own action.
-  "src/app/admin/tracking/page.tsx :: account_id, email, role":
+  // 9 Oct 2026 (AG-1): the member id joined, to read each member's client scope; same page, same reason.
+  "src/app/admin/tracking/page.tsx :: id, account_id, email, role":
     "admin-only page; groups dashboard members under their client. Never reaches a visitor.",
   // 29 Sep 2026, BRIEF-3 C2: the limit columns became cluster_limit; same read, same reason.
   // 30 Sep 2026: brand_name and brand_aliases added, for the "names the brand" flag on live prompts.
@@ -164,7 +165,8 @@ const RECORDED: Record<string, string> = {
   // 29 Sep 2026, T3. The signed-in member's memberships and clients; the
   // account id is used only to join the two and is dropped before return
   // (MemberClient has no account_id), so no page or response carries it.
-  "src/lib/tracking/member.ts :: account_id, role":
+  // 9 Oct 2026 (AG-1): the member id joined, to read the member's client scope (scope.ts readScopes).
+  "src/lib/tracking/member.ts :: id, account_id, role":
     "joins a member to their accounts server-side; clientsFor returns no account_id.",
   // 30 Sep 2026, T6 part 1: cluster_limit added for the Clusters page's usage bar; account_id still stays server-side.
   // 8 Oct 2026: trial_ends_at and trial_cancelled_at added for the plan card's trial line; account_id still stays server-side.
@@ -229,7 +231,11 @@ const MENTIONED: Record<string, string> = {
     "Used only in team.ts filters and writes; the route answers with a 303 carrying a toast word and an email, never the id.",
   "src/lib/tracking/team.ts":
     "R142 part 2 (1 Oct 2026): filters and writes dashboard_members by the account_id the member route passes; " +
-    "returns emails, roles and removed_at only, never the id.",
+    "returns emails, roles and removed_at only, never the account id. Since 9 Oct 2026 (AG-1) also each member's own " +
+    "row id and client scope, which the route uses for its writes and never puts in the 303.",
+  "src/lib/tracking/scope.ts":
+    "AG-1 (9 Oct 2026): visibleClients joins a member's memberships to client rows by account_id, a pure function " +
+    "clientsFor calls server-side. It hands each row back unspread with its role, and clientsFor names the fields it returns.",
   "src/lib/checkout/signup.ts":
     "C4 (30 Sep 2026): writes the column on client_domains and dashboard_members when a " +
     "paid checkout from a scan becomes a client. Writes, behind the Stripe signature; " +

@@ -8,6 +8,7 @@ import type { UpsellMode } from "@/lib/tracking/ask";
 import { formatDay } from "@/lib/tracking/figures";
 import { KEYWORDS_PER_CLUSTER, PROMPTS_PER_CLUSTER } from "@/lib/tracking/limits";
 import type { Member } from "@/lib/tracking/settings-data";
+import { removeLine, scopeLine } from "@/lib/tracking/team";
 
 /**
  * Settings (R142 part 1, 1 Oct 2026; BRIEF-4 P2). No board: the Clusters
@@ -39,6 +40,7 @@ const dayOf = (iso: string) => formatDay(new Date(iso).toLocaleDateString("en-CA
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 const BUTTON = { height: "40px", padding: "0 14px", border: `1px solid ${T.line}`, borderRadius: "10px", background: T.surface, color: T.ink, fontFamily: "inherit", fontSize: "13px", fontWeight: 600, cursor: "pointer" } as const;
 const DARK = { ...BUTTON, border: 0, background: T.ink, color: T.surface } as const;
+const RADIO = { width: "18px", height: "18px", margin: 0, accentColor: T.accent, cursor: "pointer", flexShrink: 0 } as const;
 const FIELD = { height: "40px", padding: "0 12px", border: `1px solid ${T.line}`, borderRadius: "10px", background: T.surface, color: T.ink, fontFamily: "inherit", fontSize: "14px", boxSizing: "border-box" } as const;
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
@@ -73,9 +75,17 @@ export default function Settings({
   ended = false,
   livePrompts = 1,
   accountClients = 1,
+  scoping = true,
 }: {
-  /** Clients on this account: every member sees all of them (audit security-2). */
+  /**
+   * Clients on this account (AG-1, 9 Oct 2026). With two or more, owners see
+   * which clients each member sees, Remove says what it takes, and the invite
+   * asks: this client only (the default) or every client. It replaced the
+   * 8 Oct line saying everyone saw every client (audit security-2).
+   */
   accountClients?: number;
+  /** False while dashboard_member_clients is not there yet: every member sees every client, so the invite is to every client and says so. */
+  scoping?: boolean;
   /** client_domains.status is ended, and how many prompts are live: neither gets "Tomorrow at 06:00" (8 Oct 2026, audit activation-4/5). */
   ended?: boolean;
   livePrompts?: number;
@@ -166,12 +176,6 @@ export default function Settings({
 
       <section aria-labelledby="set-team" style={SECTION}>
         <h2 id="set-team" style={HEAD}>Team</h2>
-        {/* 8 Oct 2026 (audit security-2): membership is per account, so say who sees what before anyone is invited. */}
-        {accountClients > 1 ? (
-          <p style={{ margin: 0, borderTop: `1px solid ${T.line}`, padding: "14px 24px", fontSize: "14px", lineHeight: 1.5, color: T.ink }}>
-            {`Everyone on this team sees all ${accountClients} clients on this account, not only ${domain}.`}
-          </p>
-        ) : null}
         {members.length === 0 ? (
           <p style={{ margin: 0, padding: "18px 24px", fontSize: "14px", color: T.soft }}>No members to show.</p>
         ) : (
@@ -184,6 +188,8 @@ export default function Settings({
                     {m.email === email ? <span style={{ marginLeft: "8px", padding: "1px 8px", borderRadius: "999px", background: T.wash, border: `1px solid ${T.washLine}`, fontSize: "11px", fontWeight: 700 }}>You</span> : null}
                   </span>
                   {m.name ? <span style={{ fontSize: "13px", color: T.soft, overflowWrap: "anywhere" }}>{m.email}</span> : null}
+                  {/* AG-1 (9 Oct 2026): owners see who sees which clients; nobody else is told how many the account has. */}
+                  {owner && scopeLine(m.clients, accountClients, domain) ? <span className="set-scope" style={{ fontSize: "13px", color: T.soft, overflowWrap: "anywhere" }}>{scopeLine(m.clients, accountClients, domain)}</span> : null}
                 </span>
                 <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "2px", fontSize: "13px", flexShrink: 0, textAlign: "right", marginLeft: "auto" }}>
                   <span style={{ fontWeight: 600, color: T.ink }}>{cap(m.role)}</span>
@@ -206,7 +212,7 @@ export default function Settings({
                       <form method="post" action={action} style={{ margin: "8px 0 0", display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "8px", textAlign: "right" }}>
                         <input type="hidden" id={`tm-rm-op-${i}`} name="op" value="remove" />
                         <input type="hidden" id={`tm-rm-email-${i}`} name="email" value={m.email} />
-                        <span style={{ fontSize: "13px", color: T.soft, maxWidth: "260px" }}>{accountClients > 1 ? `They lose access to all ${accountClients} clients on this account at once.` : "They lose access to this dashboard at once."}</span>
+                        <span style={{ fontSize: "13px", color: T.soft, maxWidth: "260px" }}>{removeLine(m.clients, accountClients, domain)}</span>
                         <SubmitButton busy="Removing..." style={DARK}>Remove {m.name ?? m.email}</SubmitButton>
                       </form>
                     </details>
@@ -243,6 +249,25 @@ export default function Settings({
                   <option value="viewer">Viewer</option>
                 </select>
               </label>
+              {/* AG-1 (9 Oct 2026): on an account with two or more clients, this client only unless the owner picks every client. */}
+              {accountClients > 1 && scoping ? (
+                <fieldset style={{ flexBasis: "100%", margin: 0, padding: 0, border: 0, display: "flex", flexWrap: "wrap", gap: "8px 20px", fontSize: "14px", color: T.ink }}>
+                  <legend style={{ padding: 0, marginBottom: "6px", fontSize: "13px", color: T.soft }}>Who they see</legend>
+                  <label style={{ display: "flex", alignItems: "center", gap: "8px", minHeight: "24px", overflowWrap: "anywhere" }}>
+                    <input type="radio" id="tm-inv-scope-client" name="scope" value="client" defaultChecked style={RADIO} />
+                    {`Only ${domain}`}
+                  </label>
+                  <label style={{ display: "flex", alignItems: "center", gap: "8px", minHeight: "24px" }}>
+                    <input type="radio" id="tm-inv-scope-account" name="scope" value="account" style={RADIO} />
+                    {`Every client on this account (${accountClients})`}
+                  </label>
+                </fieldset>
+              ) : accountClients > 1 ? (
+                <>
+                  <input type="hidden" id="tm-inv-scope" name="scope" value="account" />
+                  <span style={{ flexBasis: "100%", fontSize: "14px", color: T.ink }}>{`They will see all ${accountClients} clients on this account.`}</span>
+                </>
+              ) : null}
               <SubmitButton busy="Sending invite..." style={DARK}>Send invite</SubmitButton>
               {/* R151 (3 Oct 2026): the refusal on the form it is about (Baymard forms, inline errors; WCAG 2.2 3.3.1). The address is not carried back, so the field is empty. */}
               {inviteError ? (

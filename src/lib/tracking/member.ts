@@ -4,11 +4,15 @@ import { cookies } from "next/headers";
 
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
+import { readScopes, visibleClients } from "./scope.ts";
 import { SESSION_COOKIE, hashToken, isTokenShape } from "./session.ts";
 
 /**
  * Who is looking at /app, and which clients they may see (T3, 29 Sep 2026).
- * A member sees exactly the clients on the accounts they belong to.
+ * A member sees the clients on the accounts they belong to - every one, or,
+ * since AG-1 (9 Oct 2026, scope.ts), only those their scope lists. Every /app
+ * page and route finds its client in this list, so a client outside it is a
+ * 404 and is never in the switcher.
  */
 
 export type MemberClient = {
@@ -47,19 +51,22 @@ export async function sessionEmail(): Promise<string | null> {
 /** Every client this email may see, oldest first, with the member's role on it. */
 export async function clientsFor(email: string): Promise<(MemberClient & { role: string })[]> {
   const db = supabaseAdmin();
-  const { data: memberships, error: mErr } = await db.from("dashboard_members").select("account_id, role").eq("email", email).is("removed_at", null);
+  const { data: memberships, error: mErr } = await db.from("dashboard_members").select("id, account_id, role").eq("email", email).is("removed_at", null);
   if (mErr) throw new Error(`could not read memberships: ${mErr.message}`);
-  const roleOf = new Map((memberships ?? []).map((m) => [m.account_id as string, m.role as string]));
-  if (!roleOf.size) return [];
+  const mine = (memberships ?? []).map((m) => ({ id: m.id as string, account_id: m.account_id as string, role: m.role as string }));
+  if (!mine.length) return [];
+  // AG-1: a failed scope read throws here rather than reading as every client.
+  const scopes = await readScopes(db, mine.map((m) => m.id));
   const { data: rows, error: cErr } = await db
     .from("client_domains")
     .select("id, account_id, slug, domain, brand_name, market, tier, started_on, question_limit, keyword_limit, cluster_limit, trial_ends_at, trial_cancelled_at, status")
-    .in("account_id", [...roleOf.keys()])
+    .in("account_id", [...new Set(mine.map((m) => m.account_id))])
     .not("slug", "is", null)
     .order("created_at", { ascending: true });
   if (cErr) throw new Error(`could not read clients: ${cErr.message}`);
-  return (rows ?? []).map((r) => ({
-    id: r.id as string,
+  // Named fields only: account_id is used for the join and never returned.
+  return visibleClients(mine, scopes.of, (rows ?? []) as { id: string; account_id: string; [k: string]: unknown }[]).map(({ client: r, role }) => ({
+    id: r.id,
     slug: r.slug as string,
     domain: r.domain as string,
     brand: r.brand_name as string | null,
@@ -72,7 +79,7 @@ export async function clientsFor(email: string): Promise<(MemberClient & { role:
     trial_ends_at: (r.trial_ends_at as string | null) ?? null,
     trial_cancelled_at: (r.trial_cancelled_at as string | null) ?? null,
     status: (r.status as string | null) ?? "active",
-    role: roleOf.get(r.account_id as string) ?? "viewer",
+    role,
   }));
 }
 

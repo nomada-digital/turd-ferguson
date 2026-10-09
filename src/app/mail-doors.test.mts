@@ -232,7 +232,8 @@ const SENDERS: Record<
     bound:
       "Needs a dashboard session and the owner role on the client. Mails the address the owner invited, " +
       "with no login token, owner as reply-to. At most INVITES_PER_OWNER_PER_DAY invites an owner a day, " +
-      "counted off dashboard_events member_invite rows before the write, and MEMBERS_PER_ACCOUNT live members.",
+      "counted off dashboard_events member_invite rows before the write, and MEMBERS_PER_CLIENT live members who see the " +
+      "client (MEMBERS_PER_ACCOUNT an account until 9 Oct 2026, AG-1).",
     evidence: /export const INVITES_PER_OWNER_PER_DAY = \d+/,
     where: "src/lib/tracking/team.ts",
   },

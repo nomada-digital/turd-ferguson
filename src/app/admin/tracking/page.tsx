@@ -5,6 +5,7 @@ import { supabaseAdmin, supabaseConfigured } from "@/lib/supabase/admin";
 import { ADMIN_LIMITS, UPSELL_MODES, trackingDay } from "@/lib/tracking/decide";
 import { runIsStuck } from "@/lib/tracking/dispatch";
 import { PROMPTS_PER_CLUSTER, type Subject, namesBrandIn, trackingCounts } from "@/lib/tracking/limits";
+import { readScopes, sees } from "@/lib/tracking/scope";
 import { SETUP_CONFIRMED_EVENT, setupState } from "@/lib/tracking/setup-landing";
 
 import { ActionForm } from "./ActionForm";
@@ -74,7 +75,7 @@ export default async function TrackingAdmin() {
       .in("client_domain_id", ids)
       .gte("run_date", since)
       .order("run_date", { ascending: false }),
-    db.from("dashboard_members").select("account_id, email, role").in("account_id", accounts).is("removed_at", null),
+    db.from("dashboard_members").select("id, account_id, email, role").in("account_id", accounts).is("removed_at", null),
     db.from("accounts").select("id, upsell_mode, upsell_contact_email").in("id", accounts),
     db
       .from("tracked_clusters")
@@ -89,6 +90,8 @@ export default async function TrackingAdmin() {
   if (kErr) throw new Error(`could not read tracked keywords: ${kErr.message}`);
   if (rErr) throw new Error(`could not read tracking runs: ${rErr.message}`);
   if (mErr) throw new Error(`could not read dashboard members: ${mErr.message}`);
+  // AG-1 (9 Oct 2026): a member limited to some clients is listed only under those.
+  const scopes = await readScopes(db, (members ?? []).map((m) => m.id as string));
   if (acErr) throw new Error(`could not read accounts: ${acErr.message}`);
   if (clErr) throw new Error(`could not read clusters: ${clErr.message}`);
   if (sErr) throw new Error(`could not read setup confirms: ${sErr.message}`);
@@ -131,7 +134,7 @@ export default async function TrackingAdmin() {
         const rs = of(runs, id);
         const todayRun = rs.find((r) => r.run_date === today);
         const cost14 = rs.reduce((n, r) => n + Number(r.dfs_cost ?? 0), 0);
-        const ms = of(members, c.account_id as string, "account_id");
+        const ms = of(members, c.account_id as string, "account_id").filter((m) => sees(scopes.of.get(m.id as string), id));
         const account = (accountRows ?? []).find((a) => a.id === c.account_id);
         return (
           <section key={id} style={{ border: `1px solid ${T.line}`, borderRadius: "10px", padding: "16px", marginBottom: "16px" }}>
@@ -180,7 +183,12 @@ export default async function TrackingAdmin() {
             <EditOrStop client={id} prompts={liveQ} keywords={liveK} />
             <div>
               <strong style={{ fontSize: "13px" }}>Members</strong>{" "}
-              {ms.map((m) => `${m.email as string} (${m.role as string})`).join(", ") || "none"}
+              {ms
+                .map((m) => {
+                  const only = scopes.of.get(m.id as string)?.length;
+                  return `${m.email as string} (${m.role as string}${only ? `, ${only === 1 ? "this client only" : `this and ${only - 1} more`}` : ""})`;
+                })
+                .join(", ") || "none"}
               <ActionForm action={setMember} submit="Save member">
                 <input type="hidden" name="account" value={c.account_id as string} maxLength={ADMIN_LIMITS.id} />
                 <input name="email" maxLength={ADMIN_LIMITS.email} placeholder="Email" style={{ ...input, width: "220px" }} aria-label="Member email" />

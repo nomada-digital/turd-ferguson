@@ -112,23 +112,23 @@ test("R168 part 2: a pending cluster's prompts are rewritten in place; a prompt 
 test("R168 part 3: invite, role and remove change fixture.members under team.ts's rules", () => {
   const now = "2026-10-02T00:00:00Z";
   const live = (f: typeof fx) => f.members.filter((m) => !m.removed_at).map((m) => `${m.email}:${m.role}`);
-  const i = fixtureTeam(fx, { op: "invite", email: "new@example.com", role: "viewer", now });
+  const i = fixtureTeam(fx, { op: "invite", email: "new@example.com", role: "viewer", scope: null, slug: "tallyroo", now });
   assert.ok(i.ok);
   assert.ok(live(i.fixture).includes("new@example.com:viewer"));
-  const back = fixtureTeam(fx, { op: "invite", email: "gone@example.com", role: "viewer", now });
+  const back = fixtureTeam(fx, { op: "invite", email: "gone@example.com", role: "viewer", scope: null, slug: "tallyroo", now });
   assert.ok(back.ok);
   assert.equal(back.fixture.members.filter((m) => m.email === "gone@example.com").length, 1, "a removed row is revived, not duplicated");
   assert.ok(live(back.fixture).includes("gone@example.com:viewer"));
-  assert.equal(fixtureTeam(fx, { op: "invite", email: "editor@example.com", role: "viewer", now }).ok, false, "already on the team");
-  const r = fixtureTeam(fx, { op: "role", email: "editor@example.com", role: "viewer", now });
+  assert.equal(fixtureTeam(fx, { op: "invite", email: "editor@example.com", role: "viewer", scope: null, slug: "tallyroo", now }).ok, false, "already on the team");
+  const r = fixtureTeam(fx, { op: "role", email: "editor@example.com", role: "viewer", scope: null, slug: "tallyroo", now });
   assert.ok(r.ok && live(r.fixture).includes("editor@example.com:viewer"));
-  assert.equal(fixtureTeam(fx, { op: "role", email: "viewer@example.com", role: "viewer", now }).ok, false, "already a viewer");
-  const x = fixtureTeam(fx, { op: "remove", email: "viewer@example.com", role: null, now });
+  assert.equal(fixtureTeam(fx, { op: "role", email: "viewer@example.com", role: "viewer", scope: null, slug: "tallyroo", now }).ok, false, "already a viewer");
+  const x = fixtureTeam(fx, { op: "remove", email: "viewer@example.com", role: null, scope: null, slug: "tallyroo", now });
   assert.ok(x.ok);
   assert.equal(x.fixture.members.find((m) => m.email === "viewer@example.com")!.removed_at, now, "removing never deletes");
-  assert.equal(fixtureTeam(fx, { op: "remove", email: fx.member.email, role: null, now }).ok, false, "never yourself");
+  assert.equal(fixtureTeam(fx, { op: "remove", email: fx.member.email, role: null, scope: null, slug: "tallyroo", now }).ok, false, "never yourself");
   const editor = { ...fx, member: { email: "editor@example.com", role: "editor" } };
-  assert.deepEqual(fixtureTeam(editor, { op: "invite", email: "new@example.com", role: "viewer", now }), { ok: false, message: "Only owners can change the team." });
+  assert.deepEqual(fixtureTeam(editor, { op: "invite", email: "new@example.com", role: "viewer", scope: null, slug: "tallyroo", now }), { ok: false, message: "Only owners can change the team." });
 });
 
 test("R168 part 4: Check keyword on the fixture runs the free prechecks, then a canned signed pass; the save verifies it", () => {
