@@ -5,7 +5,7 @@ import { test } from "node:test";
 import { failureSummary, liveOn } from "./decide.ts";
 import { addDays } from "./figures.ts";
 import { expandFixture, fixtureState } from "./fixture-mode.ts";
-import { MISSING_READS, askedOnFor, brandGapNote, failedReadNames, failedTodayAside, failedTodayLine, failedTodayNote, latestAnswersNote, lostReads, partialRunNote, runLostReads, runNote, storedAnswers, todayRun } from "./run-note.ts";
+import { MISSING_READS, askedOnFor, brandGapNote, failedReadNames, failedTodayAside, failedTodayLine, failedTodayNote, latestAnswersNote, lostReads, partialRunNote, runLostReads, runNote, sovGapNote, storedAnswers, todayRun } from "./run-note.ts";
 
 /** R151 (1 Oct 2026): the note a screen shows when the last check shown lost reads. */
 
@@ -166,9 +166,22 @@ test("8 Oct 2026: the brand gap note names the engine and day, then counts", () 
   assert.match(brandGapNote(many)!, /^Other brands were not read in 5,000 answers \(Google AI Overviews on 1 Oct, Google AI Overviews on 2 Oct, Google AI Overviews on 3 Oct and 2 more\)/);
 });
 
+test("8 Oct 2026 (review of the integration of audit packages A, B and C): share of voice gets its own count only when it leaves out more than the card", () => {
+  const g = (answers: number) => ({ day: "2026-10-03", engine: "chatgpt", answers });
+  assert.equal(sovGapNote([], []), null);
+  assert.equal(sovGapNote([g(40)], [g(40)]), null, "the card's note covers share of voice");
+  assert.equal(sovGapNote([g(40)], [g(30), g(10)]), null, "the same count, however it is split");
+  assert.equal(sovGapNote([g(40)], [g(40), g(5)]), "Share of voice, which counts every prompt, leaves out 45 answers whose other brands were not read.");
+  assert.equal(sovGapNote([], [g(1)]), "Share of voice, which counts every prompt, leaves out 1 answer whose other brands were not read.", "and stands alone when the card has none");
+  assert.match(sovGapNote([], [g(2_000)])!, /leaves out 2,000 answers/);
+});
+
 test("8 Oct 2026: the screens that draw brand shares say when answers are left out, and the Overview's partial line asks lostReads", () => {
   const src = (f: string) => readFileSync(new URL(`../../components/app/${f}.tsx`, import.meta.url), "utf8");
   for (const f of ["Overview", "Named"]) assert.match(src(f), /brandGapNote\(/, `${f} draws the brand gap note`);
+  // Review of the integration of audit packages A, B and C (8 Oct 2026): the Overview's note counts the card's
+  // prompts, and share of voice - every prompt - gets its own count when it leaves out more.
+  assert.match(src("Overview"), /const gapNote = \[brandGapNote\(gaps\), sovGapNote\(gaps, brandGaps\(data\.answers, range\)\)\]\.filter\(Boolean\)\.join\(" "\) \|\| null;/);
   assert.match(src("OneCluster"), /brandGaps\(/, "the one-cluster page counts a prompt's unread answers");
   assert.match(src("OneCluster"), /tab\.othersRead/, "and its answer tab says when the others were not read");
   assert.match(src("Overview"), /const missing = lostReads\(data\.lastRun\)/);

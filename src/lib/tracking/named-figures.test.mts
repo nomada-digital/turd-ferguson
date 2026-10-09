@@ -4,8 +4,9 @@ import { test } from "node:test";
 
 import { clusterCards, clusterSummary } from "./cluster-figures.ts";
 import { expandFixture, fixtureState } from "./fixture-mode.ts";
-import { type AnswerRow, addDays, brandBoard, brandsRead, comparisonRange, keywordsIn, overview, shareOfVoice, ungroupedRead } from "./figures.ts";
+import { type AnswerRow, addDays, brandBoard, brandGaps, brandsRead, comparisonRange, keywordsIn, overview, shareOfVoice, ungroupedRead } from "./figures.ts";
 import { CITED_WITH_TOP, NAMED_TOP, citedWithBrand, namedPage, openKey, whoIsNamedCard } from "./named-figures.ts";
+import { brandGapNote, sovGapNote } from "./run-note.ts";
 
 /**
  * R143 (1 Oct 2026; BRIEF-4 P3): the Who is named page reads what the
@@ -211,4 +212,30 @@ test("8 Oct 2026 (merge of audit packages A and B): the card counts the headline
   // On the default state, with every brand read, the client's row is still the headline's.
   const d = overviewBasis(fx.data);
   assert.deepEqual(d.row(you).reach, d.cs.now);
+});
+
+test("8 Oct 2026 (review of the integration of audit packages A, B and C): with a pending cluster on brands-unread, the card's note and share of voice each count what they leave out", () => {
+  // c1 set to start tomorrow on brands-unread: B's pending-cluster case with A's unread answers. The card and its
+  // note count the headline's prompts, so they add up to the headline. Share of voice counts every prompt, so it
+  // also leaves out the unread answers on c1's moved prompts, which the card's note does not name.
+  const u = fixtureState(fx, { TRACKING_FIXTURE_STATE: "brands-unread" }).data;
+  const moved = { ...u, clusters: u.clusters.map((c) => (c.id === "c1" ? { ...c, started_on: addDays(fx.today, 1) } : c)) };
+  const { r, o, cs, card } = overviewBasis(moved);
+  const total = (gaps: readonly { answers: number }[]) => gaps.reduce((s, g) => s + g.answers, 0);
+  // As Overview.tsx counts them.
+  const gaps = brandGaps(moved.answers.filter((a) => cs.ids.has(a.question_id)), r);
+  const every = brandGaps(moved.answers, r);
+  assert.deepEqual([card.page.answers, total(gaps), cs.now.den], [4160, 40, 4200], "the card's answers and its note's add up to the headline's");
+  const unread = moved.answers.filter((a) => a.answered && !brandsRead(a) && a.run_date >= r.from && a.run_date <= r.to);
+  assert.equal(total(every), unread.length, "share of voice's count is every unread answer in the range");
+  assert.equal(unread.length, 45);
+  assert.equal(unread.filter((a) => !cs.ids.has(a.question_id)).length, 5, "five on the pending cluster's prompts");
+  assert.deepEqual(o.sov, shareOfVoice(moved.answers.filter(brandsRead), r), "and share of voice leaves all of them out");
+  const note = [brandGapNote(gaps), sovGapNote(gaps, every)].filter(Boolean).join(" ");
+  assert.equal(note, `${brandGapNote(gaps)} Share of voice, which counts every prompt, leaves out 45 answers whose other brands were not read.`);
+  // Without the pending cluster the card counts every prompt with answers, and its note speaks for share of voice too.
+  const plain = overviewBasis(u);
+  const plainGaps = brandGaps(u.answers.filter((a) => plain.cs.ids.has(a.question_id)), plain.r);
+  assert.deepEqual(plainGaps, brandGaps(u.answers, plain.r));
+  assert.equal(sovGapNote(plainGaps, brandGaps(u.answers, plain.r)), null);
 });

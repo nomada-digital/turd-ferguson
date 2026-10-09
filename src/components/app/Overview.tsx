@@ -33,7 +33,7 @@ import { rangeLabel } from "@/lib/tracking/date-range";
 import { whoIsNamedCard } from "@/lib/tracking/named-figures";
 import type { Compare, OverviewData } from "@/lib/tracking/overview-data";
 import { type PlacementRow, chartMarkers } from "@/lib/tracking/placement-figures";
-import { MISSING_READS, brandGapNote, failedTodayNote, lostReads, runNote, todayRun } from "@/lib/tracking/run-note";
+import { MISSING_READS, brandGapNote, failedTodayNote, lostReads, runNote, sovGapNote, todayRun } from "@/lib/tracking/run-note";
 
 import ClusterChart from "./ClusterChart";
 import DatePicker from "./DatePicker";
@@ -419,10 +419,12 @@ export default function Overview({
   const whoLfl = who.change;
   const board = [...whoPage.rows].filter((r) => r.answers > 0).sort((x, y) => y.answers - x.answers);
   // 8 Oct 2026 (audit data-6): answers whose other brands were not read are out of the card and share of voice.
-  // Merge of audit packages A and B (8 Oct 2026): counted on the card's own answers - the headline's prompts -
-  // so the card's answers and the note's add up to the headline's.
+  // Merge of audit packages A and B (8 Oct 2026): the note counts the card's own answers - the headline's prompts -
+  // so the card's answers and the note's add up to the headline's. Share of voice counts every prompt, so by
+  // cluster it can leave out more - a pending cluster's moved prompts' - and then says how many (review of the
+  // integration, same day; run-note.ts sovGapNote).
   const gaps = brandGaps(byCluster ? data.answers.filter((a) => byCluster.ids.has(a.question_id)) : data.answers, range);
-  const gapNote = brandGapNote(gaps);
+  const gapNote = [brandGapNote(gaps), sovGapNote(gaps, brandGaps(data.answers, range))].filter(Boolean).join(" ") || null;
   const top = board.slice(0, 5);
   const rest = board.slice(5);
   const kwRows = keywordRows(data.serp, { from: addDays(range.to, -27) < range.from ? range.from : addDays(range.to, -27), to: range.to });

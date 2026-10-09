@@ -43,6 +43,23 @@ export function brandGapNote(gaps: readonly { day: Day; engine: string; answers:
   return `Other brands were not read in ${n.toLocaleString("en-GB")} answer${n === 1 ? "" : "s"} (${where.join(", ")}${more}), so ${n === 1 ? "it is" : "they are"} left out of the brand shares rather than counted as naming no one else.`;
 }
 
+/**
+ * The Overview's second brand gap sentence (review of the integration of
+ * audit packages A, B and C, 8 Oct 2026). Its "Who is named instead" card
+ * counts the headline's prompts - by cluster, the clusters with readings -
+ * and its brandGapNote counts the same answers, so the card's answers and the
+ * note's add up to the headline's. Share of voice counts every prompt
+ * (figures.ts overview), a pending cluster's moved prompts included, so it can
+ * leave out unread answers the card's note never names. Null unless it
+ * leaves out more than `card` does; then share of voice gets its own count.
+ */
+export function sovGapNote(card: readonly { answers: number }[], every: readonly { answers: number }[]): string | null {
+  const total = (gaps: readonly { answers: number }[]) => gaps.reduce((s, g) => s + g.answers, 0);
+  const n = total(every);
+  if (n <= total(card)) return null;
+  return `Share of voice, which counts every prompt, leaves out ${n.toLocaleString("en-GB")} answer${n === 1 ? "" : "s"} whose other brands were not read.`;
+}
+
 export type RunRow = { run_date: Day; status: string; error?: string | null };
 
 /**
