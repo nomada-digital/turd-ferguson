@@ -1,8 +1,9 @@
 /**
  * Payment state (BL-2, 9 Oct 2026): what a client's Stripe subscription says
  * about being paid, and what the webhook does with it. Pure, so every rule is
- * tested with recorded payloads and never a live call; signup.ts does the
- * reads and writes, into the columns 20261009030000_payment_state.sql adds.
+ * tested with recorded payloads and never a live call; subscription-events.ts
+ * and signup.ts do the reads and writes, into the columns
+ * 20261009030000_payment_state.sql adds.
  *
  * Before this, customer.subscription.updated rewrote only cluster_limit and
  * trial_ends_at, and the runner dispatches every client whose status is
@@ -133,11 +134,13 @@ export function hostedInvoiceUrl(invoice: Record<string, unknown>): string | nul
  * tries the card again (null when it will not) and the invoice's own page.
  *
  * A subscription's first invoice is left alone: Checkout shows that failure
- * to the buyer on its own form and makes no client, and a scan bought twice
- * would otherwise put the banner on the client its first order made. An
- * invoice never moves the client's status - only the subscription's own
- * events end or restore it - and does not write over a status that has
- * already stopped tracking.
+ * to the buyer on its own form and makes no client. (This said a scan bought
+ * twice would otherwise mark its first order's client. That mix-up reached
+ * renewals too, and is closed where the client is found: by the
+ * subscription's order row, subscription-events.ts, 9 Oct 2026.) An invoice
+ * never moves the client's status - only the subscription's own events end
+ * or restore it - and does not write over a status that has already stopped
+ * tracking.
  */
 export function afterFailedInvoice(row: PaymentRow, invoice: Record<string, unknown>, atS: number): PaymentStep {
   if (str(invoice.billing_reason) === "subscription_create") return NOTHING;

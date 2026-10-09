@@ -1,5 +1,6 @@
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { onCheckoutCompleted, onInvoicePaymentFailed, onSubscriptionDeleted, onSubscriptionUpdated, onTrialWillEnd } from "@/lib/checkout/signup";
+import { onCheckoutCompleted, onSubscriptionDeleted, onSubscriptionUpdated, onTrialWillEnd } from "@/lib/checkout/signup";
+import { onInvoicePaymentFailed } from "@/lib/checkout/subscription-events";
 import { handleWebhook } from "@/lib/checkout/webhook";
 
 export const runtime = "nodejs";
@@ -15,7 +16,8 @@ export const dynamic = "force-dynamic";
  * STRIPE_WEBHOOK_SECRET before it is parsed; unset, the door answers 503 and
  * acts on nothing. The event id goes into stripe_events first, so a replay is
  * a 200 that does nothing. The rules are in lib/checkout/webhook.ts, the
- * writes in lib/checkout/signup.ts.
+ * writes in lib/checkout/signup.ts and, for a failed invoice and which client
+ * a subscription is, lib/checkout/subscription-events.ts.
  */
 export async function POST(req: Request) {
   const raw = await req.text();

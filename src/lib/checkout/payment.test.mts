@@ -185,16 +185,25 @@ test("the dashboard's payment read failing costs the banner, never the clients",
 
 const src = (rel: string) => readFileSync(new URL(rel, import.meta.url), "utf8");
 
-test("census: the webhook writes payment state only over an older event, and the dashboard reads it on its own", () => {
+test("census: the webhook writes payment state only over an older event, only to a client its order row names, and the dashboard reads it on its own", () => {
+  // 9 Oct 2026, review of 2c6dc99: the payment step moved from signup.ts to subscription-events.ts, so it runs under test.
+  const events = src("./subscription-events.ts");
+  assert.ok(events.includes('.update(step.write).eq("id", client.id).or(newerThanRecorded(at))'), "the payment write is no longer guarded by the event's time");
+  assert.equal(events.match(/\.update\(/g)?.length, 1, "one payment write");
+  assert.match(events, /if \(!client\.exact\) return true;\s*const row = await paymentRow\(/, "the payment step is no longer held to a client an order row names");
+  // The order row is read before the scan, and the scan only when no order row names the subscription.
+  assert.ok(events.indexOf('.eq("stripe_subscription_id", id)') > 0 && events.indexOf('.eq("stripe_subscription_id", id)') < events.indexOf('.eq("source_scan_id", scan.id)'), "the scan is read before the order row");
+  assert.ok(events.includes("const token = e.ordered.length ? null : subscriptionScanToken(sub);"), "the scan is read even when an order row names the subscription");
   const signup = src("./signup.ts");
-  assert.ok(signup.includes(".update(step.write).eq(\"id\", clientId).or(newerThanRecorded(at))"), "the payment write is no longer guarded by the event's time");
-  assert.equal(signup.match(/\.update\(step\.write\)/g)?.length, 1, "one payment write");
+  assert.equal(signup.match(/\.update\(step\.write\)/g), null, "signup.ts writes payment state of its own");
+  assert.equal(signup.match(/await clientOfSubscription\(db, sub\)/g)?.length, 3, "updated, deleted and trial_will_end find their client one way");
+  assert.ok(!signup.includes('.eq("source_scan_id"'), "signup.ts finds a subscription's client by its scan again");
+  assert.match(signup, /if \(!client\?\.exact\) return true;\s*const clientId = client\.id;\s*return mailTrialEnding\(/, "trial_will_end mails a client guessed from its scan");
   // Deletion still ends the client (and mails plan_ended) before the canceled status is recorded.
   const del = signup.slice(signup.indexOf("export async function onSubscriptionDeleted("), signup.indexOf("async function endClient("));
-  assert.ok(del.indexOf("endClient(db, clientId, sub)") > 0 && del.indexOf("endClient(db, clientId, sub)") < del.indexOf("recordPayment("), "onSubscriptionDeleted ends the client first");
-  // Never a client email from here: the failed-payment emails are Stripe's, Danny's setting (LB4).
-  const handlers = signup.slice(signup.indexOf("async function paymentRow("), signup.indexOf("export async function onSubscriptionDeleted("));
-  assert.ok(!/send(Lifecycle|LoginLink|OrderEmail)\(/.test(handlers), "a payment handler sends mail");
+  assert.ok(del.indexOf("endClient(db, client.id, sub)") > 0 && del.indexOf("endClient(db, client.id, sub)") < del.indexOf("recordPayment("), "onSubscriptionDeleted ends the client first");
+  // Never a client email from the payment step: the failed-payment emails are Stripe's, Danny's setting (LB4).
+  assert.ok(!/\b(send|mail)[A-Z]\w*\(/.test(events.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, "")), "subscription-events.ts sends mail");
   const member = readFileSync(new URL("../tracking/member.ts", import.meta.url), "utf8");
   assert.ok(member.includes(".select(PAYMENT_BANNER_READ)"), "the banner's columns are not read on their own");
   assert.ok(member.includes("withPayment(clients, pErr ? null :"), "a failed payment read is not handed on as null");
