@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
-import { failureSummary } from "./decide.ts";
+import { failureSummary, liveOn } from "./decide.ts";
 import { addDays } from "./figures.ts";
 import { expandFixture, fixtureState } from "./fixture-mode.ts";
-import { MISSING_READS, brandGapNote, failedReadNames, failedTodayAside, failedTodayLine, failedTodayNote, latestAnswersNote, lostReads, partialRunNote, runLostReads, runNote, storedAnswers, todayRun } from "./run-note.ts";
+import { MISSING_READS, askedOnFor, brandGapNote, failedReadNames, failedTodayAside, failedTodayLine, failedTodayNote, latestAnswersNote, lostReads, partialRunNote, runLostReads, runNote, storedAnswers, todayRun } from "./run-note.ts";
 
 /** R151 (1 Oct 2026): the note a screen shows when the last check shown lost reads. */
 
@@ -39,6 +39,11 @@ test("Overview, Clusters, a cluster, Who is named and Cited pages all take the s
     assert.match(src, f === "OneCluster" ? /runNote\(data, range, today, \{ askedOn \}\)/ : /runNote\(data, range, today\)/, `${f} notes every lost check in its range`);
     assert.ok(!src.includes("partialRunNote("), `${f} still reads the last run only`);
   }
+  // Review of the merge of audit packages B and C (8 Oct 2026): the one-cluster page's askedOn is run-note.ts
+  // askedOnFor, the runner's rule (decide.ts liveOn) in one copy - not written out inline again.
+  const one = readFileSync(new URL("../../components/app/OneCluster.tsx", import.meta.url), "utf8");
+  assert.match(one, /const askedOn = askedOnFor\(data\.questions, c\.id\);/, "OneCluster's askedOn is askedOnFor");
+  assert.ok(!/stopped_on > d\b/.test(one), "OneCluster writes a liveness rule of its own again");
   const reports = readFileSync(new URL("../../app/app/[client]/reports/page.tsx", import.meta.url), "utf8");
   assert.match(reports, /note=\{runNote\(data, range, today\)\}/, "Reports is handed the range's note");
 });
@@ -207,6 +212,41 @@ test("8 Oct 2026 (merge of audit packages A and B): runNote lists no brand-only 
   assert.equal(runNote(unread, { from: addDays(fx.today, -27), to: fx.today }, fx.today), null);
 });
 
+test("8 Oct 2026 (review of the merge of audit packages B and C): askedOnFor is the runner's rule, decide.ts liveOn, on the cluster's prompts", () => {
+  // runNote's "asked that day" rests on the runner asking every live prompt in one write. The runner picks a
+  // day's prompts with liveOn (runner.ts, which imports server-only, so read here as source); askedOnFor is
+  // liveOn on the prompts now in the cluster. A change to either rule fails here.
+  const runner = readFileSync(new URL("./runner.ts", import.meta.url), "utf8");
+  assert.match(runner, /const questions = \(qs \?\? \[\]\)\.filter\(\(q\) => liveOn\(q as \{ added_on: string; stopped_on: string \| null \}, day\)\);/, "the runner picks a day's prompts by liveOn");
+  const note = readFileSync(new URL("./run-note.ts", import.meta.url), "utf8");
+  const at = note.indexOf("export function askedOnFor(");
+  const body = note.slice(at, note.indexOf("\n}\n", at));
+  assert.ok(at >= 0 && body.includes("mine.some((q) => liveOn(q, day))"), "askedOnFor asks liveOn");
+  // On the fixture, day by day: a prompt in the cluster live that day, as liveOn has it - its stop day not asked.
+  const fx = expandFixture(JSON.parse(readFileSync(new URL("./fixture.json", import.meta.url), "utf8")));
+  // c9 began 16 Sep; here every one of its prompts stops five days before today, so both edges are in the window.
+  const stop = addDays(fx.today, -5);
+  const st = { ...fx.data, questions: fx.data.questions.map((q) => (q.cluster_id === "c9" ? { ...q, stopped_on: stop } : q)) };
+  let days = 0;
+  let asked = 0;
+  for (const data of [fx.data, st]) {
+    for (const c of [...data.clusters.map((x) => x.id), "not-a-cluster"]) {
+      const on = askedOnFor(data.questions, c);
+      for (let d = addDays(fx.today, -60); d <= addDays(fx.today, 2); d = addDays(d, 1)) {
+        const want = data.questions.some((q) => q.cluster_id === c && liveOn(q, d));
+        assert.equal(on(d), want, `${c} ${d}`);
+        days++;
+        if (want) asked++;
+      }
+    }
+  }
+  assert.ok(days > 500 && asked > 100 && asked < days, `${days} days checked, ${asked} asked`);
+  const c9 = askedOnFor(st.questions, "c9");
+  assert.deepEqual([c9("2026-09-15"), c9("2026-09-16"), c9(addDays(stop, -1)), c9(stop)], [false, true, true, false], "asked from its first day, not on its stop day");
+  assert.equal(askedOnFor(fx.data.questions, "c10")(fx.today), false, "c10's first check is tomorrow");
+  assert.equal(askedOnFor(fx.data.questions, "c10")(addDays(fx.today, 1)), true);
+});
+
 test("8 Oct 2026 (merge of audit packages B and C): on a read of some prompts, a day none was asked claims nothing of what the check stored", () => {
   // The one-cluster page reads only its prompts' answers. A cluster whose first check is tomorrow has none on a
   // day the check failed after storing every other prompt's: "none of its reads came back" was then untrue.
@@ -216,7 +256,8 @@ test("8 Oct 2026 (merge of audit packages B and C): on a read of some prompts, a
   const pending = fx.data.clusters.find((c) => c.started_on > fx.today)!;
   const ids = new Set(fx.data.questions.filter((q) => q.cluster_id === pending.id).map((q) => q.id));
   const own = { lastRun: fx.data.lastRun, runs, answers: fx.data.answers.filter((a) => ids.has(a.question_id)) };
-  const askedOn = (d: string) => fx.data.questions.some((q) => ids.has(q.id) && q.added_on <= d && (q.stopped_on === null || q.stopped_on > d));
+  // Review, 8 Oct 2026: the page's own helper (askedOnFor, on decide.ts liveOn), not a copy of the runner's rule.
+  const askedOn = askedOnFor(fx.data.questions, pending.id);
   assert.equal(askedOn(fx.today), false, `${pending.id} is not asked until tomorrow`);
   assert.match(runNote(own, r, fx.today)!, /none of its reads came back/, "without askedOn its own answers read as nothing stored");
   const said = "Today's check failed. Any reads it did not store are left out of the figures, not counted as misses.";
@@ -224,7 +265,7 @@ test("8 Oct 2026 (merge of audit packages B and C): on a read of some prompts, a
   assert.equal(runNote({ ...own, answers: fx.data.answers }, r, fx.today, { askedOn }), said, "the same on the whole read: the note is the page's, whatever was read");
   // A prompt asked that day: its answers say what the whole read does, both ways.
   const live = new Set(fx.data.questions.filter((q) => q.cluster_id === "c1").map((q) => q.id));
-  const c1 = (d: string) => fx.data.questions.some((q) => live.has(q.id) && q.added_on <= d && (q.stopped_on === null || q.stopped_on > d));
+  const c1 = askedOnFor(fx.data.questions, "c1");
   const mine = { ...own, answers: fx.data.answers.filter((a) => live.has(a.question_id)) };
   assert.equal(runNote(mine, r, fx.today, { askedOn: c1 }), runNote({ lastRun: fx.data.lastRun, runs, answers: fx.data.answers }, r, fx.today));
   assert.match(runNote(mine, r, fx.today, { askedOn: c1 })!, /did not finish/);

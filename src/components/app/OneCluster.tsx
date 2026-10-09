@@ -14,7 +14,7 @@ import { type Day, type Range, type Rate, basis as basisLine, brandGaps, compari
 import { type AnswerTab, type LatestAnswers, answerTabs, brandRuns } from "@/lib/tracking/latest-answers";
 import { NOTE_SAID, type NoteState } from "@/lib/tracking/note";
 import type { ClusterNote, Compare, OverviewData } from "@/lib/tracking/overview-data";
-import { latestAnswersNote, lostReads, runNote } from "@/lib/tracking/run-note";
+import { askedOnFor, latestAnswersNote, lostReads, runNote } from "@/lib/tracking/run-note";
 
 import ClusterChart from "./ClusterChart";
 import Fig from "./Fig";
@@ -106,8 +106,9 @@ export default function OneCluster({
   const before = cmp.range;
   // Audit data-3 (8 Oct 2026): every partial or failed check in the range, not only the last.
   // Merge of audit packages B and C (8 Oct 2026): this page reads its own prompts' answers only (perf-9), which
-  // say whether a failed check stored answers only on a day one of them was asked (run-note.ts runNote).
-  const askedOn = (d: Day) => data.questions.some((q) => q.cluster_id === c.id && q.added_on <= d && (q.stopped_on === null || q.stopped_on > d));
+  // say whether a failed check stored answers only on a day one of them was asked (run-note.ts runNote). The
+  // days are the runner's (run-note.ts askedOnFor, on decide.ts liveOn), not a copy of its rule.
+  const askedOn = askedOnFor(data.questions, c.id);
   const partial = runNote(data, range, today, { askedOn });
   const input: ClusterInput = { clusters: data.clusters ?? [], questions: data.questions, keywords: data.keywords, answers: data.answers, serp: data.serp, range, before, today, engines };
   // A first week drawn dashed over the range's first days would read as a period it is not.

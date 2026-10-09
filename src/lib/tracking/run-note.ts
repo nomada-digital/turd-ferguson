@@ -1,5 +1,5 @@
 import { ENGINE_SPECS, isEngine } from "../scan/engines.ts";
-import { readsFailedIn } from "./decide.ts";
+import { liveOn, readsFailedIn } from "./decide.ts";
 import { type AnswerRow, type Day, type Range, formatDay } from "./figures.ts";
 import type { OverviewData } from "./overview-data.ts";
 
@@ -180,6 +180,21 @@ export function runNote(
   const shown = lost.length > 5 ? [...lost.slice(-4).map(item), `${lost.length - 4} earlier`] : lost.map(item);
   const names = [...new Set(lost.flatMap((r) => failedReadNames(r.error)))];
   return `${lost.length} checks in this range lost reads${names.length ? ` (${and(names)})` : ""}: ${and(shown)}. ${MISSING_READS}`;
+}
+
+/**
+ * The days one cluster's prompts were asked, as runNote's `askedOn` takes
+ * them (review of the merge of audit packages B and C, 8 Oct 2026): a prompt
+ * now in the cluster, live that day by decide.ts liveOn - the rule the runner
+ * picks a day's prompts by (runner.ts). OneCluster.tsx wrote the rule out
+ * inline and each test its own copy, so a change to the runner's rule would
+ * have left the note's "asked that day" behind it with every test green. One
+ * copy, here; the page and the tests take it, and run-note.test.mts holds it
+ * and the runner to liveOn.
+ */
+export function askedOnFor(questions: readonly { cluster_id: string | null; added_on: Day; stopped_on: Day | null }[], clusterId: string): (day: Day) => boolean {
+  const mine = questions.filter((q) => q.cluster_id === clusterId);
+  return (day) => mine.some((q) => liveOn(q, day));
 }
 
 /**

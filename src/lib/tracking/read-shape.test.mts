@@ -12,7 +12,7 @@ import { presets } from "./date-range.ts";
 import { PAGE } from "../supabase/page.ts";
 import { ANSWER_SELECT, type AnswersQuery, type AnswersTable, type ReadOpts, answerPlan, answerRow, boundStated, clusterQuestionIds, monthSlice, planPrompts, rangeFloor, readAnswers, reportSpan, selectColumns, shapeRead, withoutBrandsOk } from "./read-shape.ts";
 import { monthFigures, reportMonths } from "./report-months.ts";
-import { runNote } from "./run-note.ts";
+import { askedOnFor, runNote } from "./run-note.ts";
 
 /**
  * The narrow reads (8 Oct 2026, audit perf-4, perf-9, perf-1). Each page on
@@ -312,9 +312,10 @@ function oneCluster(data: OverviewData, f: Fixture, range: Range, before: Range 
     strips: prompts.map((p) => promptStrip({ answers: data.answers, range, engines }, p.id)),
     brands: prompts.map((p) => promptBrands({ answers: data.answers, range }, p.id, f.client.brand)),
     // Merge of audit packages A, B and C (8 Oct 2026): each prompt's unread brand answers (A), and the range's note
-    // (B), asked as OneCluster.tsx asks it - with the days the cluster's prompts were asked.
+    // (B), asked as OneCluster.tsx asks it - with the days the cluster's prompts were asked (run-note.ts askedOnFor,
+    // the page's own helper since the review the same day, not a copy of the runner's rule).
     unread: prompts.map((p) => brandGaps(data.answers.filter((a) => a.question_id === p.id), range)),
-    note: runNote(data, range, f.today, { askedOn: (d) => data.questions.some((q) => q.cluster_id === id && q.added_on <= d && (q.stopped_on === null || q.stopped_on > d)) }),
+    note: runNote(data, range, f.today, { askedOn: askedOnFor(data.questions, id) }),
   };
 }
 
