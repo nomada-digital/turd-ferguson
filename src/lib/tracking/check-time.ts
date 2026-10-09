@@ -53,6 +53,14 @@ export function checkTime(day: string, market: string): string {
   return clockIn(Date.UTC(y!, m! - 1, d!, CHECK_HOUR_UTC), market) ?? `${String(CHECK_HOUR_UTC).padStart(2, "0")}:00 UTC`;
 }
 
+/**
+ * What is said in place of a check time while a client has no live prompt:
+ * the runner skips that client (decide.ts shouldTrack), so no time is
+ * promised. The Overview's day-zero line, the setup page and setup_confirmed
+ * share it (9 Oct 2026, review of 3eaa592).
+ */
+export const NO_PROMPT_NO_CHECK = "Nothing is checked until a cluster has prompts.";
+
 /** The next daily run after `now`, epoch ms: today's 05:00 UTC if it is still to come, else tomorrow's. */
 export function nextCheckAt(now: number): number {
   const d = new Date(now);

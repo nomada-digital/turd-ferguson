@@ -29,7 +29,7 @@ import {
   ungroupedRead,
 } from "@/lib/tracking/figures";
 import { type ClusterCard, clusterCards, clusterChart, clusterSummary, keyFigureChanges, pendingBasis } from "@/lib/tracking/cluster-figures";
-import { checkTime, clockIn } from "@/lib/tracking/check-time";
+import { NO_PROMPT_NO_CHECK, checkTime, clockIn } from "@/lib/tracking/check-time";
 import { rangeLabel } from "@/lib/tracking/date-range";
 import { whoIsNamedCard } from "@/lib/tracking/named-figures";
 import type { Compare, OverviewData } from "@/lib/tracking/overview-data";
@@ -212,7 +212,7 @@ export default function Overview({
   const liveQuestions = data.questions.filter((q) => q.stopped_on === null).length;
   // The runner skips a client with no live prompt (decide.ts shouldTrack), so a
   // day-zero client with none must not be promised tomorrow's check (8 Oct 2026, audit activation-4).
-  const firstCheckLine = ended ? "Tracking has ended." : liveQuestions ? `Your first check runs tomorrow at ${next}.` : "Nothing is checked until a cluster has prompts.";
+  const firstCheckLine = ended ? "Tracking has ended." : liveQuestions ? `Your first check runs tomorrow at ${next}.` : NO_PROMPT_NO_CHECK;
   const hasData = o.named.den > 0;
   const beforeRange = !!startedOn && range.to < startedOn;
   // R151 (3 Oct 2026): with nothing read in the range, the filled "Download report" outweighed the

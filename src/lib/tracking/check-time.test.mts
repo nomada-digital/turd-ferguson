@@ -5,9 +5,10 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
 import { trialMoment } from "../../config/trial.ts";
-import { CHECK_HOUR_UTC, checkTime, clockIn, marketZone, nextCheckAt } from "./check-time.ts";
+import { CHECK_HOUR_UTC, NO_PROMPT_NO_CHECK, checkTime, clockIn, marketZone, nextCheckAt } from "./check-time.ts";
+import { shouldTrack } from "./decide.ts";
 import { addDays } from "./figures.ts";
-import { firstCheckWhen } from "./setup-landing.ts";
+import { firstCheckWhen, setupChecks } from "./setup-landing.ts";
 
 /**
  * The daily check's time, in the client's own zone (9 Oct 2026, audit copy-2,
@@ -71,6 +72,29 @@ test("a first check is promised only while it is still to come", () => {
   assert.equal(firstCheckWhen("2026-10-09", "2026-10-09", "UK"), null);
   assert.equal(firstCheckWhen("2026-10-01", "2026-10-09", "UK"), null);
   assert.equal(firstCheckWhen(null, "2026-10-09", "UK"), null);
+});
+
+/**
+ * Review of 3eaa592 (9 Oct 2026): firstCheckWhen looked at started_on only, so
+ * the R180 no-scan order - no live prompt, started tomorrow - was told "The
+ * first check runs tomorrow at 1:00am ET" on the setup page, and a day later
+ * "Checks run every day at 1:00am ET", while the runner skips it and its own
+ * Overview said nothing is checked. setupChecks is what both surfaces say.
+ */
+test("setup promises a check only when the runner would make one: a live prompt, and the start come or to come", () => {
+  const base = { today: "2026-10-09", market: "US" };
+  // The signup-typed fixture's case: 0 live prompts, started tomorrow, then the day after.
+  for (const startedOn of ["2026-10-10", "2026-10-09", "2026-10-01", null]) {
+    assert.deepEqual(setupChecks({ ...base, startedOn, livePrompts: 0 }), { first: null, line: NO_PROMPT_NO_CHECK }, String(startedOn));
+    assert.equal(shouldTrack({ id: "c", status: "active", started_on: startedOn, activeQuestions: 0 }, startedOn ?? base.today), false, "and the runner agrees");
+  }
+  assert.equal(NO_PROMPT_NO_CHECK, "Nothing is checked until a cluster has prompts.");
+  assert.deepEqual(setupChecks({ ...base, startedOn: "2026-10-10", livePrompts: 5 }), { first: "tomorrow at 1:00am ET", line: "The first check runs tomorrow at 1:00am ET." });
+  assert.deepEqual(setupChecks({ today: "2026-10-26", market: "UK", startedOn: "2026-10-27", livePrompts: 5 }), { first: "tomorrow at 05:00 UK time", line: "The first check runs tomorrow at 05:00 UK time." });
+  // Checks began: a live prompt and a start that has come is what shouldTrack runs.
+  assert.equal(shouldTrack({ id: "c", status: "active", started_on: "2026-10-01", activeQuestions: 1 }, base.today), true);
+  assert.deepEqual(setupChecks({ ...base, startedOn: "2026-10-01", livePrompts: 1 }), { first: null, line: "Checks run every day at 1:00am ET." });
+  assert.deepEqual(setupChecks({ today: "2026-11-02", market: "US", startedOn: "2026-10-01", livePrompts: 1 }), { first: null, line: "Checks run every day at 12:00am ET." });
 });
 
 // ------------------------------------------------------------------ census
@@ -149,9 +173,10 @@ test("census: only check-time.ts writes a zone label", () => {
  * of 3eaa592 (9 Oct 2026) the count took in both - 21, of which four were
  * check-time.ts's two declarations and its own clockIn call and
  * firstCheckWhen's declaration - so a floor of 20 held only 16 real calls.
- * Re-counted on 9 Oct 2026: 17 (Overview 5, Clusters 2, OneCluster 1,
- * Settings 1, Reports 1, latest-answers 1, trial 1, setup page 2, lifecycle 2,
- * setup-landing 1 - firstCheckWhen's checkTime).
+ * Re-counted on 9 Oct 2026, with setupChecks the setup page's and the mail's
+ * one call: 17 (Overview 5, Clusters 2, OneCluster 1, Settings 1, Reports 1,
+ * latest-answers 1, trial 1, setup page 1, lifecycle 1, setup-landing 3 -
+ * firstCheckWhen's checkTime, setupChecks' firstCheckWhen and checkTime).
  */
 const CALLERS = [
   "src/components/app/Overview.tsx",
@@ -168,7 +193,7 @@ const CALLERS = [
 const CALLS_FLOOR = 17;
 
 /** A call of the helper or a wrapper of it; a declaration, `function checkTime(`, is not one. */
-const CALL = /(?<!\bfunction\s+)\b(?:checkTime|clockIn|firstCheckWhen)\(/g;
+const CALL = /(?<!\bfunction\s+)\b(?:checkTime|clockIn|firstCheckWhen|setupChecks)\(/g;
 export const callsIn = (src: string) => (code(src).match(CALL) ?? []).length;
 
 test("census: every surface that states a check time asks check-time.ts", () => {
@@ -182,6 +207,22 @@ test("census: every surface that states a check time asks check-time.ts", () => 
   for (const f of ["src/components/app/Overview.tsx", "src/components/app/Settings.tsx"]) {
     assert.match(readFileSync(join(ROOT, f), "utf8"), /checkTime\(addDays\(today, 1\), market\)/, f);
   }
+});
+
+/**
+ * Review of 3eaa592 (9 Oct 2026): firstCheckWhen knows the start date and not
+ * the prompts, so a surface that asks it directly can promise a check the
+ * runner never makes. Only setupChecks asks it; the setup page and the mail
+ * ask setupChecks, with a live-prompt count.
+ */
+test("census: only setupChecks asks firstCheckWhen, and setup's two surfaces ask setupChecks with the live prompts", () => {
+  const direct = files().filter(({ file, src }) => file !== "src/lib/tracking/setup-landing.ts" && /(?<!\bfunction\s+)\bfirstCheckWhen\(/.test(code(src)));
+  assert.deepEqual(direct.map((f) => f.file), [], "say it through setupChecks, which knows whether a prompt is live");
+  for (const f of ["src/app/app/[client]/setup/page.tsx", "src/lib/email/lifecycle.ts"]) {
+    assert.match(code(readFileSync(join(ROOT, f), "utf8")), /setupChecks\(\{[^}]*livePrompts/, f);
+  }
+  assert.match(code(readFileSync(join(ROOT, "src/lib/tracking/setup-mail.ts"), "utf8")), /livePrompts: livePrompts \?\? 0/, "the mail's send site counts the prompts");
+  assert.match(code(readFileSync(join(ROOT, "src/components/app/Overview.tsx"), "utf8")), /: NO_PROMPT_NO_CHECK;/, "the Overview's day-zero line is the same words");
 });
 
 test("census probe: the old copy fires, comments and ISO timestamps do not", () => {
@@ -198,4 +239,5 @@ test("census probe: the old copy fires, comments and ISO timestamps do not", () 
   // The call floor counts calls, not the declarations that would pad it.
   assert.equal(callsIn("export function clockIn(at) {}\nexport function checkTime(day) { return clockIn(day); }"), 1);
   assert.equal(callsIn("const s = `at ${checkTime(addDays(today, 1), market)}`; // checkTime(x)"), 1);
+  assert.equal(callsIn("const { first } = setupChecks({ livePrompts: 0 });"), 1);
 });

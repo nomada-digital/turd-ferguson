@@ -18,9 +18,7 @@ import { loginHref } from "@/lib/tracking/next-path";
 import { placedTier } from "@/lib/tracking/placement-figures";
 import { writeRole } from "@/lib/tracking/member";
 import { trackingRepo } from "@/lib/tracking/repo";
-import { checkTime } from "@/lib/tracking/check-time";
-import { addDays } from "@/lib/tracking/figures";
-import { confirmLabel, firstCheckWhen, setupCards } from "@/lib/tracking/setup-landing";
+import { confirmLabel, setupCards, setupChecks } from "@/lib/tracking/setup-landing";
 import { refuseRole } from "@/lib/tracking/stop";
 import { appPath, siteHref } from "@/lib/app-host";
 
@@ -79,7 +77,8 @@ export default async function ClientSetup({
   const [structure, confirmed, typed] = await Promise.all([repo.structure(client.id), repo.setupConfirmed(client.id), repo.orderKeyword(client.id)]);
   const cards = setupCards(structure);
   const ungrouped = ungroupedShown(structure.questions, today).length;
-  const first = firstCheckWhen(client.started_on, today, client.market);
+  // 9 Oct 2026 (review of 3eaa592): no live prompt, no check promised - the runner skips that client, as the Overview says.
+  const checks = setupChecks({ startedOn: client.started_on, today, market: client.market, livePrompts: structure.questions.filter((q) => q.stopped_on === null).length });
   // R180: the keyword typed at checkout, with no scan behind the order, prefills the first keywordless card's field.
   const prefill = prefillCard(cards, typed);
   const canWrite = refuseRole(writeRole(client)) === null;
@@ -212,8 +211,8 @@ export default async function ClientSetup({
             <a href="#help" style={{ color: T.accent, fontWeight: 600 }}>
               Tell us
             </a>{" "}
-            {/* 9 Oct 2026 (audit copy-2): the time in the client's zone, and no "first" check once checks have begun. */}
-            {`before you confirm, and we make it. ${first ? `The first check runs ${first}.` : `Checks run every day at ${checkTime(addDays(today, 1), client.market)}.`}`}
+            {/* 9 Oct 2026 (audit copy-2): the time in the client's zone, no "first" check once checks have begun, none at all with no live prompt. */}
+            {`before you confirm, and we make it. ${checks.line}`}
           </p>
           {failed ? (
             <p role="alert" style={{ margin: "0 0 12px", fontSize: "14px", color: T.badFg }}>

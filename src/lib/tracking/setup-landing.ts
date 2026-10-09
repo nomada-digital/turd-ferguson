@@ -14,7 +14,7 @@
 export const SETUP_CONFIRMED_EVENT = "setup_confirmed";
 
 import { appPath } from "../app-host.ts";
-import { checkTime } from "./check-time.ts";
+import { NO_PROMPT_NO_CHECK, checkTime } from "./check-time.ts";
 import { addDays, formatDay } from "./figures.ts";
 
 export const setupPath = (slug: string) => appPath(`/${slug}/setup`);
@@ -115,14 +115,30 @@ export function setupState(c: { started_on: string | null }, rows: readonly { cr
 }
 
 /**
- * When a client's first check runs, said from `today` in the client's zone
- * (9 Oct 2026, audit copy-2): "tomorrow at 06:00 UK time", "on 12 Oct at
- * 1:00am ET". Null once started_on is today or past - the runner checks a
- * live prompt whether or not setup was confirmed (decide.ts shouldTrack), so
- * there is no first check left to promise - or when it is unset. The setup
- * page and the setup_confirmed mail both say it, so it is worded once.
+ * When a client's first check runs, by its start date alone, said from
+ * `today` in the client's zone (9 Oct 2026, audit copy-2): "tomorrow at
+ * 06:00 UK time", "on 12 Oct at 1:00am ET". Null once started_on is today or
+ * past - the runner checks a live prompt whether or not setup was confirmed
+ * (decide.ts shouldTrack), so there is no first check left to promise - or
+ * when it is unset. It knows nothing of prompts, so copy goes through setupChecks.
  */
 export function firstCheckWhen(startedOn: string | null, today: string, market: string): string | null {
   if (!startedOn || startedOn <= today) return null;
   return `${startedOn === addDays(today, 1) ? "tomorrow" : `on ${formatDay(startedOn)}`} at ${checkTime(startedOn, market)}`;
+}
+
+/**
+ * What the setup page and the setup_confirmed mail say about the checks,
+ * worded once (9 Oct 2026, review of 3eaa592). shouldTrack checks a client
+ * only once it has a live prompt and its start has come, so: no live prompt
+ * promises nothing, in the Overview's words; a start still to come names the
+ * first check; otherwise checks have begun, and the line says when they run.
+ * `livePrompts` counts prompts not stopped, as the Overview and Settings
+ * count them. `first` is set only for a first check still to come, for the
+ * mail's subject.
+ */
+export function setupChecks(c: { startedOn: string | null; today: string; market: string; livePrompts: number }): { first: string | null; line: string } {
+  if (c.livePrompts < 1) return { first: null, line: NO_PROMPT_NO_CHECK };
+  const first = firstCheckWhen(c.startedOn, c.today, c.market);
+  return { first, line: first ? `The first check runs ${first}.` : `Checks run every day at ${checkTime(addDays(c.today, 1), c.market)}.` };
 }

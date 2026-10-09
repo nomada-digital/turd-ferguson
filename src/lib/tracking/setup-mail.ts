@@ -82,11 +82,17 @@ export async function mailSetupConfirmed(clientId: string, member: string): Prom
     const { data: account, error: aErr } = await db.from("accounts").select("upsell_mode").eq("id", c.account_id).maybeSingle();
     if (aErr || !account) throw new Error(aErr?.message ?? "no account");
     if (upsellMode(account.upsell_mode) === "agency") return;
-    const { data: clusters, error: clErr } = await db.from("tracked_clusters").select("name").eq("client_domain_id", clientId).is("stopped_on", null).order("created_at", { ascending: true });
+    // 9 Oct 2026 (review of 3eaa592): the live prompts are counted as the Overview and Settings count them, so a client
+    // with none is promised no check - the runner skips it (decide.ts shouldTrack).
+    const [{ data: clusters, error: clErr }, { count: livePrompts, error: qErr }] = await Promise.all([
+      db.from("tracked_clusters").select("name").eq("client_domain_id", clientId).is("stopped_on", null).order("created_at", { ascending: true }),
+      db.from("tracked_questions").select("id", { count: "exact", head: true }).eq("client_domain_id", clientId).is("stopped_on", null),
+    ]);
     if (clErr) throw new Error(clErr.message);
+    if (qErr) throw new Error(qErr.message);
     const tier = ((c.tier as string) in TIER_PLAIN ? c.tier : "tracked") as TierKey;
     // 9 Oct 2026 (audit copy-2): the check time in the client's zone, and no "first" check once checks have begun.
-    const mail = setupConfirmed({ tier, clusters: (clusters ?? []).map((k) => k.name as string), link: appUrl("/", siteUrl()), market: (c.market as string | null) ?? "US", today: trackingDay(), startedOn: (c.started_on as string | null) ?? null });
+    const mail = setupConfirmed({ tier, clusters: (clusters ?? []).map((k) => k.name as string), link: appUrl("/", siteUrl()), market: (c.market as string | null) ?? "US", today: trackingDay(), startedOn: (c.started_on as string | null) ?? null, livePrompts: livePrompts ?? 0 });
     if (!(await sendLifecycle({ memberEmail: member, mail }))) console.warn("[app] setup_confirmed not sent");
   } catch (err) {
     console.warn(`[app] setup_confirmed skipped: ${err instanceof Error ? err.message : String(err)}`);
