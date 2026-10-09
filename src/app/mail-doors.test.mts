@@ -107,7 +107,7 @@ const files = sourceFiles(SRC).map((f) => ({
 const SENDERS: Record<
   string,
   {
-    reach: "anonymous" | "behind the ceilings" | "open, limited per caller" | "signed by Stripe" | "signed-in member, limited per member" | "signed-in owner, limited per owner" | "signed-in owner or editor, once a client" | "the tracking runner, once a client a Sunday";
+    reach: "anonymous" | "behind the ceilings" | "open, limited per caller" | "signed by Stripe" | "signed-in member, limited per member" | "signed-in owner, limited per owner" | "signed-in owner or editor, once a client" | "the tracking runner, once a client a Sunday" | "the tracking runner or the daily cron, once a day";
     bound: string;
     evidence: RegExp;
     where: string;
@@ -261,14 +261,49 @@ const SENDERS: Record<
    * when isLinkCheckDay says Sunday. One message per client per Sunday, to our
    * own contact destination, nothing when no row alerts.
    */
+  /**
+   * 9 Oct 2026 (audit reliability-4): a run can be claimed again, after "Run
+   * now" asks to re-run a failed, partial or stalled one (rerun.ts claimRerun,
+   * a compare-and-swap on the ask; the queued claim is unchanged). A re-run
+   * does not repeat the link check (runner.ts, `if (rerun)` inside the Sunday
+   * branch), so the bound below still holds: one check per client a Sunday.
+   */
   "src/lib/tracking/link-mail.ts": {
     reach: "the tracking runner, once a client a Sunday",
     bound:
       "Mails only our own contact destination. One call per claimed Sunday tracking run, a run " +
-      "being one per client a day and claimed by a compare-and-swap on status queued; no alert " +
-      "lines, no message.",
-    evidence: /if \(isLinkCheckDay\(day\)\)/,
+      "being one per client a day and claimed by a compare-and-swap on status queued, and a " +
+      "re-run of the day not checking again; no alert lines, no message.",
+    evidence: /if \(isLinkCheckDay\(day\)\) \{\s*if \(rerun\) \{/,
     where: "src/lib/tracking/runner.ts",
+  },
+  /**
+   * 9 Oct 2026, audit reliability-6 and spec OP-1: the daily run-health
+   * summary to Danny. Called from run-health.ts reportRunHealth, through
+   * health-io.ts, by a claimed tracking run as it closes and by the
+   * CRON_SECRET-gated /api/cron/track after its dispatch. Sent only when the
+   * day has settled with a client not complete, and once a day: the claim is
+   * a dashboard_events run_health_mail row keyed on props.day, read and then
+   * written before the send, and made exact by 20261009000000's unique index.
+   * /api/health/runs reads the same health and sends nothing.
+   *
+   * Later on 9 Oct 2026 (review of 50013ab): a claim is made sent=false and
+   * marked sent after the send, and one still unsent ten minutes on - its
+   * function stopped before the send - is released by a compare-and-swap and
+   * sent by the next reading. So a day's summary is no longer lost to a
+   * function stopped mid-send, and a function stopped after the send and
+   * before the mark can send it a second time. The bound below moved with it.
+   */
+  "src/lib/tracking/health-mail.ts": {
+    reach: "the tracking runner or the daily cron, once a day",
+    bound:
+      "Mails only our own contact destination. One message per tracking day: reportRunHealth " +
+      "reads the day's run_health_mail claim and writes it before the send (unique per day with " +
+      "20261009000000), and sends nothing while a run is in flight or when every run is complete. A claim " +
+      "left unsent for ten minutes by a function stopped before its send is released and sent once more. " +
+      "Its callers are a claimed tracking run and the cron behind CRON_SECRET; the health JSON does not send.",
+    evidence: /if \(!claimAbandoned\(prior\.props, p\.now\)\) return "taken";[\s\S]*?\.eq\("props->>sent", "false"\)[\s\S]*?\.insert\(\{[^}]*event: RUN_HEALTH_EVENT[\s\S]*?await io\.send\(/,
+    where: "src/lib/tracking/run-health.ts",
   },
   /**
    * 2 Oct 2026, R166 step 4 (Danny, danny.md line 175): setup confirmed, to

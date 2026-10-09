@@ -14,7 +14,9 @@ export const maxDuration = 300;
  *
  * Bounded three ways before a read is made: the signature; the claim in
  * `runTrackingDay`, which moves only a `queued` row to `running`, so a run
- * already running or finished is skipped however often this is posted; and
+ * already running or finished is skipped however often this is posted - or,
+ * for a run the admin asked to re-run (9 Oct 2026, rerun.ts claimRerun),
+ * takes that ask once by a compare-and-swap on its marker; and
  * `tracking_enabled` / `tracking_daily_cost_cap_usd`, re-read at the claim.
  * The run budgets 270s against this route's 300 and writes its own status on
  * the way out; the stall reaper closes one the platform killed.

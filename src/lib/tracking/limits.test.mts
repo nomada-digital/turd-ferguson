@@ -79,9 +79,12 @@ test("grouping: refused past 5 in a cluster, for a prompt already grouped, twice
 });
 
 test("grouping (R111): the daily runner reads prompts by client, never by cluster, so ungrouped ones still get readings", () => {
-  const runner = readFileSync(fileURLToPath(new URL("./runner.ts", import.meta.url)), "utf8");
-  const reads = [...runner.matchAll(/\.from\("tracked_questions"\)[^;]*/g)].map((m) => m[0]);
-  assert.ok(reads.length >= 2, `found ${reads.length} tracked_questions reads in runner.ts, floor 2`);
+  // 9 Oct 2026 (audit reliability-2): the dispatch's live-prompt count moved
+  // from runner.ts to run-health.ts readTrackable, paged, which the dispatch
+  // and the run-health readings share. Same two reads, one file further.
+  const src = ["./runner.ts", "./run-health.ts"].map((f) => readFileSync(fileURLToPath(new URL(f, import.meta.url)), "utf8")).join("\n");
+  const reads = [...src.matchAll(/\.from\("tracked_questions"\)[^;]*/g)].map((m) => m[0]);
+  assert.ok(reads.length >= 2, `found ${reads.length} tracked_questions reads in runner.ts and run-health.ts, floor 2`);
   for (const r of reads) assert.doesNotMatch(r, /cluster_id/, r);
 });
 

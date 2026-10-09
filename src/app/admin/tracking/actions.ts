@@ -11,7 +11,8 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import { ADMIN_LIMITS, dayAfter, liveOn, slugFor, trackingDay, upsellSetting } from "@/lib/tracking/decide";
 import { NEEDS_A_KEYWORD } from "@/lib/checkout/signup";
 import { type Angle, angleFor, groupPrompts, insertCluster, insertKeyword, insertPrompts, linkKeyword, namesBrandIn, PROMPTS_PER_CLUSTER, readPromptRoom, readSubject, refuseGrouping } from "@/lib/tracking/limits";
-import { dispatchTrackingRun } from "@/lib/tracking/runner";
+import { dispatchTrackingRun, requestRerun } from "@/lib/tracking/runner";
+import { RERUN_BUTTON } from "@/lib/tracking/rerun";
 import { adminEdit, adminStop, isAdminKind } from "@/lib/tracking/admin-edit";
 import { placementFields } from "@/lib/tracking/placements";
 import { clearScope } from "@/lib/tracking/scope";
@@ -443,6 +444,17 @@ export async function setUpsell(_prev: AdminResult | null, form: FormData): Prom
  * "Run now" - the only manual spend. Opens today's run if there is none and
  * posts it down the same signed path the cron uses. A run already running or
  * finished today is left alone by the run route's claim.
+ *
+ * Today's failed, partial or stalled run is re-run (9 Oct 2026, audit
+ * reliability-4): requestRerun refuses it under the switch and the cap, or
+ * asks for it by a compare-and-swap that writes only a marker, and it is
+ * dispatched like any run; the runner claims the ask and reads again only
+ * what did not come back (rerun.ts). Until that pass closes, the run's status
+ * and error line are what they were, so a dispatch that fails here, a re-run
+ * never claimed and one the platform kills all leave the day as it was
+ * (review of b2e0019). A complete run, or one still reading inside 15
+ * minutes, is refused as before. Posting twice dispatches twice and the
+ * claim reads once.
  */
 export async function runNow(_prev: AdminResult | null, form: FormData): Promise<AdminResult> {
   const refused = await refuseUnlessAdmin();
@@ -469,18 +481,26 @@ export async function runNow(_prev: AdminResult | null, form: FormData): Promise
   if (iErr) return { ok: false, message: `Could not open today's run: ${iErr.message}` };
   const { data: run, error: rErr } = await db
     .from("tracking_runs")
-    .select("id, status")
+    .select("id, run_date, status, error, started_at, step_ms")
     .eq("client_domain_id", clientId)
     .eq("run_date", day)
     .single();
   if (rErr) return { ok: false, message: `Could not read today's run: ${rErr.message}` };
-  if (run.status !== "queued") return { ok: false, message: `Today's run is already ${run.status}.` };
+  const rerun = run.status !== "queued";
+  if (rerun) {
+    const asked = await requestRerun(
+      { id: run.id as string, run_date: run.run_date as string, status: run.status as string, error: (run.error as string | null) ?? null, started_at: (run.started_at as string | null) ?? null, step_ms: run.step_ms },
+      day,
+    ).catch((err: unknown) => ({ ok: false as const, message: `Could not ask for a re-run: ${err instanceof Error ? err.message : String(err)}` }));
+    if (!asked.ok) return { ok: false, message: asked.message };
+  }
 
   try {
     await dispatchTrackingRun(run.id as string);
   } catch (err) {
-    return { ok: false, message: `Dispatch failed: ${err instanceof Error ? err.message : String(err)}` };
+    const why = err instanceof Error ? err.message : String(err);
+    return { ok: false, message: rerun ? `Dispatch failed: ${why}. Today's run is as it was, and ${RERUN_BUTTON} asks again.` : `Dispatch failed: ${why}` };
   }
   revalidatePath("/admin/tracking");
-  return { ok: true, message: "Run dispatched. Refresh in a few minutes." };
+  return { ok: true, message: rerun ? "Re-run dispatched: it reads again only what did not come back. Refresh in a few minutes." : "Run dispatched. Refresh in a few minutes." };
 }

@@ -2,10 +2,12 @@ import type { Metadata } from "next";
 
 import { T } from "@/config/tokens";
 import { supabaseAdmin, supabaseConfigured } from "@/lib/supabase/admin";
+import { selectAll } from "@/lib/supabase/page";
 import { ADMIN_LIMITS, UPSELL_MODES, trackingDay } from "@/lib/tracking/decide";
-import { runIsStuck } from "@/lib/tracking/dispatch";
 import { PROMPTS_PER_CLUSTER, type Subject, namesBrandIn, trackingCounts } from "@/lib/tracking/limits";
 import { readScopes, sees } from "@/lib/tracking/scope";
+import { RERUN_BUTTON, rerunLine } from "@/lib/tracking/rerun";
+import { type HealthRun, RUN_STATES, type RunHealth, STATE_WORDS, readRunHealth, runState } from "@/lib/tracking/run-health";
 import { SETUP_CONFIRMED_EVENT, setupState } from "@/lib/tracking/setup-landing";
 
 import { ActionForm } from "./ActionForm";
@@ -27,6 +29,16 @@ export const metadata: Metadata = {
  *
  * Lists only clients set up here (a slug is set by the create action), so the
  * rows client_domains held before tracking are never shown or tracked.
+ *
+ * Today's runs head the page (9 Oct 2026, audit reliability-6): run-health.ts
+ * readRunHealth, the reading the summary mail and /api/health/runs make, so
+ * the three cannot disagree. A run left `running` past 15 minutes reads as
+ * stalled here rather than "running $0.00" until the 03:45 sweep, and "Run
+ * now" on a failed, partial or stalled run re-reads what did not come back
+ * (audit reliability-4, rerun.ts), with where that re-run is beside it. The
+ * prompt, keyword, run and cluster reads are paged (audit reliability-2;
+ * clusters from the review of 348abbd): every client's rows in one select
+ * stop at PostgREST's thousand.
  */
 
 const input = {
@@ -42,11 +54,18 @@ const money = (n: number) => `$${n.toFixed(2)}`;
 
 type Row = Record<string, unknown>;
 
+/** Every page of a read, with the page's own message when one fails. */
+const all = <R,>(what: string, page: (from: number, to: number) => PromiseLike<{ data: R[] | null; error: { message: string } | null }>) =>
+  selectAll<R>(page).catch((err: unknown) => {
+    throw new Error(`could not read ${what}: ${err instanceof Error ? err.message : String(err)}`);
+  });
+
 export default async function TrackingAdmin() {
   if (!supabaseConfigured()) return <div style={{ padding: "40px" }}>Database not configured.</div>;
   const db = supabaseAdmin();
-  const today = trackingDay();
-  const since = new Date(Date.now() - 14 * 86_400_000).toISOString().slice(0, 10);
+  const now = Date.now();
+  const today = trackingDay(new Date(now));
+  const since = new Date(now - 14 * 86_400_000).toISOString().slice(0, 10);
 
   const { data: clients, error: cErr } = await db
     .from("client_domains")
@@ -59,41 +78,50 @@ export default async function TrackingAdmin() {
   const accounts = [...new Set((clients ?? []).map((c) => c.account_id as string))];
 
   const [
-    { data: questions, error: qErr },
-    { data: keywords, error: kErr },
-    { data: runs, error: rErr },
+    questions,
+    keywords,
+    runsById,
+    health,
     { data: members, error: mErr },
     { data: accountRows, error: acErr },
-    { data: clusters, error: clErr },
+    clustersById,
     { data: setups, error: sErr },
   ] = await Promise.all([
-    db.from("tracked_questions").select("id, client_domain_id, cluster_id, angle, text, source, added_on, stopped_on").in("client_domain_id", ids),
-    db.from("tracked_keywords").select("id, client_domain_id, keyword, added_on, stopped_on").in("client_domain_id", ids),
-    db
-      .from("tracking_runs")
-      .select("client_domain_id, run_date, status, dfs_cost, model_calls, error, created_at, started_at, finished_at")
-      .in("client_domain_id", ids)
-      .gte("run_date", since)
-      .order("run_date", { ascending: false }),
+    all<Row>("tracked questions", (from, to) => db.from("tracked_questions").select("id, client_domain_id, cluster_id, angle, text, source, added_on, stopped_on").in("client_domain_id", ids).order("id", { ascending: true }).range(from, to)),
+    all<Row>("tracked keywords", (from, to) => db.from("tracked_keywords").select("id, client_domain_id, keyword, added_on, stopped_on").in("client_domain_id", ids).order("id", { ascending: true }).range(from, to)),
+    all<Row>("tracking runs", (from, to) =>
+      db
+        .from("tracking_runs")
+        .select("client_domain_id, run_date, status, dfs_cost, model_calls, error, created_at, started_at, finished_at, step_ms")
+        .in("client_domain_id", ids)
+        .gte("run_date", since)
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
+    // Its own failure is shown on the strip, never the page's.
+    readRunHealth(db, today, now).catch((err: unknown) => (err instanceof Error ? err.message : String(err))),
     db.from("dashboard_members").select("id, account_id, email, role").in("account_id", accounts).is("removed_at", null),
     db.from("accounts").select("id, upsell_mode, upsell_contact_email").in("id", accounts),
-    db
-      .from("tracked_clusters")
-      .select("id, client_domain_id, name, keyword_id, tier, started_on, stopped_on")
-      .in("client_domain_id", ids)
-      .is("stopped_on", null)
-      .order("created_at", { ascending: true }),
+    all<Row>("clusters", (from, to) =>
+      db
+        .from("tracked_clusters")
+        .select("id, client_domain_id, name, keyword_id, tier, started_on, stopped_on, created_at")
+        .in("client_domain_id", ids)
+        .is("stopped_on", null)
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
     // R166 step 6: who confirmed setup, and when.
     db.from("dashboard_events").select("client_domain_id, created_at, member_email").in("client_domain_id", ids).eq("event", SETUP_CONFIRMED_EVENT),
   ]);
-  if (qErr) throw new Error(`could not read tracked questions: ${qErr.message}`);
-  if (kErr) throw new Error(`could not read tracked keywords: ${kErr.message}`);
-  if (rErr) throw new Error(`could not read tracking runs: ${rErr.message}`);
+  // Newest day first, as the run list below reads them; paged by id.
+  const runs = [...runsById].sort((a, b) => String(b.run_date).localeCompare(String(a.run_date)));
+  // Oldest first, as they were made; paged by id.
+  const clusters = [...clustersById].sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
   if (mErr) throw new Error(`could not read dashboard members: ${mErr.message}`);
   // AG-1 (9 Oct 2026): a member limited to some clients is listed only under those.
   const scopes = await readScopes(db, (members ?? []).map((m) => m.id as string));
   if (acErr) throw new Error(`could not read accounts: ${acErr.message}`);
-  if (clErr) throw new Error(`could not read clusters: ${clErr.message}`);
   if (sErr) throw new Error(`could not read setup confirms: ${sErr.message}`);
 
   const of = (rows: Row[] | null, id: string, key = "client_domain_id") => (rows ?? []).filter((r) => r[key] === id);
@@ -107,6 +135,8 @@ export default async function TrackingAdmin() {
           Dashboard usage
         </a>
       </p>
+
+      <RunStrip health={health} today={today} />
 
       <section style={{ border: `1px solid ${T.line}`, borderRadius: "10px", padding: "16px", marginBottom: "24px" }}>
         <h2 style={{ fontSize: "16px", margin: "0 0 8px" }}>Create a client from a scan</h2>
@@ -133,6 +163,10 @@ export default async function TrackingAdmin() {
         const n = trackingCounts({ clusterLimit: c.cluster_limit as number, today, prompts: qs as { added_on: string; stopped_on: string | null }[], keywords: ks as { stopped_on: string | null }[] });
         const rs = of(runs, id);
         const todayRun = rs.find((r) => r.run_date === today);
+        const todayState = todayRun ? runState(todayRun as HealthRun, now) : null;
+        const rerunnable = todayState === "failed" || todayState === "partial" || todayState === "stalled";
+        // Where today's re-run is, if one was asked (rerun.ts): the run's own status stays as it was until it closes.
+        const rerunNote = todayRun ? rerunLine(todayRun as { started_at: string | null; step_ms?: unknown }, now) : null;
         const cost14 = rs.reduce((n, r) => n + Number(r.dfs_cost ?? 0), 0);
         const ms = of(members, c.account_id as string, "account_id").filter((m) => sees(scopes.of.get(m.id as string), id));
         const account = (accountRows ?? []).find((a) => a.id === c.account_id);
@@ -143,7 +177,7 @@ export default async function TrackingAdmin() {
             </h2>
             <p style={{ margin: "0 0 8px", color: T.soft }}>
               Clusters allowed {c.cluster_limit as number} - prompts {n.prompts}/{n.promptLimit} ({n.checkedToday} live today) - keywords {n.keywords}/{n.keywordLimit} -today&apos;s run:{" "}
-              {todayRun ? `${todayRun.status} ${money(Number(todayRun.dfs_cost ?? 0))}${todayRun.error ? ` (${todayRun.error})` : ""}` : "none"} - 14 days {money(cost14)}
+              {todayRun && todayState ? `${STATE_WORDS[todayState]} ${money(Number(todayRun.dfs_cost ?? 0))}${todayRun.error ? ` (${todayRun.error})` : ""}` : "none"} - 14 days {money(cost14)}
               {c.tier !== "tracked" ? (
                 <>
                   {" - "}
@@ -153,15 +187,23 @@ export default async function TrackingAdmin() {
                 </>
               ) : null}
             </p>
-            <ActionForm action={runNow} submit="Run now">
+            <ActionForm action={runNow} submit={rerunnable ? RERUN_BUTTON : "Run now"}>
               <input type="hidden" name="client" value={id} maxLength={ADMIN_LIMITS.id} />
-              <span style={{ fontSize: "12.5px", color: T.soft }}>The only manual spend.</span>
-              {todayRun && runIsStuck(todayRun as { status: string; created_at: string | null; started_at: string | null }) ? (
+              <span style={{ fontSize: "12.5px", color: T.soft }}>
+                {rerunnable ? "Reads again only what did not come back today, under the same cap." : "The only manual spend."}
+              </span>
+              {todayRun && (todayState === "stuck" || todayState === "undispatched") ? (
                 <span style={{ fontSize: "12.5px", color: T.ink, fontWeight: 700 }}>
                   stuck - queued since {String(todayRun.created_at).slice(11, 16)}Z and never claimed:{" "}
                   {(todayRun.error as string | null) ?? "no dispatch error recorded"}
                 </span>
               ) : null}
+              {todayRun && todayState === "stalled" ? (
+                <span style={{ fontSize: "12.5px", color: T.ink, fontWeight: 700 }}>
+                  stalled - running since {String(todayRun.started_at).slice(11, 16)}Z and never closed; the platform stopped it
+                </span>
+              ) : null}
+              {rerunNote ? <span style={{ fontSize: "12.5px", color: T.ink }}>{rerunNote}</span> : null}
             </ActionForm>
             <ActionForm action={addTracked} submit="Add prompt">
               <input type="hidden" name="client" value={id} maxLength={ADMIN_LIMITS.id} />
@@ -227,6 +269,47 @@ export default async function TrackingAdmin() {
         );
       })}
     </div>
+  );
+}
+
+/**
+ * Today's runs across every client (9 Oct 2026, audit reliability-6): how
+ * many should have run, each state's count, and every client not complete
+ * with its error line - the summary mail's lines, on the page.
+ */
+function RunStrip({ health, today }: { health: RunHealth | string; today: string }) {
+  const box = { border: `1px solid ${T.line}`, borderRadius: "10px", padding: "12px 16px", marginBottom: "24px" } as const;
+  if (typeof health === "string") {
+    return (
+      <section style={box}>
+        <strong>Today&apos;s runs</strong> <span style={{ color: T.badFg }}>could not be read: {health}</span>
+      </section>
+    );
+  }
+  const looking = health.clients.filter((c) => c.state !== "complete");
+  const tally = RUN_STATES.filter((s) => health.counts[s] > 0).map((s) => `${STATE_WORDS[s]} ${health.counts[s]}`);
+  return (
+    <section style={box}>
+      <strong>Today&apos;s runs</strong>{" "}
+      <span style={{ color: T.soft }}>
+        ({today}) - {health.expected} should run{tally.length ? ` - ${tally.join(", ")}` : ""}
+        {health.settled ? "" : " - still in flight"}
+        {" - "}
+        <a href="/api/health/runs" style={{ color: T.ink }}>
+          health JSON
+        </a>
+      </span>
+      {looking.length ? (
+        <ul style={{ margin: "6px 0 0", paddingLeft: "20px", fontSize: "13px" }}>
+          {looking.map((c) => (
+            <li key={c.id}>
+              {c.domain}: <strong>{STATE_WORDS[c.state]}</strong>
+              {c.error ? <span style={{ color: T.soft }}> - {c.error}</span> : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </section>
   );
 }
 

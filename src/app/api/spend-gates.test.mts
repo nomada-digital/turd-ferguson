@@ -214,6 +214,10 @@ const EXEMPT: Record<string, { why: string; evidence: RegExp; where: string }> =
    * lifecycle emails that go by the calendar (lib/email/lifecycle-sweep.ts) -
    * Resend messages, not model or SERP spend - each behind its own flag, off
    * by default, and once per client per email.
+   *
+   * 9 Oct 2026 (audit reliability-6, OP-1): and the run-health summary to our
+   * own inbox (lib/tracking/run-health.ts) - one Resend message a tracking
+   * day at most, claimed in dashboard_events before the send.
    */
   "cron/track": {
     why:
@@ -221,15 +225,26 @@ const EXEMPT: Record<string, { why: string; evidence: RegExp; where: string }> =
       "Behind CRON_SECRET; refused outright by refuseRun when tracking_enabled is off or today's tracking " +
       "dfs_cost has reached tracking_daily_cost_cap_usd; and the unique (client, day) row means a second " +
       "call the same day dispatches nothing. Its lifecycle emails go only with their email_<name>_enabled " +
-      "flag on, to live owners, once per client per email, claimed in dashboard_events before the send.",
+      "flag on, to live owners, once per client per email, claimed in dashboard_events before the send. " +
+      "Its run-health summary goes to our own inbox at most once a tracking day, claimed the same way.",
     evidence: /refuseRun\(await trackingSettings\(\), await trackingSpentOn\(day\)\)/,
     where: "src/lib/tracking/runner.ts",
   },
+  /**
+   * 9 Oct 2026 (audit reliability-4): /admin/tracking's "Run now" can ask to
+   * re-run today's failed, partial or stalled run (rerun.ts), behind the
+   * admin's Basic auth and the same switch and cap. Later that day (review of
+   * b2e0019) the ask stopped moving the run back to queued: it writes a
+   * marker, and the run route claims it by a compare-and-swap on that marker
+   * (claimRerun) only when the queued claim below took nothing - once an ask.
+   */
   "track/run": {
     why:
       "Runs one client's day. Only a body signed with CRON_SECRET is accepted; the claim moves only a " +
       "queued row to running, so one run reads once however often it is posted; and the same " +
-      "tracking_enabled / daily cost cap refusal is re-read at the claim.",
+      "tracking_enabled / daily cost cap refusal is re-read at the claim. A run the admin asked to re-run " +
+      "is claimed once an ask by a compare-and-swap on its marker and read again the same way, only for the " +
+      "reads that did not come back, its spend added to the run's.",
     evidence: /\.eq\("status", "queued"\)/,
     where: "src/lib/tracking/runner.ts",
   },

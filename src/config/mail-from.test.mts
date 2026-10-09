@@ -247,6 +247,11 @@ const SENDERS: { file: string; sends: number; why: string }[] = [
     why: "setup confirmed, 2 Oct 2026 (R166 step 4) - to us at the contact destination, member as reply-to, once a client after the setup_confirmed row is written",
   },
   {
+    file: "src/lib/tracking/health-mail.ts",
+    sends: 1,
+    why: "the daily run-health summary, 9 Oct 2026 (audit reliability-6, spec OP-1) - to us at the contact destination, from a closing tracking run or the daily cron, once a tracking day when a client's run is not complete",
+  },
+  {
     file: "src/lib/email/lifecycle-mail.ts",
     sends: 1,
     // "only from the signed Stripe webhook" until 8 Oct 2026 (review of 7e133a7): the runner,
@@ -277,8 +282,9 @@ test("every send takes its From from the one reader", () => {
   // Sunday link check's alert (T12, R96). 9 since 1 Oct 2026: the team
   // invite (R142 part 2, BRIEF-4 P2). 10 since 1 Oct 2026: the lifecycle
   // emails (R159 part 3), flag-gated. 11 since 2 Oct 2026: setup confirmed
-  // (R166 step 4).
-  assert.equal(all.length, 11, `expected 11 sends, the walk found ${all.length}`);
+  // (R166 step 4). 12 since 9 Oct 2026: the run-health summary (audit
+  // reliability-6, OP-1).
+  assert.equal(all.length, 12, `expected 12 sends, the walk found ${all.length}`);
 
   for (const s of all) {
     assert.equal(s.from, "mailFrom()", `${s.file} sets its own From: ${s.from}`);
@@ -319,6 +325,8 @@ test("every send takes its From from the one reader", () => {
 const RECIPIENTS: { to: string; why: string }[] = [
   {
     to: "process.env.CONTACT_EMAIL_DESTINATION ?? CONTACT_EMAIL",
+    // 9 Oct 2026: the run-health summary (health-mail.ts) is addressed the same way, as the
+    // order email, the link alert and setup confirmed already were.
     why: "us - the waitlist door, whose destination a deployment may repoint but which is never a value a caller supplies",
   },
   {
@@ -352,7 +360,8 @@ test("every send is addressed to somebody we are allowed to write to", () => {
   // 1 Oct 2026: the team invite (R142 part 2), to the address an owner invited.
   // 10 since 1 Oct 2026: the lifecycle emails (R159 part 3), to a stored owner.
   // 11 since 2 Oct 2026: setup confirmed (R166 step 4), to the contact destination.
-  assert.equal(all.length, 11, `expected 11 sends, the walk found ${all.length}`);
+  // 12 since 9 Oct 2026: the run-health summary (audit reliability-6, OP-1), to the contact destination.
+  assert.equal(all.length, 12, `expected 12 sends, the walk found ${all.length}`);
 
   const allowed = new Map(RECIPIENTS.map((r) => [r.to, r.why]));
   for (const s of all) {

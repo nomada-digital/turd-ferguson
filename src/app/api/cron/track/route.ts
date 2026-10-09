@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { constantTimeEqual } from "@/lib/constant-time";
 import { sweepLifecycleMailSafely } from "@/lib/email/lifecycle-cron";
+import { runHealthAfterDispatch } from "@/lib/tracking/health-io";
 import { dispatchTrackingRuns } from "@/lib/tracking/runner";
 
 export const runtime = "nodejs";
@@ -29,6 +30,12 @@ export const maxDuration = 60;
  * setup_reminder, each behind its own flag (off until Danny approves it) and
  * once per client (lib/email/lifecycle-sweep.ts, wired to Resend in
  * lifecycle-cron.ts). Never fatal to the answer.
+ *
+ * Between the two, run health (9 Oct 2026, audit reliability-6, spec OP-1;
+ * lib/tracking/run-health.ts): the day before's summary to our own inbox if
+ * it was never sent, and today's at once when nothing was dispatched, with
+ * the reason. A day with runs in flight is reported by the last run to
+ * close. Never fatal to the answer either.
  */
 export async function GET(req: Request) {
   const secret = process.env.CRON_SECRET;
@@ -39,18 +46,24 @@ export async function GET(req: Request) {
   }
 
   let answer: { body: Record<string, unknown>; status: number };
+  let note: string | null = null;
   try {
     // Dispatched to the canonical origin, never this request's own host: under
     // Vercel Cron that is not necessarily alwayscited.com, and on 30 Sep no run
     // dispatched from it was ever claimed (lib/tracking/dispatch.ts).
     const out = await dispatchTrackingRuns();
-    if (out.refused) console.warn(`[track] daily check refused: ${out.refused}`);
+    if (out.refused) {
+      console.warn(`[track] daily check refused: ${out.refused}`);
+      note = `The daily dispatch was refused: ${out.refused}.`;
+    }
     answer = { body: { ok: true, ...out }, status: 200 };
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
     console.warn(`[track] daily check failed: ${error}`);
+    note = `The daily dispatch failed: ${error.slice(0, 300)}.`;
     answer = { body: { ok: false, error }, status: 502 };
   }
+  const health = await runHealthAfterDispatch(note);
   const mail = await sweepLifecycleMailSafely();
-  return NextResponse.json({ ...answer.body, mail }, { status: answer.status });
+  return NextResponse.json({ ...answer.body, health, mail }, { status: answer.status });
 }

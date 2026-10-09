@@ -251,7 +251,14 @@ test("first_reading: flag first, the client's only finished run, no agency, the 
   assert.ok(at('lifecycleOn(db, "first_reading")') >= 0 && at('lifecycleOn(db, "first_reading")') < at("sendLifecycle("), "the flag is asked before the send");
   assert.ok(at("if (count !== 1) return;") >= 0 && at("if (count !== 1) return;") < at("sendLifecycle("), "only on the client's first finished run");
   assert.ok(at('=== "agency") return;') >= 0 && at('=== "agency") return;') < at("sendLifecycle("), "never in agency mode");
-  assert.match(runner, /named: namedRate\(answerRows, range\),\s*page1: keywordsOnPage1\(serpRows, range, keywords\.length\)/);
+  // 9 Oct 2026 (audit reliability-4): a re-run reads again only what did not
+  // come back, so the day's figures are its rows merged over what the run kept
+  // (rerun.ts dayRows); the cron's pass keeps nothing and reads its own rows,
+  // as before. Still the Overview's namedRate and keywordsOnPage1.
+  assert.match(runner, /const all = kept \? dayRows\(kept, written, serpRows\) : \{ answers: answerRows, serp: serpRows \};/);
+  assert.match(runner, /named: namedRate\(all\.answers, range\),\s*page1: keywordsOnPage1\(all\.serp, range, keywords\.length\)/);
+  // Once a day: not on a re-run of a run an earlier pass of which landed.
+  assert.match(runner, /if \(status !== "failed" && !rerun\?\.landed\) \{/);
 });
 
 test("the invite names who added you and the role", () => {
