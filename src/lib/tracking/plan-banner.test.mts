@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import { FIXTURE_INVOICE_URL, expandFixture, fixtureState } from "./fixture-mode.ts";
-import { paymentDay, planBanner, type BannerClient } from "./plan-banner.ts";
+import { UNPAID_INVOICE_DAYS, paymentDay, planBanner, type BannerClient } from "./plan-banner.ts";
 
 /**
  * The plan banner (8 Oct 2026, audit activation-12, activation-5), decided in
@@ -36,9 +36,10 @@ test("only the owner sees the failed payment, and tracking is not said to have s
 });
 
 test("ended for payment says why; ended any other way reads as before", () => {
-  const unpaid = { status: "ended", payment_status: "unpaid", payment_ended_at: "2026-10-08T12:00:00Z", payment_invoice_url: PAGE };
+  // No invoice to pay (or one too old to offer, below): the owner asks us, as any end does.
+  const unpaid = { status: "ended", payment_status: "unpaid", payment_ended_at: "2026-10-08T12:00:00Z", payment_invoice_url: null };
   assert.deepEqual(draw(unpaid), { tone: "ended", text: "Tracking has stopped for Tallyroo because the plan is unpaid. Everything read so far stays here.", link: { href: BILLING, label: "Ask us to restart it" } });
-  assert.deepEqual(draw(unpaid, "viewer"), { tone: "ended", text: "Tracking has stopped for Tallyroo because the plan is unpaid. Everything read so far stays here - an owner can ask us to restart it.", link: null });
+  assert.deepEqual(draw({ ...unpaid, payment_invoice_url: PAGE }, "viewer"), { tone: "ended", text: "Tracking has stopped for Tallyroo because the plan is unpaid. Everything read so far stays here - an owner can ask us to restart it.", link: null });
   assert.deepEqual(draw(unpaid, "owner", false), { tone: "ended", text: "Tracking has stopped for Tallyroo because the plan is unpaid. Everything read so far stays here - your account contact can restart it.", link: null });
   // As Sidebar drew it on 8 Oct 2026 (review of 2379757).
   assert.deepEqual(draw({ status: "ended" }), { tone: "ended", text: "Tracking has ended for Tallyroo. Everything read so far stays here.", link: { href: BILLING, label: "Ask us to restart it" } });
@@ -46,6 +47,31 @@ test("ended for payment says why; ended any other way reads as before", () => {
   assert.deepEqual(draw({ status: "ended" }, "owner", false), { tone: "ended", text: "Tracking has ended for Tallyroo. Everything read so far stays here - your account contact can restart it.", link: null });
   // Ended beats a past-due record the invoice wrote after the end (payment.ts: an invoice never moves the status).
   assert.equal(draw({ ...due, status: "ended", payment_ended_at: "2026-10-08T12:00:00Z" })!.tone, "ended");
+});
+
+/**
+ * Review of 355d223 (9 Oct 2026): an unpaid end withheld the invoice it still
+ * held, and sent the owner to us for something paying fixes. Stripe moves an
+ * unpaid subscription to active when the invoice is paid
+ * (docs.stripe.com/billing/subscriptions/overview, read 9 Oct 2026), and
+ * afterSubscription then restores the client.
+ */
+test("an unpaid end gives the owner the invoice to pay, for a week; other payment ends still ask us", () => {
+  const ended = { status: "ended", payment_status: "unpaid", payment_ended_at: "2026-10-08T12:00:00Z", payment_invoice_url: PAGE };
+  const pay = { tone: "ended", text: "Tracking has stopped for Tallyroo because the plan is unpaid. Everything read so far stays here, and tracking starts again once the invoice is paid.", link: { href: PAGE, label: "Pay the invoice", external: true } };
+  assert.deepEqual(draw(ended), pay);
+  assert.deepEqual(draw(ended, "owner", false), pay, "the owner pays Stripe whoever bills the account");
+  // Not the owner: told as before, never handed the invoice.
+  for (const role of ["editor", "viewer"]) assert.equal(draw(ended, role)!.link, null, role);
+  // Paused and incomplete_expired: an invoice cannot bring them back, so Ask us.
+  for (const payment_status of ["paused", "incomplete_expired"]) assert.equal(draw({ ...ended, payment_status })!.link?.label, "Ask us to restart it", payment_status);
+  // Cancelled after it stopped (payment.ts clears payment_ended_at): final, as before.
+  assert.equal(draw({ ...ended, payment_status: "canceled", payment_ended_at: null })!.link?.label, "Ask us to restart it");
+  // Stripe's links expire (docs.stripe.com/invoicing/hosted-invoice-page): after a week, Ask us.
+  const day = 86_400_000;
+  assert.equal(draw({ ...ended, payment_ended_at: new Date(NOW - (UNPAID_INVOICE_DAYS * day - 60_000)).toISOString() })!.link?.label, "Pay the invoice");
+  assert.equal(draw({ ...ended, payment_ended_at: new Date(NOW - UNPAID_INVOICE_DAYS * day).toISOString() })!.link?.label, "Ask us to restart it");
+  assert.equal(draw({ ...ended, payment_ended_at: "not a time" })!.link?.label, "Ask us to restart it");
 });
 
 test("the trial reads as it did before the payment states joined", () => {
@@ -66,13 +92,13 @@ test("the retry day is the client's own: a US client's evening is not read as Lo
 
 test("the copy keeps the house rules: no em-dash, no capitalised brand", () => {
   const texts: string[] = [];
-  for (const c of [due, { ...due, payment_invoice_url: null }, { status: "ended" }, { status: "ended", payment_ended_at: "2026-10-08T12:00:00Z" }]) {
+  for (const c of [due, { ...due, payment_invoice_url: null }, { status: "ended" }, { status: "ended", payment_ended_at: "2026-10-08T12:00:00Z" }, { status: "ended", payment_status: "unpaid", payment_ended_at: "2026-10-08T12:00:00Z", payment_invoice_url: PAGE }]) {
     for (const role of ["owner", "viewer"]) for (const upsell of [true, false]) {
       const b = draw(c, role, upsell);
       if (b) texts.push(b.text, b.link?.label ?? "");
     }
   }
-  assert.ok(texts.length >= 12);
+  assert.ok(texts.length >= 16);
   for (const t of texts) {
     assert.doesNotMatch(t, /—|–/, t);
     assert.doesNotMatch(t, /AlwaysCited|Alwayscited|always cited/, t);
@@ -91,6 +117,8 @@ test("the past-due and unpaid fixture states draw their banners on the real fixt
   assert.deepEqual(d!.link, { href: FIXTURE_INVOICE_URL, label: "Pay the invoice", external: true });
   assert.equal(at("past-due", "viewer"), null);
   assert.match(at("unpaid")!.text, /because the plan is unpaid/);
+  assert.deepEqual(at("unpaid")!.link, { href: FIXTURE_INVOICE_URL, label: "Pay the invoice", external: true }, "the unpaid fixture ended yesterday, inside the week");
+  assert.equal(at("unpaid", "viewer")!.link, null);
   assert.equal(at("default"), null);
 });
 

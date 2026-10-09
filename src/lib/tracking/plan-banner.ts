@@ -6,7 +6,8 @@ import { trialMoment, trialStatus } from "../../config/trial.ts";
  * hidden on phones - for the things a client must not miss. Drawn by
  * Sidebar.tsx; decided here, so every state is tested without a page.
  *
- * In order: tracking has ended (for payment, BL-2, or otherwise); the last
+ * In order: tracking has ended (for payment, BL-2, with the invoice to pay
+ * when paying it starts tracking again, or otherwise); the last
  * payment failed and Stripe is retrying (BL-2, 9 Oct 2026, owners only); how
  * long the free trial has left.
  */
@@ -35,6 +36,23 @@ export function paymentDay(iso: string, market: string): string {
   return `${Number(p.day)} ${MONTHS[Number(p.month) - 1]} ${p.year}`;
 }
 
+/**
+ * How long after an unpaid end the banner still offers the invoice (picked
+ * 9 Oct 2026). Stripe's invoice links expire: 30 days after an invoice with
+ * no due date is finalized, and a link the API hands out stays good for at
+ * least 10 days (docs.stripe.com/invoicing/hosted-invoice-page, read 9 Oct
+ * 2026). The link the webhook keeps is from the last failed attempt before
+ * the end, and while a subscription is unpaid Stripe makes each new period's
+ * invoice as a draft. So a week on, the owner asks us instead of following a
+ * link that may have expired.
+ */
+export const UNPAID_INVOICE_DAYS = 7;
+
+function unpaidInvoiceLive(endedAt: string, now: number): boolean {
+  const at = Date.parse(endedAt);
+  return Number.isFinite(at) && now - at < UNPAID_INVOICE_DAYS * 86_400_000;
+}
+
 export function planBanner(p: {
   client: BannerClient;
   role: string;
@@ -56,6 +74,15 @@ export function planBanner(p: {
     const text = c.payment_ended_at
       ? `Tracking has stopped for ${c.name} because the plan is unpaid. Everything read so far stays here`
       : `Tracking has ended for ${c.name}. Everything read so far stays here`;
+    // Review of 355d223 (9 Oct 2026): an unpaid end is one the owner can undo
+    // without us. Paying the invoice moves an unpaid subscription back to
+    // active (Stripe, docs.stripe.com/billing/subscriptions/overview, read
+    // 9 Oct 2026), and the webhook then makes the client active again
+    // (payment.ts afterSubscription). Paused and incomplete_expired cannot be
+    // undone by an invoice, and a cancellation is final: those still ask us.
+    if (owner && c.payment_ended_at && c.payment_status === "unpaid" && c.payment_invoice_url && unpaidInvoiceLive(c.payment_ended_at, now)) {
+      return { tone: "ended", text: `${text}, and tracking starts again once the invoice is paid.`, link: { href: c.payment_invoice_url, label: "Pay the invoice", external: true } };
+    }
     return owner && upsell
       ? { tone: "ended", text: `${text}.`, link: { href: billing, label: "Ask us to restart it" } }
       : { tone: "ended", text: `${text} - ${upsell ? "an owner can ask us to restart it" : "your account contact can restart it"}.`, link: null };
