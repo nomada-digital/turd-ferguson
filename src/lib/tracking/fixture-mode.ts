@@ -45,7 +45,7 @@ export type Fixture = {
   members: FixtureMember[];
   /** R180: the newest order's typed keyword and scan, as orders stores them; only the signup-typed state has one. */
   order?: OrderPick | null;
-  /** AG-1 (9 Oct 2026): the account's other clients, beside `client`. They have no readings. */
+  /** AG-1 (9 Oct 2026): the account's other clients, beside `client`; only the two-clients state has one. They have no readings. */
   others?: Fixture["client"][];
 };
 
@@ -97,7 +97,27 @@ export function fixtureUnreadable(env: Record<string, string | undefined> = proc
  * swept - the default names 5 brands, cites 6 pages and has 6 placements.
  */
 /** Every TRACKING_FIXTURE_STATE, unset being `default`. Anything else serves the default. */
-export const FIXTURE_STATES = ["default", "signup", "signup-typed", "new", "young", "partial", "failed", "unreadable", "stopped", "ungrouped", "pilot-mixed", "uncited", "long", "trial", "trial-ending", "trial-cancelled", "ended", "brands-unread"] as const;
+export const FIXTURE_STATES = ["default", "signup", "signup-typed", "new", "young", "partial", "failed", "unreadable", "stopped", "ungrouped", "pilot-mixed", "uncited", "long", "trial", "trial-ending", "trial-cancelled", "ended", "brands-unread", "two-clients"] as const;
+
+/**
+ * AG-1 (audit security-2, 9 Oct 2026; also what M7's Home needs): an account
+ * with two clients. `TRACKING_FIXTURE_STATE=two-clients` adds Ledgerline, a
+ * made-up UK client on the same account with no readings, and two members
+ * limited to one client each: lead@example.com, a viewer who sees Tallyroo
+ * only (`TRACKING_FIXTURE_ROLE=scoped` signs in as them), and
+ * books@example.com, an editor who sees Ledgerline only. The owner, editor
+ * and viewer see both.
+ */
+export const FIXTURE_SECOND_CLIENT = { id: "fixture-2", slug: "ledgerline", brand: "Ledgerline", domain: "ledgerline.example", market: "UK", tier: "tracked" } as const;
+
+function twoClients(f: Fixture): Fixture {
+  const second = { ...f.client, ...FIXTURE_SECOND_CLIENT };
+  const scoped: FixtureMember[] = [
+    { email: "lead@example.com", name: null, role: "viewer", last_login_at: null, clients: [f.client.id] },
+    { email: "books@example.com", name: null, role: "editor", last_login_at: null, clients: [second.id] },
+  ];
+  return { ...f, others: [second], members: [...f.members, ...scoped] };
+}
 
 /** Every client on the fixture's account, the main one first, as clientsFor orders them (oldest first). */
 export function fixtureAccount(f: Fixture): Fixture["client"][] {
@@ -187,7 +207,8 @@ function longLists(f: Fixture): Fixture {
 export const FIXTURE_ORDER_KEYWORD = "invoicing app for freelancers";
 
 export function fixtureState(f: Fixture, env: Record<string, string | undefined> = process.env): Fixture {
-  const as = fixtureAs(f, env);
+  // two-clients first: its limited members are who TRACKING_FIXTURE_ROLE=scoped signs in as.
+  const as = fixtureAs(env.TRACKING_FIXTURE_STATE === "two-clients" ? twoClients(f) : f, env);
   if (env.TRACKING_FIXTURE_STATE === "pilot-mixed") return pilotMixed(as);
   if (env.TRACKING_FIXTURE_STATE === "new") return dayZero(as);
   if (env.TRACKING_FIXTURE_STATE === "young") return young(as);
@@ -423,8 +444,10 @@ function brandsUnread(f: Fixture): Fixture {
  * R146 (1 Oct 2026, BRIEF-4 P6): `TRACKING_FIXTURE_ROLE=editor|viewer|removed`
  * signs the fixture session in as that member of the team, so the role
  * journeys run on the real pages. `removed` is the removed member, whom
- * fixtureLive refuses, so every client page 404s for them. Unset is the
- * owner; anything else throws rather than silently running as the owner.
+ * fixtureLive refuses, so every client page 404s for them. `scoped` (AG-1,
+ * 9 Oct 2026) is the first live member limited to some clients, which only
+ * the two-clients state has. Unset is the owner; anything else throws rather
+ * than silently running as the owner.
  */
 function fixtureAs(f: Fixture, env: Record<string, string | undefined>): Fixture {
   const want = env.TRACKING_FIXTURE_ROLE;
@@ -432,10 +455,12 @@ function fixtureAs(f: Fixture, env: Record<string, string | undefined>): Fixture
   const m =
     want === "removed"
       ? f.members.find((x) => x.removed_at)
-      : want === "editor" || want === "viewer"
-        ? f.members.find((x) => x.role === want && !x.removed_at)
-        : undefined;
-  if (!m) throw new Error(`TRACKING_FIXTURE_ROLE=${want}: the fixture has no such member (owner, editor, viewer or removed)`);
+      : want === "scoped"
+        ? f.members.find((x) => x.clients?.length && !x.removed_at)
+        : want === "editor" || want === "viewer"
+          ? f.members.find((x) => x.role === want && !x.removed_at && !x.clients)
+          : undefined;
+  if (!m) throw new Error(`TRACKING_FIXTURE_ROLE=${want}: the fixture has no such member (owner, editor, viewer, scoped or removed)`);
   return { ...f, member: { email: m.email, role: m.role } };
 }
 

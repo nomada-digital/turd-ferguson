@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
-import { FIXTURE_STATES, PARTIAL_EARLIER_DAYS, YOUNG_DAYS, expandFixture, fixtureLive, fixtureMode, fixtureState, fixtureUnreadable } from "./fixture-mode.ts";
+import { FIXTURE_SECOND_CLIENT, FIXTURE_STATES, PARTIAL_EARLIER_DAYS, YOUNG_DAYS, expandFixture, fixtureClients, fixtureLive, fixtureMode, fixtureSettings, fixtureState, fixtureUnreadable } from "./fixture-mode.ts";
 import { addDays, brandGaps, overview } from "./figures.ts";
 import { readsFailedIn } from "./decide.ts";
 import { ANGLES, PROMPTS_PER_CLUSTER, namesBrandIn } from "./limits.ts";
@@ -284,4 +284,33 @@ test("8 Oct 2026 (audit data-10): TRACKING_FIXTURE_STATE=young began tracking ni
   assert.equal(new Set(y.data.answers.map((a) => a.run_date)).size, YOUNG_DAYS + 1, "every day from the start to today read");
   assert.ok(y.data.clusters.every((c) => c.started_on >= start) && y.data.questions.every((q) => q.added_on >= start) && y.data.keywords.every((k) => k.added_on >= start));
   assert.ok(y.data.serp.every((x) => x.run_date >= start) && y.data.runs!.every((r) => r.run_date >= start));
+});
+
+/**
+ * AG-1 (audit security-2, 9 Oct 2026): TRACKING_FIXTURE_STATE=two-clients, an
+ * account with Tallyroo and Ledgerline. The acceptance on the fixture: the
+ * viewer limited to Tallyroo sees Tallyroo only - Ledgerline is not theirs, so
+ * its pages 404 and the switcher has nothing else - and Ledgerline's Settings
+ * does not list them; an account-wide member sees both.
+ */
+test("AG-1: two-clients is one account with two clients, and the scoped viewer sees only theirs", () => {
+  assert.ok(FIXTURE_STATES.includes("two-clients"));
+  const owner = fixtureState(fx, { TRACKING_FIXTURE_STATE: "two-clients" });
+  const a = owner.client.id;
+  const b = FIXTURE_SECOND_CLIENT.id;
+  assert.deepEqual(fixtureClients(owner, owner.member.email).map((c) => `${c.slug}:${c.role}`), ["tallyroo:owner", "ledgerline:owner"], "the owner sees both");
+  const viewer = fixtureState(fx, { TRACKING_FIXTURE_STATE: "two-clients", TRACKING_FIXTURE_ROLE: "viewer" });
+  assert.deepEqual(fixtureClients(viewer, viewer.member.email).map((c) => c.slug), ["tallyroo", "ledgerline"], "an account-wide viewer sees both");
+  const scoped = fixtureState(fx, { TRACKING_FIXTURE_STATE: "two-clients", TRACKING_FIXTURE_ROLE: "scoped" });
+  assert.equal(scoped.member.email, "lead@example.com");
+  assert.deepEqual(fixtureClients(scoped, scoped.member.email).map((c) => `${c.slug}:${c.role}`), ["tallyroo:viewer"], "/app/ledgerline 404s and the switcher lists Tallyroo only");
+  const team = (f: typeof owner, id: string) => fixtureSettings(f, id).members.map((m) => `${m.email}:${m.clients ?? "every"}`);
+  assert.deepEqual(team(owner, a), ["owner@example.com:every", "editor@example.com:every", "viewer@example.com:every", "lead@example.com:1"]);
+  assert.deepEqual(team(owner, b), ["owner@example.com:every", "editor@example.com:every", "viewer@example.com:every", "books@example.com:1"], "Ledgerline's Settings does not list the Tallyroo-only viewer");
+  assert.equal(fixtureSettings(owner, a).accountClients, 2);
+  assert.equal(fixtureSettings(owner, "nobody").members.length, 0);
+  // The default fixture is one client, as before.
+  assert.equal(fixtureSettings(fx, fx.client.id).accountClients, 1);
+  assert.deepEqual(fixtureClients(fx, fx.member.email).map((c) => c.slug), ["tallyroo"]);
+  assert.throws(() => fixtureState(fx, { TRACKING_FIXTURE_ROLE: "scoped" }), /no such member/, "only two-clients has a scoped member");
 });

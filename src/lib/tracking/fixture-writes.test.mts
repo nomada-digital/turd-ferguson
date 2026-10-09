@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
-import { expandFixture } from "./fixture-mode.ts";
+import { FIXTURE_SECOND_CLIENT, expandFixture, fixtureClients, fixtureSettings, fixtureState } from "./fixture-mode.ts";
 import { FIXTURE_CHECK_VOLUME, fixtureAddCluster, fixtureCheck, fixtureEditPrompts, fixtureFillSlot, fixtureGroup, fixtureStop, fixtureTeam, fixtureWrites } from "./fixture-writes.ts";
 import { addDays } from "./figures.ts";
 
@@ -129,6 +129,40 @@ test("R168 part 3: invite, role and remove change fixture.members under team.ts'
   assert.equal(fixtureTeam(fx, { op: "remove", email: fx.member.email, role: null, scope: null, slug: "tallyroo", now }).ok, false, "never yourself");
   const editor = { ...fx, member: { email: "editor@example.com", role: "editor" } };
   assert.deepEqual(fixtureTeam(editor, { op: "invite", email: "new@example.com", role: "viewer", scope: null, slug: "tallyroo", now }), { ok: false, message: "Only owners can change the team." });
+});
+
+test("AG-1 (9 Oct 2026): on the two-clients fixture an invite is to this client only unless it says every client; Remove takes one client", () => {
+  const now = "2026-10-09T09:00:00Z";
+  const two = fixtureState(fx, { TRACKING_FIXTURE_STATE: "two-clients" });
+  const b = FIXTURE_SECOND_CLIENT.id;
+  const team = (f: typeof two, id: string) => fixtureSettings(f, id).members.map((m) => m.email);
+  // Invited on Tallyroo with no scope word: Tallyroo only.
+  const i = fixtureTeam(two, { op: "invite", email: "new@example.com", role: "viewer", scope: null, slug: "tallyroo", now });
+  assert.ok(i.ok);
+  assert.deepEqual(i.fixture.members.find((m) => m.email === "new@example.com")!.clients, [two.client.id]);
+  assert.ok(team(i.fixture, two.client.id).includes("new@example.com"));
+  assert.ok(!team(i.fixture, b).includes("new@example.com"), "Ledgerline's Settings does not list them");
+  // Every client: no list.
+  const e = fixtureTeam(two, { op: "invite", email: "staff@example.com", role: "editor", scope: "account", slug: "ledgerline", now });
+  assert.ok(e.ok && !("clients" in e.fixture.members.find((m) => m.email === "staff@example.com")!));
+  // books@ sees Ledgerline only, so on Tallyroo they are not "already": Tallyroo joins their list.
+  const add = fixtureTeam(two, { op: "invite", email: "books@example.com", role: "editor", scope: "client", slug: "tallyroo", now });
+  assert.ok(add.ok);
+  assert.deepEqual(add.fixture.members.find((m) => m.email === "books@example.com")!.clients, [b, two.client.id]);
+  // Remove on Tallyroo takes Tallyroo only from them; on Ledgerline it then takes their last, and them.
+  const off = fixtureTeam(add.fixture, { op: "remove", email: "books@example.com", role: null, scope: null, slug: "tallyroo", now });
+  assert.ok(off.ok);
+  const books = off.fixture.members.find((m) => m.email === "books@example.com")!;
+  assert.deepEqual([books.clients, books.removed_at ?? null], [[b], null]);
+  const gone = fixtureTeam(off.fixture, { op: "remove", email: "books@example.com", role: null, scope: null, slug: "ledgerline", now });
+  assert.ok(gone.ok);
+  assert.equal(gone.fixture.members.find((m) => m.email === "books@example.com")!.removed_at, now);
+  // Remove on Tallyroo cannot reach someone who does not see it.
+  assert.equal(fixtureTeam(two, { op: "remove", email: "books@example.com", role: null, scope: null, slug: "tallyroo", now }).ok, false);
+  // The scoped viewer's session sees Tallyroo only; a post on Ledgerline's route is refused before any rule.
+  const lead = fixtureState(fx, { TRACKING_FIXTURE_STATE: "two-clients", TRACKING_FIXTURE_ROLE: "scoped" });
+  assert.deepEqual(fixtureClients(lead, lead.member.email).map((c) => c.slug), ["tallyroo"]);
+  assert.equal(fixtureTeam({ ...two, member: { email: "owner@example.com", role: "owner" } }, { op: "invite", email: "x@example.com", role: "viewer", scope: null, slug: "nowhere", now }).ok, false, "an unknown client is refused");
 });
 
 test("R168 part 4: Check keyword on the fixture runs the free prechecks, then a canned signed pass; the save verifies it", () => {
