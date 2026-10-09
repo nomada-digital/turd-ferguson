@@ -237,6 +237,17 @@ export const TASK_SE_ERROR = 40101;
 export const TASK_PARTIAL = 40106;
 
 /**
+ * Two account-level codes that come back with no task at all (9 Oct 2026,
+ * DataForSEO's errors appendix read that day): 40202 "the rate-limit per
+ * minute has been exceeded" and 40209 "too many simultaneous queries" - "the
+ * limit for simultaneous requests made by a single user is 30". Both say
+ * "not now" about the account, not about the request, so a read that met
+ * one is retried on the runner's delays like 40101.
+ */
+export const TASK_RATE_LIMIT = 40202;
+export const TASK_TOO_MANY = 40209;
+
+/**
  * The first task, or a throw. The error carries the task's status code and
  * what it billed (30 Sep 2026): a task DataForSEO failed can still have been
  * paid for, and the tracking runner retries on the code and records the cost
@@ -246,7 +257,16 @@ export const TASK_PARTIAL = 40106;
 export function firstTask(body: Record<string, unknown>): Task {
   const tasks = body.tasks;
   const task = (Array.isArray(tasks) ? (tasks as Task[]) : [])[0];
-  if (!task) throw new Error("DataForSEO returned no task");
+  if (!task) {
+    // DataForSEO refused the whole request, and says why at the top level. Until 9 Oct 2026 this
+    // threw that reason away: 23 of 25 ChatGPT reads that day failed as "returned no task", with
+    // nothing to tell a rate limit from an outage. The code rides on the error, so retries can read it.
+    const code = typeof body.status_code === "number" ? body.status_code : null;
+    const said = typeof body.status_message === "string" ? body.status_message.slice(0, 60) : "";
+    const err = new Error(code === null ? "DataForSEO returned no task" : `DataForSEO returned no task (${code}${said ? ` ${said}` : ""})`);
+    if (code !== null) Object.assign(err, { taskStatus: code });
+    throw err;
+  }
   if (task.status_code === TASK_PARTIAL) {
     const items = task.result?.[0]?.items;
     if (Array.isArray(items) && items.length > 0) return { ...task, partial: true };

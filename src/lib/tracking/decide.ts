@@ -2,7 +2,7 @@ import { createHmac } from "node:crypto";
 
 import { constantTimeEqual } from "../constant-time.ts";
 import { isPlausibleEmail } from "../email-address.ts";
-import { TASK_SE_ERROR } from "../scan/dataforseo-request.ts";
+import { TASK_RATE_LIMIT, TASK_SE_ERROR, TASK_TOO_MANY } from "../scan/dataforseo-request.ts";
 
 import { PROMPT_MAX } from "./prompt-text.ts";
 
@@ -334,7 +334,9 @@ export const READ_RETRY_DELAYS_MS = [1_000, 3_000] as const;
 /**
  * The wait before retrying a failed read, or null for no retry. Retried: HTTP
  * 429 and 5xx, DataForSEO's server-side task codes (5xxxx), and 40101, the
- * search engine's own server error (R137, 30 Sep 2026). The free scan's
+ * search engine's own server error (R137, 30 Sep 2026); and since 9 Oct 2026
+ * the account's own "not now" codes, 40202 and 40209 (dataforseo-request.ts
+ * TASK_RATE_LIMIT, TASK_TOO_MANY), which come back with no task. The free scan's
  * engine reads use this same rule (pipeline.ts). Not retried: a
  * bad request, auth, a timeout (it already spent its budget), or a retry that
  * would not leave the read its minimum budget inside the run.
@@ -345,7 +347,7 @@ export function readRetryDelay(err: unknown, attempt: number, remainingMs: numbe
   const e = (err ?? {}) as ReadError;
   const retryable =
     (typeof e.status === "number" && (e.status === 429 || e.status >= 500)) ||
-    (typeof e.taskStatus === "number" && (e.taskStatus >= 50000 || e.taskStatus === TASK_SE_ERROR));
+    (typeof e.taskStatus === "number" && (e.taskStatus >= 50000 || e.taskStatus === TASK_SE_ERROR || e.taskStatus === TASK_RATE_LIMIT || e.taskStatus === TASK_TOO_MANY));
   if (!retryable) return null;
   return remainingMs - delay >= 10_000 ? delay : null;
 }

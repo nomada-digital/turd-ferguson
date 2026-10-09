@@ -485,3 +485,29 @@ test("the keyword-rank read (R40) is the Google organic read at SERP_DEPTH, in m
     assert.equal(body.load_async_ai_overview, undefined);
   }
 });
+
+test("a request DataForSEO refused whole says why, and an account's 'not now' is retried (9 Oct 2026)", async () => {
+  const { readRetryDelay } = await import("../tracking/decide.ts");
+  let err: unknown;
+  try {
+    firstTask({ status_code: 40209, status_message: "Too many simultaneous queries.", tasks: [] });
+  } catch (e) {
+    err = e;
+  }
+  assert.match(String((err as Error).message), /^DataForSEO returned no task \(40209 Too many simultaneous queries\.\)$/);
+  assert.equal((err as { taskStatus?: number }).taskStatus, 40209);
+  assert.equal(readRetryDelay(err, 0, 200_000), 1_000, "40209 is retried");
+  try {
+    firstTask({ status_code: 40202, status_message: "Rate-limit per minute exceeded.", tasks: null });
+  } catch (e) {
+    err = e;
+  }
+  assert.equal(readRetryDelay(err, 1, 200_000), 3_000, "40202 is retried");
+  try {
+    firstTask({ status_code: 40501, status_message: "Invalid Field.", tasks: [] });
+  } catch (e) {
+    err = e;
+  }
+  assert.equal(readRetryDelay(err, 0, 200_000), null, "a bad request is not");
+  assert.throws(() => firstTask({}), /^Error: DataForSEO returned no task$/, "no top-level code: the old words");
+});
