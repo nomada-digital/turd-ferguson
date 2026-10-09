@@ -144,7 +144,14 @@ test("census: only check-time.ts writes a zone label", () => {
 
 /**
  * The surfaces that state a check time, each asking the helper (9 Oct 2026).
- * A floor too: 21 calls when this was written.
+ * A floor too, on call expressions in those surfaces: check-time.ts itself,
+ * and a `function name(` that declares one, are not calls. Until the review
+ * of 3eaa592 (9 Oct 2026) the count took in both - 21, of which four were
+ * check-time.ts's two declarations and its own clockIn call and
+ * firstCheckWhen's declaration - so a floor of 20 held only 16 real calls.
+ * Re-counted on 9 Oct 2026: 17 (Overview 5, Clusters 2, OneCluster 1,
+ * Settings 1, Reports 1, latest-answers 1, trial 1, setup page 2, lifecycle 2,
+ * setup-landing 1 - firstCheckWhen's checkTime).
  */
 const CALLERS = [
   "src/components/app/Overview.tsx",
@@ -158,10 +165,16 @@ const CALLERS = [
   "src/lib/tracking/setup-landing.ts",
   "src/config/trial.ts",
 ];
-const CALLS_FLOOR = 20;
+const CALLS_FLOOR = 17;
+
+/** A call of the helper or a wrapper of it; a declaration, `function checkTime(`, is not one. */
+const CALL = /(?<!\bfunction\s+)\b(?:checkTime|clockIn|firstCheckWhen)\(/g;
+export const callsIn = (src: string) => (code(src).match(CALL) ?? []).length;
 
 test("census: every surface that states a check time asks check-time.ts", () => {
-  const calls = files().map(({ file, src }) => ({ file, n: (code(src).match(/\b(?:checkTime|clockIn|firstCheckWhen)\(/g) ?? []).length }));
+  const calls = files()
+    .filter(({ file }) => file !== "src/lib/tracking/check-time.ts")
+    .map(({ file, src }) => ({ file, n: callsIn(src) }));
   for (const f of CALLERS) assert.ok((calls.find((c) => c.file === f)?.n ?? 0) > 0, `${f} no longer asks check-time.ts`);
   const total = calls.reduce((s, c) => s + c.n, 0);
   assert.ok(total >= CALLS_FLOOR, `${total} calls, floor ${CALLS_FLOOR}`);
@@ -182,4 +195,7 @@ test("census probe: the old copy fires, comments and ISO timestamps do not", () 
   assert.equal(zoneHits("`${t} UK time`").length, 1);
   assert.equal(zoneHits("`${t}am ET`").length, 1);
   assert.equal(zoneHits("Date.UTC(y, m, d)").length, 0);
+  // The call floor counts calls, not the declarations that would pad it.
+  assert.equal(callsIn("export function clockIn(at) {}\nexport function checkTime(day) { return clockIn(day); }"), 1);
+  assert.equal(callsIn("const s = `at ${checkTime(addDays(today, 1), market)}`; // checkTime(x)"), 1);
 });
