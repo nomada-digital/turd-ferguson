@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 
 import { T } from "@/config/tokens";
 import { supabaseAdmin, supabaseConfigured } from "@/lib/supabase/admin";
+import { selectAll } from "@/lib/supabase/page";
 import { ADMIN_LIMITS, UPSELL_MODES, trackingDay } from "@/lib/tracking/decide";
 import { runIsStuck } from "@/lib/tracking/dispatch";
 import { PROMPTS_PER_CLUSTER, type Subject, namesBrandIn, trackingCounts } from "@/lib/tracking/limits";
@@ -26,6 +27,10 @@ export const metadata: Metadata = {
  *
  * Lists only clients set up here (a slug is set by the create action), so the
  * rows client_domains held before tracking are never shown or tracked.
+ *
+ * The prompt, keyword and run reads are paged (9 Oct 2026, audit
+ * reliability-2): every client's rows in one select stop at PostgREST's
+ * thousand, and the counts below went wrong past it with nothing to say so.
  */
 
 const input = {
@@ -40,6 +45,12 @@ const input = {
 const money = (n: number) => `$${n.toFixed(2)}`;
 
 type Row = Record<string, unknown>;
+
+/** Every page of a read, with the page's own message when one fails. */
+const all = <R,>(what: string, page: (from: number, to: number) => PromiseLike<{ data: R[] | null; error: { message: string } | null }>) =>
+  selectAll<R>(page).catch((err: unknown) => {
+    throw new Error(`could not read ${what}: ${err instanceof Error ? err.message : String(err)}`);
+  });
 
 export default async function TrackingAdmin() {
   if (!supabaseConfigured()) return <div style={{ padding: "40px" }}>Database not configured.</div>;
@@ -58,22 +69,25 @@ export default async function TrackingAdmin() {
   const accounts = [...new Set((clients ?? []).map((c) => c.account_id as string))];
 
   const [
-    { data: questions, error: qErr },
-    { data: keywords, error: kErr },
-    { data: runs, error: rErr },
+    questions,
+    keywords,
+    runsById,
     { data: members, error: mErr },
     { data: accountRows, error: acErr },
     { data: clusters, error: clErr },
     { data: setups, error: sErr },
   ] = await Promise.all([
-    db.from("tracked_questions").select("id, client_domain_id, cluster_id, angle, text, source, added_on, stopped_on").in("client_domain_id", ids),
-    db.from("tracked_keywords").select("id, client_domain_id, keyword, added_on, stopped_on").in("client_domain_id", ids),
-    db
-      .from("tracking_runs")
-      .select("client_domain_id, run_date, status, dfs_cost, model_calls, error, created_at, started_at, finished_at")
-      .in("client_domain_id", ids)
-      .gte("run_date", since)
-      .order("run_date", { ascending: false }),
+    all<Row>("tracked questions", (from, to) => db.from("tracked_questions").select("id, client_domain_id, cluster_id, angle, text, source, added_on, stopped_on").in("client_domain_id", ids).order("id", { ascending: true }).range(from, to)),
+    all<Row>("tracked keywords", (from, to) => db.from("tracked_keywords").select("id, client_domain_id, keyword, added_on, stopped_on").in("client_domain_id", ids).order("id", { ascending: true }).range(from, to)),
+    all<Row>("tracking runs", (from, to) =>
+      db
+        .from("tracking_runs")
+        .select("client_domain_id, run_date, status, dfs_cost, model_calls, error, created_at, started_at, finished_at")
+        .in("client_domain_id", ids)
+        .gte("run_date", since)
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
     db.from("dashboard_members").select("account_id, email, role").in("account_id", accounts).is("removed_at", null),
     db.from("accounts").select("id, upsell_mode, upsell_contact_email").in("id", accounts),
     db
@@ -85,9 +99,8 @@ export default async function TrackingAdmin() {
     // R166 step 6: who confirmed setup, and when.
     db.from("dashboard_events").select("client_domain_id, created_at, member_email").in("client_domain_id", ids).eq("event", SETUP_CONFIRMED_EVENT),
   ]);
-  if (qErr) throw new Error(`could not read tracked questions: ${qErr.message}`);
-  if (kErr) throw new Error(`could not read tracked keywords: ${kErr.message}`);
-  if (rErr) throw new Error(`could not read tracking runs: ${rErr.message}`);
+  // Newest day first, as the run list below reads them; paged by id.
+  const runs = [...runsById].sort((a, b) => String(b.run_date).localeCompare(String(a.run_date)));
   if (mErr) throw new Error(`could not read dashboard members: ${mErr.message}`);
   if (acErr) throw new Error(`could not read accounts: ${acErr.message}`);
   if (clErr) throw new Error(`could not read clusters: ${clErr.message}`);

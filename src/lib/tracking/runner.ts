@@ -26,7 +26,6 @@ import {
   readRetryDelay,
   refuseRun,
   runOutcome,
-  shouldTrack,
   trackingDay,
 } from "./decide.ts";
 import { firstReading } from "@/lib/email/lifecycle";
@@ -39,6 +38,7 @@ import { dispatchRun } from "./dispatch.ts";
 import { keywordsOnPage1, namedRate } from "./figures.ts";
 import { sendLinkAlerts } from "./link-mail.ts";
 import { decideLinkCheck, isLinkCheckDay, type LinkRow, readPlacement } from "./placements.ts";
+import { readTrackable } from "./run-health.ts";
 
 /**
  * The daily alwaystracked runner - T1 of
@@ -141,35 +141,13 @@ export async function dispatchTrackingRuns(now: Date = new Date()): Promise<{
   const refusal = refuseRun(await trackingSettings(), await trackingSpentOn(day));
   if (refusal) return { day, dispatched: 0, skipped: 0, refused: refusal };
 
-  const { data: clients, error: cErr } = await db
-    .from("client_domains")
-    .select("id, status, started_on, tier")
-    .eq("status", "active");
-  if (cErr) throw new Error(`could not read the tracked clients: ${cErr.message}`);
-
-  const { data: questions, error: qErr } = await db
-    .from("tracked_questions")
-    .select("client_domain_id, added_on, stopped_on")
-    .is("stopped_on", null);
-  if (qErr) throw new Error(`could not read the tracked questions: ${qErr.message}`);
-
-  const live = new Map<string, number>();
-  for (const q of questions ?? []) {
-    if (!liveOn(q as { added_on: string; stopped_on: string | null }, day)) continue;
-    const id = q.client_domain_id as string;
-    live.set(id, (live.get(id) ?? 0) + 1);
-  }
-
+  // Every active client with shouldTrack's verdict over its live prompts,
+  // every page of both reads (run-health.ts readTrackable; audit
+  // reliability-2): one unpaged select stopped at PostgREST's thousand rows.
   let dispatched = 0;
   let skipped = 0;
-  for (const c of clients ?? []) {
-    const client = {
-      id: c.id as string,
-      status: c.status as string | null,
-      started_on: c.started_on as string | null,
-      activeQuestions: live.get(c.id as string) ?? 0,
-    };
-    if (!shouldTrack(client, day)) {
+  for (const client of await readTrackable(db, day)) {
+    if (!client.track) {
       skipped += 1;
       continue;
     }
@@ -177,7 +155,7 @@ export async function dispatchTrackingRuns(now: Date = new Date()): Promise<{
     const { data: inserted, error: iErr } = await db
       .from("tracking_runs")
       .upsert(
-        { client_domain_id: client.id, run_date: day, engines: [...enginesFor((c.tier as TierKey) ?? "tracked")] },
+        { client_domain_id: client.id, run_date: day, engines: [...enginesFor((client.tier as TierKey) ?? "tracked")] },
         { onConflict: "client_domain_id,run_date", ignoreDuplicates: true },
       )
       .select("id");
