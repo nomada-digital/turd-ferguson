@@ -107,7 +107,7 @@ const files = sourceFiles(SRC).map((f) => ({
 const SENDERS: Record<
   string,
   {
-    reach: "anonymous" | "behind the ceilings" | "open, limited per caller" | "signed by Stripe" | "signed-in member, limited per member" | "signed-in owner, limited per owner" | "signed-in owner or editor, once a client" | "the tracking runner, once a client a Sunday";
+    reach: "anonymous" | "behind the ceilings" | "open, limited per caller" | "signed by Stripe" | "signed-in member, limited per member" | "signed-in owner, limited per owner" | "signed-in owner or editor, once a client" | "the tracking runner, once a client a Sunday" | "the tracking runner or the daily cron, once a day";
     bound: string;
     evidence: RegExp;
     where: string;
@@ -260,6 +260,26 @@ const SENDERS: Record<
       "lines, no message.",
     evidence: /if \(isLinkCheckDay\(day\)\)/,
     where: "src/lib/tracking/runner.ts",
+  },
+  /**
+   * 9 Oct 2026, audit reliability-6 and spec OP-1: the daily run-health
+   * summary to Danny. Called from run-health.ts reportRunHealth, through
+   * health-io.ts, by a claimed tracking run as it closes and by the
+   * CRON_SECRET-gated /api/cron/track after its dispatch. Sent only when the
+   * day has settled with a client not complete, and once a day: the claim is
+   * a dashboard_events run_health_mail row keyed on props.day, read and then
+   * written before the send, and made exact by 20261009000000's unique index.
+   * /api/health/runs reads the same health and sends nothing.
+   */
+  "src/lib/tracking/health-mail.ts": {
+    reach: "the tracking runner or the daily cron, once a day",
+    bound:
+      "Mails only our own contact destination. At most one message per tracking day: reportRunHealth " +
+      "reads the day's run_health_mail claim and writes it before the send (unique per day with " +
+      "20261009000000), and sends nothing while a run is in flight or when every run is complete. " +
+      "Its callers are a claimed tracking run and the cron behind CRON_SECRET; the health JSON does not send.",
+    evidence: /if \(\(sent \?\? \[\]\)\.length\) return "taken";[\s\S]*?\.insert\(\{[^}]*event: RUN_HEALTH_EVENT[\s\S]*?await io\.send\(/,
+    where: "src/lib/tracking/run-health.ts",
   },
   /**
    * 2 Oct 2026, R166 step 4 (Danny, danny.md line 175): setup confirmed, to

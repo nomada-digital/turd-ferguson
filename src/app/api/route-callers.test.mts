@@ -399,6 +399,17 @@ const NO_CALLER: { route: string; method: string; why: string; earns: () => bool
     earns: () => !readFileSync(join(ROOT, "src/components/scan/ScanFlow.tsx"), "utf8").includes("/resend"),
   },
   {
+    route: "/api/health/runs",
+    method: "GET",
+    // 9 Oct 2026, audit reliability-6 and spec OP-1: whether today's runs were read.
+    why:
+      "Polled by an external uptime monitor, which alerts on its 503; /admin/tracking links to it " +
+      "with a plain <a>, which the fetch scanner does not read.",
+    earns: () =>
+      readFileSync(join(ROOT, "src/app/admin/tracking/page.tsx"), "utf8").includes('href="/api/health/runs"') &&
+      readFileSync(join(ROOT, "src/app/api/health/runs/route.ts"), "utf8").includes("healthAnswer("),
+  },
+  {
     route: "/api/version",
     method: "GET",
     why:

@@ -36,6 +36,7 @@ import { TIER_PLAIN } from "@/lib/tier-text";
 import { upsellMode } from "./ask.ts";
 import { dispatchRun } from "./dispatch.ts";
 import { keywordsOnPage1, namedRate } from "./figures.ts";
+import { reportRunHealthSafely } from "./health-io.ts";
 import { sendLinkAlerts } from "./link-mail.ts";
 import { decideLinkCheck, isLinkCheckDay, type LinkRow, readPlacement } from "./placements.ts";
 import { readTrackable } from "./run-health.ts";
@@ -194,6 +195,10 @@ type AnswerRow = {
  *
  * Idempotent by the claim: only a `queued` row moves to `running`, so a run
  * already running or finished is skipped, however many times it is posted.
+ *
+ * Every run, as it closes, asks whether the day has settled with a client not
+ * complete (run-health.ts reportRunHealth): the last one to close sends the
+ * day's one summary.
  */
 export async function runTrackingDay(runId: string): Promise<{ status: string; skipped?: string }> {
   const db = supabaseAdmin();
@@ -232,6 +237,7 @@ export async function runTrackingDay(runId: string): Promise<{ status: string; s
     const refusal = refuseRun(await trackingSettings(), await trackingSpentOn(run.run_date as string));
     if (refusal) {
       await close({ status: "failed", error: refusal });
+      await reportRunHealthSafely(run.run_date as string);
       return { status: "failed", skipped: refusal };
     }
 
@@ -469,9 +475,11 @@ export async function runTrackingDay(runId: string): Promise<{ status: string; s
         page1: keywordsOnPage1(serpRows, range, keywords.length),
       });
     }
+    await reportRunHealthSafely(day);
     return { status };
   } catch (err) {
     await close({ status: "failed", error: message(err) });
+    await reportRunHealthSafely(run.run_date as string);
     throw err;
   }
 }

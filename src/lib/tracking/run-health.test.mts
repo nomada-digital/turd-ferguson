@@ -2,16 +2,232 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
+import { failureSummary } from "./decide.ts";
 import { type Row, fakeDb } from "./fake-db.mts";
-import { readTrackable } from "./run-health.ts";
+import {
+  type HealthRun,
+  type TrackableClient,
+  RUN_HEALTH_EVENT,
+  RUN_HEALTH_UNSENT,
+  healthAnswer,
+  healthMail,
+  readRunHealth,
+  readTrackable,
+  reportRunHealth,
+  runHealth,
+  runState,
+} from "./run-health.ts";
 
 /**
- * Who should be read on a day, past PostgREST's thousand rows (9 Oct 2026,
- * audit reliability-2), against an in-memory database (fake-db.mts) that caps
- * every select as PostgREST does. No real database is read or written.
+ * Run health (9 Oct 2026, audit reliability-6, reliability-2, spec OP-1).
+ *
+ * Every tracking failure ended in a log line, so a failed, partial, stalled
+ * or missing run reached nobody, and a missed alwaystracked day cannot be
+ * read again later. These run the one reading the summary mail, the health
+ * JSON, the admin strip and the dispatch share, against an in-memory
+ * database (fake-db.mts) that caps every select at PostgREST's thousand rows.
+ * No real database is read or written and no email is sent.
  */
 
 const DAY = "2026-10-09";
+/** 05:06 UTC on the day: the cron dispatched at 05:00 and the runs have had five minutes. */
+const AFTER_RUNS = Date.parse(`${DAY}T05:06:00Z`);
+const MIN = 60_000;
+const iso = (ms: number) => new Date(ms).toISOString();
+
+const client = (id: string, domain: string, track = true): TrackableClient => ({ id, domain, status: "active", started_on: "2026-10-01", tier: "tracked", activeQuestions: track ? 5 : 0, track });
+const run = (client_domain_id: string, status: string, extra: Partial<HealthRun> = {}): HealthRun => ({
+  client_domain_id,
+  status,
+  error: null,
+  created_at: `${DAY}T05:00:01Z`,
+  started_at: status === "queued" ? null : `${DAY}T05:00:03Z`,
+  ...extra,
+});
+
+test("a run's state: closed runs as they closed; in flight until stuck or stalled; no row is missing", () => {
+  const now = Date.parse(`${DAY}T05:10:00Z`);
+  assert.equal(runState(undefined, now), "missing");
+  for (const s of ["complete", "partial", "failed"]) assert.equal(runState(run("a", s), now), s);
+  assert.equal(runState(run("a", "queued"), now), "queued", "opened ten minutes ago and not claimed yet");
+  assert.equal(runState(run("a", "queued"), Date.parse(`${DAY}T05:31:00Z`)), "stuck", "queued past 30 minutes: never claimed");
+  assert.equal(runState(run("a", "queued", { error: "dispatch failed: the run route answered 500" }), now), "undispatched", "a dispatch error on it: nothing will pick it up");
+  assert.equal(runState(run("a", "running"), now), "running");
+  assert.equal(runState(run("a", "running"), Date.parse(`${DAY}T05:15:04Z`)), "stalled", "running past 15 minutes: the platform killed it");
+  assert.equal(runState(run("a", "something new"), now), "failed", "a status this does not know is not read as fine");
+});
+
+test("the day's health: who should have run against what ran, problems first", () => {
+  const h = runHealth({
+    day: DAY,
+    now: AFTER_RUNS,
+    clients: [client("a", "tallyroo.com"), client("b", "ledgerline.com"), client("c", "thesmallbizstack.com"), client("d", "softwarecritic.com"), client("e", "freelancefieldnotes.com", false)],
+    runs: [run("a", "complete"), run("b", "partial", { error: "4 of 21 reads failed - google_aio: 4 x HTTP 429" }), run("c", "failed", { error: "boom" }), run("x", "complete")],
+  });
+  assert.equal(h.expected, 4, "a client shouldTrack skips is not expected");
+  assert.deepEqual(
+    h.clients.map((c) => [c.domain, c.state]),
+    [
+      ["softwarecritic.com", "missing"],
+      ["thesmallbizstack.com", "failed"],
+      ["ledgerline.com", "partial"],
+      ["tallyroo.com", "complete"],
+      ["x", "complete"],
+    ],
+    "every expected client and every run, problems first; a run of a client no longer active is still listed",
+  );
+  assert.equal(h.counts.missing, 1);
+  assert.equal(h.counts.complete, 2);
+  assert.equal(h.settled, true);
+  assert.equal(h.ok, false);
+  const partialOnly = runHealth({ day: DAY, now: AFTER_RUNS, clients: [client("a", "tallyroo.com"), client("b", "ledgerline.com")], runs: [run("a", "complete"), run("b", "partial")] });
+  assert.equal(partialOnly.ok, true, "a partial run was read: some reads failed, the day is not missing");
+  const inFlight = runHealth({ day: DAY, now: AFTER_RUNS, clients: [client("a", "tallyroo.com"), client("b", "ledgerline.com")], runs: [run("a", "failed"), run("b", "running")] });
+  assert.equal(inFlight.settled, false, "a sibling still reading: the day has not settled");
+  const none = runHealth({ day: DAY, now: AFTER_RUNS, clients: [], runs: [] });
+  assert.deepEqual([none.ok, none.settled, none.expected], [true, true, 0], "nothing to run is healthy, not an alarm");
+});
+
+test("the health JSON: 503 from 07:00 UTC for a day with a stalled run; 200 before, and for partial", () => {
+  const clients = [client("a", "tallyroo.com"), client("b", "ledgerline.com")];
+  const stalled = (now: number) => runHealth({ day: DAY, now, clients, runs: [run("a", "complete"), run("b", "running")] });
+  const before = Date.parse(`${DAY}T06:59:00Z`);
+  const after = Date.parse(`${DAY}T07:00:00Z`);
+  assert.equal(stalled(before).counts.stalled, 1);
+  assert.equal(healthAnswer(stalled(before), before).status, 200, "before the deadline whatever the runs are doing");
+  const late = healthAnswer(stalled(after), after);
+  assert.equal(late.status, 503);
+  assert.deepEqual(late.body, { day: DAY, checked_at: `${DAY}T07:00:00.000Z`, deadline: `${DAY}T07:00:00.000Z`, ok: false, late: true, unread: { stalled: 1 } });
+  const partial = runHealth({ day: DAY, now: after, clients, runs: [run("a", "complete"), run("b", "partial")] });
+  assert.equal(healthAnswer(partial, after).status, 200, "partial is read; the mail says so, the monitor does not page");
+  const missing = runHealth({ day: DAY, now: after, clients, runs: [] });
+  assert.equal(healthAnswer(missing, after).status, 503, "the cron never fired: every client missing at 07:00");
+  assert.deepEqual(healthAnswer(missing, after).body.unread, { missing: 2 });
+  // No client, id, cost or count of clients in what anyone can read.
+  const body = JSON.stringify(healthAnswer(runHealth({ day: DAY, now: after, clients, runs: [run("a", "failed", { error: "secret-ish detail", dfs_cost: 1.23 })] }), after).body);
+  for (const leak of ["tallyroo.com", "ledgerline.com", '"a"', "secret-ish", "1.23", "expected", "complete"]) assert.ok(!body.includes(leak), `${leak} is in the public health JSON: ${body}`);
+});
+
+test("the summary: one line per client not complete, with its error line, and where to act", () => {
+  const error = failureSummary(21, [1, 2, 3, 4].map(() => ({ engine: "google_aio", reason: "HTTP 429" })));
+  const h = runHealth({
+    day: DAY,
+    now: AFTER_RUNS,
+    clients: [client("a", "tallyroo.com"), client("b", "ledgerline.com"), client("c", "thesmallbizstack.com")],
+    runs: [run("a", "complete"), run("b", "partial", { error }), run("c", "failed", { error: "today's tracking spend $25.00 has reached the cap of $25.00" })],
+  });
+  const mail = healthMail(h, { today: DAY, adminUrl: "https://alwayscited.example/admin/tracking" });
+  assert.equal(mail.subject, `alwaystracked run health ${DAY}: 2 of 3 clients to look at`);
+  assert.match(mail.text, /- thesmallbizstack\.com: failed - today's tracking spend \$25\.00 has reached the cap of \$25\.00/);
+  assert.match(mail.text, /- ledgerline\.com: partial - 4 of 21 reads failed - google_aio: 4 x HTTP 429/);
+  assert.doesNotMatch(mail.text, /tallyroo\.com/, "a complete client is counted, not listed");
+  assert.match(mail.text, /complete 1, partial 1, failed 1/);
+  assert.match(mail.text, /Run now on \/admin\/tracking .*today only: https:\/\/alwayscited\.example\/admin\/tracking/);
+  assert.doesNotMatch(mail.text + mail.subject, /AlwaysCited|Alwayscited|Alwaystracked|AlwaysTracked|\u2014/, "lowercase brand, hyphens");
+  const late = healthMail(h, { today: "2026-10-10", adminUrl: "https://alwayscited.example/admin/tracking", note: "The daily dispatch was refused: x." });
+  assert.match(late.text, /can no longer be re-run/, "the morning-after summary does not offer a re-run of a past day");
+  assert.match(late.text, /The daily dispatch was refused: x\./);
+});
+
+/** One London day of the database: clients, live prompts, runs. */
+function day(over: { clients?: Row[]; prompts?: Row[]; runs?: Row[]; events?: Row[] } = {}) {
+  return {
+    client_domains: over.clients ?? [
+      { id: "a", domain: "tallyroo.com", status: "active", started_on: "2026-10-01", tier: "tracked" },
+      { id: "b", domain: "ledgerline.com", status: "active", started_on: "2026-10-01", tier: "tracked" },
+    ],
+    tracked_questions: over.prompts ?? [
+      { id: "q1", client_domain_id: "a", added_on: "2026-10-01", stopped_on: null },
+      { id: "q2", client_domain_id: "b", added_on: "2026-10-01", stopped_on: null },
+    ],
+    tracking_runs: (over.runs ?? []).map((r, i) => ({ id: `r${i}`, run_date: DAY, error: null, created_at: `${DAY}T05:00:01Z`, started_at: `${DAY}T05:00:03Z`, ...r })),
+    dashboard_events: over.events ?? [],
+  };
+}
+
+function outbox(fail = false) {
+  const sent: { subject: string; text: string }[] = [];
+  const state = { fail };
+  return { sent, state, health: { adminUrl: "https://alwayscited.example/admin/tracking", send: async (m: { subject: string; text: string }) => (state.fail ? false : (sent.push(m), true)) } };
+}
+
+test("a forced failed run produces one internal email with its failure line, once a day", async () => {
+  const { db, tables } = fakeDb(day({ runs: [{ client_domain_id: "a", status: "complete" }, { client_domain_id: "b", status: "failed", error: "could not store the answers: forced" }] }));
+  const box = outbox();
+  assert.equal(await reportRunHealth(db, box.health, { day: DAY, now: AFTER_RUNS }), "sent");
+  assert.equal(box.sent.length, 1);
+  assert.match(box.sent[0]!.text, /- ledgerline\.com: failed - could not store the answers: forced/);
+  assert.deepEqual(
+    tables.dashboard_events!.map((e) => [e.event, (e.props as Row).day, e.client_domain_id]),
+    [[RUN_HEALTH_EVENT, DAY, null]],
+    "claimed before the send, keyed on the day, no client",
+  );
+  // The next run to close, the cron, a re-run: the day's summary has gone.
+  assert.equal(await reportRunHealth(db, box.health, { day: DAY, now: AFTER_RUNS + MIN }), "taken");
+  assert.equal(box.sent.length, 1);
+});
+
+test("in flight: every run that closes before the last returns at the first read; the last one sends", async () => {
+  const { db, tables, calls } = fakeDb(day({ runs: [{ client_domain_id: "a", status: "partial", error: "1 of 5 reads failed - chatgpt: 1 x HTTP 500" }, { client_domain_id: "b", status: "running" }] }));
+  const box = outbox();
+  assert.equal(await reportRunHealth(db, box.health, { day: DAY, now: AFTER_RUNS }), "pending");
+  assert.deepEqual([...new Set(calls.map((c) => c.table))], ["tracking_runs"], "the day's runs read, then out: no client read, no claim");
+  tables.tracking_runs![1]!.status = "complete";
+  assert.equal(await reportRunHealth(db, box.health, { day: DAY, now: AFTER_RUNS }), "sent");
+  assert.match(box.sent[0]!.text, /tallyroo\.com: partial - 1 of 5 reads failed/);
+});
+
+test("a day with every run complete sends nothing; a missing client is a problem", async () => {
+  const box = outbox();
+  const clean = fakeDb(day({ runs: [{ client_domain_id: "a", status: "complete" }, { client_domain_id: "b", status: "complete" }] }));
+  assert.equal(await reportRunHealth(clean.db, box.health, { day: DAY, now: AFTER_RUNS }), "healthy");
+  assert.equal(clean.tables.dashboard_events!.length, 0, "no claim for a healthy day");
+  const gap = fakeDb(day({ runs: [{ client_domain_id: "a", status: "complete" }] }));
+  assert.equal(await reportRunHealth(gap.db, box.health, { day: DAY, now: AFTER_RUNS }), "sent");
+  assert.match(box.sent[0]!.text, /- ledgerline\.com: no run/);
+  assert.equal(box.sent.length, 1);
+});
+
+test("nothing dispatched: the cron's report sends at once, with why", async () => {
+  const { db } = fakeDb(day());
+  const box = outbox();
+  const note = "The daily dispatch was refused: tracking is switched off (tracking_enabled).";
+  assert.equal(await reportRunHealth(db, box.health, { day: DAY, now: Date.parse(`${DAY}T05:00:02Z`), note }), "sent");
+  assert.match(box.sent[0]!.subject, /2 of 2 clients to look at/);
+  assert.ok(box.sent[0]!.text.includes(note));
+});
+
+test("a mail that reaches nobody releases its claim, and the next reading sends", async () => {
+  const { db, tables } = fakeDb(day({ runs: [{ client_domain_id: "a", status: "failed", error: "x" }, { client_domain_id: "b", status: "complete" }] }));
+  const box = outbox(true);
+  assert.equal(await reportRunHealth(db, box.health, { day: DAY, now: AFTER_RUNS }), "unsent");
+  assert.deepEqual(tables.dashboard_events!.map((e) => e.event), [RUN_HEALTH_UNSENT]);
+  box.state.fail = false;
+  assert.equal(await reportRunHealth(db, box.health, { day: DAY, now: AFTER_RUNS }), "sent");
+  assert.equal(box.sent.length, 1);
+});
+
+test("two runs closing together: the unique index lets one claim through", async () => {
+  // Both read no claim (the read is before either insert), then both insert.
+  const { db, tables } = fakeDb(day({ runs: [{ client_domain_id: "a", status: "failed", error: "x" }, { client_domain_id: "b", status: "partial", error: "y" }] }));
+  const box = outbox();
+  const out = await Promise.all([reportRunHealth(db, box.health, { day: DAY, now: AFTER_RUNS }), reportRunHealth(db, box.health, { day: DAY, now: AFTER_RUNS })]);
+  assert.deepEqual(out.sort(), ["sent", "taken"]);
+  assert.equal(box.sent.length, 1);
+  assert.equal(tables.dashboard_events!.length, 1);
+});
+
+test("the morning after: a day a killed run held open is summarised once the sweep has closed it", async () => {
+  const { db, tables } = fakeDb(day({ runs: [{ client_domain_id: "a", status: "complete" }, { client_domain_id: "b", status: "running" }] }));
+  const box = outbox();
+  // 05:06 on the day: b was killed at 05:05 and is "running" - in flight, so nobody sends.
+  assert.equal(await reportRunHealth(db, box.health, { day: DAY, now: AFTER_RUNS }), "pending");
+  // The 03:45 stall sweep closes it; the next morning's cron reports the day before.
+  Object.assign(tables.tracking_runs![1]!, { status: "failed", error: "the run was stopped before it could record a result, and was closed by the stall sweep" });
+  assert.equal(await reportRunHealth(db, box.health, { day: DAY, now: Date.parse("2026-10-10T05:00:30Z") }), "sent");
+  assert.match(box.sent[0]!.text, /ledgerline\.com: failed - the run was stopped/);
+  assert.match(box.sent[0]!.text, /can no longer be re-run/);
+});
 
 test("reliability-2: 2,500 live prompts across 25 clients - every client is counted and dispatched", async () => {
   const clients: Row[] = [];
@@ -40,9 +256,35 @@ test("reliability-2: 2,500 live prompts across 25 clients - every client is coun
   assert.ok(calls.filter((c) => c.table === "tracked_questions" && c.range).length >= 3, "read in pages");
 });
 
-test("census: the dispatch opens runs off readTrackable's verdict", () => {
-  const runner = readFileSync(new URL("./runner.ts", import.meta.url), "utf8");
+test("readRunHealth reads every run of the day, past a thousand", async () => {
+  const clients: Row[] = [];
+  const runs: Row[] = [];
+  for (let c = 0; c < 1200; c++) {
+    const id = `c${String(c).padStart(4, "0")}`;
+    clients.push({ id, domain: `client${c}.example`, status: "active", started_on: "2026-10-01", tier: "tracked" });
+    runs.push({ id: `r${String(c).padStart(4, "0")}`, client_domain_id: id, run_date: DAY, status: "complete", error: null, created_at: `${DAY}T05:00:01Z`, started_at: `${DAY}T05:00:03Z` });
+  }
+  const prompts = clients.map((c) => ({ id: `q-${c.id as string}`, client_domain_id: c.id, added_on: "2026-10-01", stopped_on: null }));
+  const { db } = fakeDb({ client_domains: clients, tracked_questions: prompts, tracking_runs: runs });
+  const h = await readRunHealth(db, DAY, AFTER_RUNS);
+  assert.equal(h.expected, 1200);
+  assert.equal(h.counts.complete, 1200, "an unpaged read would have called 200 of them missing");
+  assert.equal(h.counts.missing, 0);
+});
+
+test("census: the dispatch opens runs off readTrackable's verdict, and every health reading shares it", () => {
+  const read = (f: string) => readFileSync(new URL(f, import.meta.url), "utf8");
+  const runner = read("./runner.ts");
   const body = runner.slice(runner.indexOf("export async function dispatchTrackingRuns"), runner.indexOf("type AnswerRow"));
   assert.match(body, /for \(const client of await readTrackable\(db, day\)\) \{\s*if \(!client\.track\) \{/);
   assert.doesNotMatch(body, /from\("tracked_questions"\)|from\("client_domains"\)/, "no second read of who should run");
+  // The runner reports as it closes, on every way out of a claimed run.
+  assert.equal([...runner.matchAll(/await reportRunHealthSafely\(/g)].length, 3, "refused, closed, thrown");
+  const cron = read("../../app/api/cron/track/route.ts");
+  assert.match(cron, /const health = await runHealthAfterDispatch\(note\);\s*const mail = await sweepLifecycleMailSafely\(\);/);
+  const health = read("../../app/api/health/runs/route.ts");
+  assert.match(health, /healthAnswer\(await readRunHealth\(supabaseAdmin\(\), day, now\), now\)/);
+  assert.doesNotMatch(health, /reportRunHealth|from "resend"|health-mail|health-io/, "the public health JSON sends nothing");
+  const page = read("../../app/admin/tracking/page.tsx");
+  assert.match(page, /readRunHealth\(db, today, now\)/);
 });

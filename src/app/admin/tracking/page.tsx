@@ -4,8 +4,8 @@ import { T } from "@/config/tokens";
 import { supabaseAdmin, supabaseConfigured } from "@/lib/supabase/admin";
 import { selectAll } from "@/lib/supabase/page";
 import { ADMIN_LIMITS, UPSELL_MODES, trackingDay } from "@/lib/tracking/decide";
-import { runIsStuck } from "@/lib/tracking/dispatch";
 import { PROMPTS_PER_CLUSTER, type Subject, namesBrandIn, trackingCounts } from "@/lib/tracking/limits";
+import { type HealthRun, RUN_STATES, type RunHealth, STATE_WORDS, readRunHealth, runState } from "@/lib/tracking/run-health";
 import { SETUP_CONFIRMED_EVENT, setupState } from "@/lib/tracking/setup-landing";
 
 import { ActionForm } from "./ActionForm";
@@ -28,9 +28,12 @@ export const metadata: Metadata = {
  * Lists only clients set up here (a slug is set by the create action), so the
  * rows client_domains held before tracking are never shown or tracked.
  *
- * The prompt, keyword and run reads are paged (9 Oct 2026, audit
- * reliability-2): every client's rows in one select stop at PostgREST's
- * thousand, and the counts below went wrong past it with nothing to say so.
+ * Today's runs head the page (9 Oct 2026, audit reliability-6): run-health.ts
+ * readRunHealth, the reading the summary mail and /api/health/runs make, so
+ * the three cannot disagree. A run left `running` past 15 minutes reads as
+ * stalled here rather than "running $0.00" until the 03:45 sweep. The prompt,
+ * keyword and run reads are paged (audit reliability-2): every client's rows
+ * in one select stop at PostgREST's thousand.
  */
 
 const input = {
@@ -55,8 +58,9 @@ const all = <R,>(what: string, page: (from: number, to: number) => PromiseLike<{
 export default async function TrackingAdmin() {
   if (!supabaseConfigured()) return <div style={{ padding: "40px" }}>Database not configured.</div>;
   const db = supabaseAdmin();
-  const today = trackingDay();
-  const since = new Date(Date.now() - 14 * 86_400_000).toISOString().slice(0, 10);
+  const now = Date.now();
+  const today = trackingDay(new Date(now));
+  const since = new Date(now - 14 * 86_400_000).toISOString().slice(0, 10);
 
   const { data: clients, error: cErr } = await db
     .from("client_domains")
@@ -72,6 +76,7 @@ export default async function TrackingAdmin() {
     questions,
     keywords,
     runsById,
+    health,
     { data: members, error: mErr },
     { data: accountRows, error: acErr },
     { data: clusters, error: clErr },
@@ -88,6 +93,8 @@ export default async function TrackingAdmin() {
         .order("id", { ascending: true })
         .range(from, to),
     ),
+    // Its own failure is shown on the strip, never the page's.
+    readRunHealth(db, today, now).catch((err: unknown) => (err instanceof Error ? err.message : String(err))),
     db.from("dashboard_members").select("account_id, email, role").in("account_id", accounts).is("removed_at", null),
     db.from("accounts").select("id, upsell_mode, upsell_contact_email").in("id", accounts),
     db
@@ -118,6 +125,8 @@ export default async function TrackingAdmin() {
         </a>
       </p>
 
+      <RunStrip health={health} today={today} />
+
       <section style={{ border: `1px solid ${T.line}`, borderRadius: "10px", padding: "16px", marginBottom: "24px" }}>
         <h2 style={{ fontSize: "16px", margin: "0 0 8px" }}>Create a client from a scan</h2>
         <ActionForm action={createClientFromScan} submit="Create client">
@@ -143,6 +152,7 @@ export default async function TrackingAdmin() {
         const n = trackingCounts({ clusterLimit: c.cluster_limit as number, today, prompts: qs as { added_on: string; stopped_on: string | null }[], keywords: ks as { stopped_on: string | null }[] });
         const rs = of(runs, id);
         const todayRun = rs.find((r) => r.run_date === today);
+        const todayState = todayRun ? runState(todayRun as HealthRun, now) : null;
         const cost14 = rs.reduce((n, r) => n + Number(r.dfs_cost ?? 0), 0);
         const ms = of(members, c.account_id as string, "account_id");
         const account = (accountRows ?? []).find((a) => a.id === c.account_id);
@@ -153,7 +163,7 @@ export default async function TrackingAdmin() {
             </h2>
             <p style={{ margin: "0 0 8px", color: T.soft }}>
               Clusters allowed {c.cluster_limit as number} - prompts {n.prompts}/{n.promptLimit} ({n.checkedToday} live today) - keywords {n.keywords}/{n.keywordLimit} -today&apos;s run:{" "}
-              {todayRun ? `${todayRun.status} ${money(Number(todayRun.dfs_cost ?? 0))}${todayRun.error ? ` (${todayRun.error})` : ""}` : "none"} - 14 days {money(cost14)}
+              {todayRun && todayState ? `${STATE_WORDS[todayState]} ${money(Number(todayRun.dfs_cost ?? 0))}${todayRun.error ? ` (${todayRun.error})` : ""}` : "none"} - 14 days {money(cost14)}
               {c.tier !== "tracked" ? (
                 <>
                   {" - "}
@@ -166,10 +176,15 @@ export default async function TrackingAdmin() {
             <ActionForm action={runNow} submit="Run now">
               <input type="hidden" name="client" value={id} maxLength={ADMIN_LIMITS.id} />
               <span style={{ fontSize: "12.5px", color: T.soft }}>The only manual spend.</span>
-              {todayRun && runIsStuck(todayRun as { status: string; created_at: string | null; started_at: string | null }) ? (
+              {todayRun && (todayState === "stuck" || todayState === "undispatched") ? (
                 <span style={{ fontSize: "12.5px", color: T.ink, fontWeight: 700 }}>
                   stuck - queued since {String(todayRun.created_at).slice(11, 16)}Z and never claimed:{" "}
                   {(todayRun.error as string | null) ?? "no dispatch error recorded"}
+                </span>
+              ) : null}
+              {todayRun && todayState === "stalled" ? (
+                <span style={{ fontSize: "12.5px", color: T.ink, fontWeight: 700 }}>
+                  stalled - running since {String(todayRun.started_at).slice(11, 16)}Z and never closed; the platform stopped it
                 </span>
               ) : null}
             </ActionForm>
@@ -232,6 +247,47 @@ export default async function TrackingAdmin() {
         );
       })}
     </div>
+  );
+}
+
+/**
+ * Today's runs across every client (9 Oct 2026, audit reliability-6): how
+ * many should have run, each state's count, and every client not complete
+ * with its error line - the summary mail's lines, on the page.
+ */
+function RunStrip({ health, today }: { health: RunHealth | string; today: string }) {
+  const box = { border: `1px solid ${T.line}`, borderRadius: "10px", padding: "12px 16px", marginBottom: "24px" } as const;
+  if (typeof health === "string") {
+    return (
+      <section style={box}>
+        <strong>Today&apos;s runs</strong> <span style={{ color: T.badFg }}>could not be read: {health}</span>
+      </section>
+    );
+  }
+  const looking = health.clients.filter((c) => c.state !== "complete");
+  const tally = RUN_STATES.filter((s) => health.counts[s] > 0).map((s) => `${STATE_WORDS[s]} ${health.counts[s]}`);
+  return (
+    <section style={box}>
+      <strong>Today&apos;s runs</strong>{" "}
+      <span style={{ color: T.soft }}>
+        ({today}) - {health.expected} should run{tally.length ? ` - ${tally.join(", ")}` : ""}
+        {health.settled ? "" : " - still in flight"}
+        {" - "}
+        <a href="/api/health/runs" style={{ color: T.ink }}>
+          health JSON
+        </a>
+      </span>
+      {looking.length ? (
+        <ul style={{ margin: "6px 0 0", paddingLeft: "20px", fontSize: "13px" }}>
+          {looking.map((c) => (
+            <li key={c.id}>
+              {c.domain}: <strong>{STATE_WORDS[c.state]}</strong>
+              {c.error ? <span style={{ color: T.soft }}> - {c.error}</span> : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </section>
   );
 }
 

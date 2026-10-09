@@ -1,6 +1,6 @@
 import { SITE_URL } from "../../config/schema.ts";
 
-import { RUN_SIGNATURE_HEADER, signRun } from "./decide.ts";
+import { RUN_SIGNATURE_HEADER, TRACKING_STALL_MS, signRun } from "./decide.ts";
 
 /**
  * Handing a tracking run to its own `/api/track/run` invocation, with nothing
@@ -73,4 +73,18 @@ export function runIsStuck(run: { status: string; created_at: string | null; sta
   if (run.status !== "queued" || run.started_at) return false;
   const created = run.created_at ? Date.parse(run.created_at) : NaN;
   return Number.isFinite(created) && now - created > TRACKING_STUCK_MS;
+}
+
+/**
+ * A run claimed and never closed: `running` with a start older than
+ * TRACKING_STALL_MS, which the run route's 300s ceiling makes a run the
+ * platform killed (9 Oct 2026, audit reliability-4). The stall sweep closes
+ * these at 03:45 UTC, almost a day after a 05:00 run dies, so /admin/tracking,
+ * the run-health report and "Run now" read this instead of waiting for it.
+ * runIsStuck stays queued-only: a claimed run was dispatched.
+ */
+export function runIsStalled(run: { status: string; started_at?: string | null }, now: number = Date.now()): boolean {
+  if (run.status !== "running") return false;
+  const started = run.started_at ? Date.parse(run.started_at) : NaN;
+  return Number.isFinite(started) && now - started > TRACKING_STALL_MS;
 }
