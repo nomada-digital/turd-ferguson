@@ -3,6 +3,7 @@ import TierEngines from "@/components/TierEngines";
 import PkgScroll from "@/components/home/PkgScroll";
 import TierName, { TierText, type TierKey } from "@/components/TierName";
 import { ALWAYS_ON, ALWAYS_ON_SUPPORT } from "@/config/always-on";
+import { listIf, onlyIf } from "@/config/capabilities";
 import { CLUSTERS_LINE, TIERS, checkoutUrlFor, contactUrlFor } from "@/config/pricing";
 import { trialLine } from "@/config/trial";
 import { CARD, SHELL, T } from "@/config/tokens";
@@ -16,6 +17,17 @@ import { D, PACKAGES_WASH } from "./dark";
  * what each tier adds. It replaces the four package cards and the separate
  * white-label card; "every tier is white-label" is now the table's last row
  * and the line under it.
+ *
+ * 8 Oct 2026, LB1/LB7: both of those wait on `dashboardBranding` - no tier's
+ * dashboard carries the agency's brand yet, so "Your dashboards and your
+ * branding" and "are white-label" are withheld until it does, and so is the
+ * foot's "How the line sits" link, whose "line" is the one that clause drew
+ * (on review, later that day: alone it read as a fragment). "Placement
+ * opportunities, scored for difficulty" is narrowed to the free scan, the only
+ * place a difficulty is scored (the dashboard's Cited page shows none, by its
+ * brief), and "Rank tracking on the money keywords" is ticked for alwaystracked
+ * and alwaysmentioned: the daily run reads every cluster keyword's Google
+ * position for every tier (tracking/runner.ts).
  *
  * Every price and basis is read off the tier in src/config/pricing.ts, so the
  * homepage cannot quote a number the package pages disagree with. Where the
@@ -68,20 +80,21 @@ const CTA_HREF: Partial<Record<TierKey, string>> = {
 
 /** 1 = included, 0 = not, a string = the cell's text. One entry per tier, in TIERS order. */
 type Cell = 0 | 1 | string;
-const ROWS: { what: string; cells: Record<TierKey, Cell> }[] = [
+type Row = { what: string; cells: Record<TierKey, Cell> };
+const ROWS: Row[] = [
   { what: "Buyer questions across the AI engines and Google keywords, checked daily", cells: { tracked: 1, mentioned: 1, cited: 1, everywhere: 1 } },
   { what: "Every source behind every answer", cells: { tracked: 1, mentioned: 1, cited: 1, everywhere: 1 } },
-  { what: "Placement opportunities, scored for difficulty", cells: { tracked: 1, mentioned: 1, cited: 1, everywhere: 1 } },
+  { what: "Placement opportunities, scored for difficulty, in the free scan", cells: { tracked: 1, mentioned: 1, cited: 1, everywhere: 1 } },
   { what: "Who secures the placements", cells: { tracked: "You", mentioned: "Us", cited: "Us", everywhere: "Us" } },
   { what: "Placements in cited pages, links included", cells: { tracked: 0, mentioned: 1, cited: 1, everywhere: 1 } },
   { what: "Citation reporting on every placement", cells: { tracked: 0, mentioned: 1, cited: 1, everywhere: 1 } },
   { what: "Placements chosen to move the Google position too", cells: { tracked: 0, mentioned: 0, cited: 1, everywhere: 1 } },
   { what: "Link insertions and schema work", cells: { tracked: 0, mentioned: 0, cited: 1, everywhere: 1 } },
-  { what: "Rank tracking on the money keywords", cells: { tracked: 0, mentioned: 0, cited: 1, everywhere: 1 } },
+  { what: "Rank tracking on the money keywords", cells: { tracked: 1, mentioned: 1, cited: 1, everywhere: 1 } },
   // Pricing spec 27 Sep, section 8: the top tier is brand PR, sold to brands
   // direct rather than white-labelled (open decision 5's default).
   { what: "Brand PR for earned media", cells: { tracked: 0, mentioned: 0, cited: 0, everywhere: 1 } },
-  { what: "Your dashboards and your branding", cells: { tracked: 1, mentioned: 1, cited: 1, everywhere: 0 } },
+  ...listIf<Row>("dashboardBranding", { what: "Your dashboards and your branding", cells: { tracked: 1, mentioned: 1, cited: 1, everywhere: 0 } }),
 ];
 
 const PRICE: React.CSSProperties = { fontSize: "24px", fontWeight: 700, letterSpacing: "-0.03em", marginTop: "8px", color: T.ink, lineHeight: 1.2 };
@@ -319,11 +332,17 @@ export default function Packages({ full = false }: { full?: boolean }) {
         {/* id="white-label" marks the end of the priced grid for price-surfaces.test.mts. */}
         <div id="white-label" className="pkg-foot" style={{ marginTop: "18px", fontSize: "13.5px", lineHeight: 1.6, color: T.soft }}>
           <span>
-            <TierName tier="tracked" /> to <TierName tier="cited" /> are white-label;{" "}
-            <TierName tier="everywhere" /> is sold to brands direct.{" "}
-            <a href="/white-label" style={{ fontWeight: 600, textDecoration: "none", color: T.ink }}>
-              How the line sits
-            </a>
+            {onlyIf("dashboardBranding", <><TierName tier="tracked" /> to <TierName tier="cited" /> are white-label;{" "}</>)}
+            <TierName tier="everywhere" /> is sold to brands direct.
+            {/* "The line" is the one the clause above draws, so the link waits with it (8 Oct 2026). */}
+            {onlyIf("dashboardBranding", (
+              <>
+                {" "}
+                <a href="/white-label" style={{ fontWeight: 600, textDecoration: "none", color: T.ink }}>
+                  How the line sits
+                </a>
+              </>
+            ))}
           </span>
           <span>
             <TierName tier="cited" /> is built and run by the senior team at{" "}

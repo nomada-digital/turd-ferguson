@@ -1,4 +1,5 @@
 import { ALWAYS_ON, ALWAYS_ON_SUPPORT } from "@/config/always-on";
+import { onlyIf } from "@/config/capabilities";
 import { WAITLIST_LIMITS } from "@/config/contact";
 import { FREE_ENGINE_COUNT, QUESTIONS } from "@/config/scan-shape";
 import { PACK_CLUSTERS, PACK_KEYWORDS, PACK_PROMPTS, TRACKED_CLUSTERS, TRACKED_PROMPTS, TRACKING_PACK_PRICE } from "@/config/pricing";
@@ -27,8 +28,13 @@ export type Faq = { q: string; hint: string; a: string };
 export const FAQS: Faq[] = [
   {
     q: "If I am an agency, will you contact my client?",
-    hint: "No, and it is in the agreement",
-    a: "No. Not for a case study, not for a testimonial, not after the engagement ends. Every surface a client opens carries your branding, and the only place our name appears is on the invoice to you.",
+    // 8 Oct 2026 (LB1): /legal publishes no agreement for "it is in the
+    // agreement" to point at, so the hint says only what is true. The
+    // branding sentence waits on a dashboard in the agency's brand.
+    hint: "No",
+    a:
+      "No. Not for a case study, not for a testimonial, not after the engagement ends." +
+      (onlyIf("dashboardBranding", " Every surface a client opens carries your branding, and the only place our name appears is on the invoice to you.") ?? ""),
   },
   {
     q: "Do I need links, or do mentions count?",
@@ -81,7 +87,9 @@ export const FAQS: Faq[] = [
   {
     q: "What if I already pay for a tracking tool?",
     hint: "Keep it if your team knows it",
-    a: "Most agencies that talk to us already pay for something. Our figures will not match theirs exactly - different prompt sets, different engines, different days - and where two tools disagree we report it rather than smooth it. What we add is the placements, which no tracking tool does.",
+    // ", which no tracking tool does" came off 8 Oct 2026 (LB7): an undated
+    // claim about every competitor, which AGENTS.md bars without a dated source.
+    a: "Most agencies that talk to us already pay for something. Our figures will not match theirs exactly - different prompt sets, different engines, different days - and where two tools disagree we report it rather than smooth it. What we add is the placements.",
   },
 ];
 

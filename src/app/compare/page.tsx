@@ -3,6 +3,7 @@ import Link from "next/link";
 import { OG_IMAGE } from "@/config/og";
 
 import TierName from "@/components/TierName";
+import { listIf } from "@/config/capabilities";
 import { TIERS } from "@/config/pricing";
 import { CARD, GRID12, MICRO, SHELL, T } from "@/config/tokens";
 
@@ -39,6 +40,18 @@ export const metadata: Metadata = {
  *
  * The best argument on the board survives untouched: the card saying when a
  * tracking tool is the better purchase. That needs nobody else's facts.
+ *
+ * **It did not survive 8 Oct 2026 (LB7).** "A pure tracking tool is cheaper
+ * than us and probably better instrumented" sat on the page whose entry price
+ * is the alwaystracked plan - the site sending its own tracking buyer
+ * elsewhere, with an undated claim about other companies' tools. It is cut.
+ * The card left beside it lost its label too: "When we are" only read as the
+ * second half of the pair, and a longer label would be new selling words, which
+ * are Danny's (on review, later that day). The card that replaces the cut one,
+ * and the framing of this one - which still turns away the buyer who wants
+ * measurement, on the page whose entry price is the alwaystracked plan - are
+ * his LB7 decision. "White label for agencies: Yes" waits on
+ * `dashboardBranding` (LB1): no dashboard carries an agency's brand yet.
  */
 
 type Column = { key: string; label: React.ReactNode; emphasis?: boolean };
@@ -55,7 +68,7 @@ const ROWS: { feature: string; values: Record<string, string> }[] = [
   { feature: "Stores what each engine said behind every reading", values: { us: "Yes" } },
   { feature: "Places your brand into those source pages", values: { us: "Yes" } },
   { feature: "Reports the Google position alongside the citation", values: { us: "Yes" } },
-  { feature: "White label for agencies", values: { us: "Yes" } },
+  ...listIf("dashboardBranding", { feature: "White label for agencies", values: { us: "Yes" } }),
   { feature: "Price published without a call", values: { us: "Yes" } },
   { feature: "Entry price", values: { us: entry } },
 ];
@@ -118,47 +131,37 @@ export default function ComparePage() {
         ))}
       </div>
 
-      <div className="two-up">
-        <div className="ac-row" style={{ ...CARD, padding: "24px" }}>
-          <div style={MICRO}>When a tracking tool is the better buy</div>
-          <p style={{ margin: "10px 0 0", fontSize: "14px", lineHeight: 1.6, color: T.soft }}>
-            If you have your own outreach team and only need measurement, a pure tracking tool is cheaper than us and
-            probably better instrumented. We would rather say that here than three weeks into an engagement.
-          </p>
-        </div>
-        <div className="ac-row" style={{ ...CARD, border: `1px solid ${T.accent}`, padding: "24px" }}>
-          <div style={{ ...MICRO, color: T.accent }}>When we are</div>
-          <p style={{ margin: "10px 0 0", fontSize: "14px", lineHeight: 1.6, color: T.ink }}>
-            When you need the gap closed rather than measured, and you do not have relationships with the
-            sites the engines read. That is the whole difference, and it is a supply problem rather than a software one.
-          </p>
-          {/* R151 (1 Oct 2026): the page ended here with nothing to do next -
-              no link or control in main at all. One primary action, as on
-              /pr-agencies, and a quiet way to the prices. */}
-          <div style={{ marginTop: "18px", display: "flex", alignItems: "center", gap: "18px", flexWrap: "wrap" }}>
-            <Link
-              href="/#scan"
-              className="btn-primary"
-              style={{
-                // No inline colour: .btn-primary sets white on its gradient, and
-                // contrast.test.mts measures that pair there, not against this card.
-                fontSize: "15px",
-                fontWeight: 600,
-                padding: "12px 20px",
-                borderRadius: "10px",
-                textDecoration: "none",
-                minHeight: "44px",
-                boxSizing: "border-box",
-                display: "flex",
-                alignItems: "center",
-              }}
-            >
-              Run a free scan
-            </Link>
-            <Link href="/packages" style={{ fontSize: "14px", fontWeight: 600, textDecoration: "none", color: T.accent, minHeight: "44px", display: "flex", alignItems: "center" }}>
-              See the packages
-            </Link>
-          </div>
+      <div className="ac-row" style={{ ...CARD, border: `1px solid ${T.accent}`, padding: "24px" }}>
+        <p style={{ margin: 0, fontSize: "14px", lineHeight: 1.6, color: T.ink }}>
+          When you need the gap closed rather than measured, and you do not have relationships with the
+          sites the engines read. That is the whole difference, and it is a supply problem rather than a software one.
+        </p>
+        {/* R151 (1 Oct 2026): the page ended here with nothing to do next -
+            no link or control in main at all. One primary action, as on
+            /pr-agencies, and a quiet way to the prices. */}
+        <div style={{ marginTop: "18px", display: "flex", alignItems: "center", gap: "18px", flexWrap: "wrap" }}>
+          <Link
+            href="/#scan"
+            className="btn-primary"
+            style={{
+              // No inline colour: .btn-primary sets white on its gradient, and
+              // contrast.test.mts measures that pair there, not against this card.
+              fontSize: "15px",
+              fontWeight: 600,
+              padding: "12px 20px",
+              borderRadius: "10px",
+              textDecoration: "none",
+              minHeight: "44px",
+              boxSizing: "border-box",
+              display: "flex",
+              alignItems: "center",
+            }}
+          >
+            Run a free scan
+          </Link>
+          <Link href="/packages" style={{ fontSize: "14px", fontWeight: 600, textDecoration: "none", color: T.accent, minHeight: "44px", display: "flex", alignItems: "center" }}>
+            See the packages
+          </Link>
         </div>
       </div>
     </div>

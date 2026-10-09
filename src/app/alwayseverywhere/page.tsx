@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { OG_IMAGE } from "@/config/og";
 import PackagePage from "@/components/PackagePage";
+import { onlyIf } from "@/config/capabilities";
 import { TIERS } from "@/config/pricing";
 
 const tier = TIERS.find((t) => t.id === "everywhere")!;
@@ -11,6 +12,11 @@ const tier = TIERS.find((t) => t.id === "everywhere")!;
  * brands direct rather than white-labelled (open decision 5's default, Danny to
  * confirm). The spec's claims rules hold here harder than anywhere: no
  * guarantee of mentions, citations or coverage on this tier, and no price.
+ *
+ * 8 Oct 2026, LB1: "This tier is not white-labelled." is true, but stressing
+ * "this tier" contrasts it with tiers that are, and no tier's dashboard
+ * carries an agency's brand yet. It waits on `dashboardBranding` with the
+ * "are white-label" lines it answers; the tile reads whole without it.
  */
 export const metadata: Metadata = {
   title: "alwayseverywhere | Brand PR and earned media for AI visibility",
@@ -51,7 +57,9 @@ export default function Page() {
         {
           figure: "Direct",
           heading: "Sold to brands direct",
-          body: "This tier is not white-labelled. Agencies that run PR sell it to their own clients, and we would rather work alongside them than compete, so it is sold to the brand under our name.",
+          body:
+            (onlyIf("dashboardBranding", "This tier is not white-labelled. ") ?? "") +
+            "Agencies that run PR sell it to their own clients, and we would rather work alongside them than compete, so it is sold to the brand under our name.",
         },
         {
           figure: "On a call",

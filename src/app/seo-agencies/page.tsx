@@ -5,13 +5,18 @@ import Link from "next/link";
 
 import EngineLogo from "@/components/EngineLogo";
 import { D } from "@/components/home/dark";
+import { onlyIf } from "@/config/capabilities";
 import { TIERS, TRACKED_BASIS } from "@/config/pricing";
 import { CARD, SHELL, T } from "@/config/tokens";
 
 export const metadata: Metadata = {
   title: "For SEO agencies",
+  // ", run white-label under your name" waits on a dashboard and sign-in mail
+  // in the agency's brand (LB1, 8 Oct 2026); see the note below.
   description:
-    "Sell AI visibility without building a second supply chain: placement on third-party pages, aimed at a different target list, run white-label under your name.",
+    "Sell AI visibility without building a second supply chain: placement on third-party pages, aimed at a different target list" +
+    (onlyIf("dashboardBranding", ", run white-label under your name") ?? "") +
+    ".",
   openGraph: { url: "https://alwayscited.com/seo-agencies", images: OG_IMAGE },
   alternates: { canonical: "https://alwayscited.com/seo-agencies" },
 };
@@ -34,6 +39,15 @@ export const metadata: Metadata = {
  * The entry price comes from src/config/pricing.ts, as everywhere else. The
  * scan box runs the scan in place through PageScanBox (R181, 2 Oct 2026); it
  * was a GET to /scan while LiveScanChecker hardcoded its field's id.
+ *
+ * 8 Oct 2026, LB1: "run white-label under your name" (the description, so the
+ * OG card and /llms.txt too) and the hero's "and we run it under your name"
+ * claimed what `/white-label` withholds: the dashboard draws our mark and the
+ * alwaystracked name in every mode, the sign-in mail is "Your alwaystracked
+ * login link", and outreach to publishers is ours by that page's own table.
+ * Both clauses wait on `dashboardBranding` and come back in these words when
+ * AG-2 ships. "Selling it under your own name?" at the foot is the agency's
+ * own reselling, not a claim about our surfaces, and stays.
  */
 
 const tracked = TIERS.find((t) => t.id === "tracked");
@@ -73,8 +87,8 @@ export default function SeoAgenciesPage() {
             Sell AI visibility without building a second supply chain.
           </h1>
           <p style={{ margin: "18px 0 0", fontSize: "17px", lineHeight: 1.55, color: T.soft, maxWidth: "54ch" }}>
-            The work is placement on third-party pages, which you already do. It is aimed at a different target list,
-            and we run it under your name.
+            The work is placement on third-party pages, which you already do. It is aimed at a different target list
+            {onlyIf("dashboardBranding", ", and we run it under your name")}.
           </p>
         </div>
 

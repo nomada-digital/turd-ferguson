@@ -18,6 +18,7 @@
  */
 
 import { TIER_PLAIN, type TierKey } from "@/components/TierName";
+import { listIf, onlyIf } from "@/config/capabilities";
 // The site's one list joiner. A second copy of "a, b and c" written here is
 // the two-copies-of-one-function species this repo has already paid for once.
 import { listOf } from "@/config/scan-shape";
@@ -183,12 +184,15 @@ export const TIERS: Tier[] = [
     priceBasis: `${TRACKED_CLUSTERS} clusters: ${TRACKED_PROMPTS} prompts and ${TRACKED_KEYWORDS} keywords, checked daily`,
     positioning: "Know what your coverage did",
     href: "/alwaystracked",
+    // Checkout lists the first three. Coverage matching, the host article's
+    // position and white-label reports are not built for this tier, so each
+    // waits on its capability (LB1, 8 Oct 2026, config/capabilities.ts).
     includes: [
       "Ongoing AI visibility tracking",
       "Category leaderboard and cited sources",
-      "Coverage matching, URL for URL",
-      "Google positions for the article and the client page",
-      "White-label reports",
+      ...listIf("coverageUpload", "Coverage matching, URL for URL"),
+      onlyIf("hostArticleRankings", "Google positions for the article and the client page") ?? "Google positions for the client page",
+      ...listIf("reportBranding", "White-label reports"),
     ],
     cta: { label: "See what is included", href: "/alwaystracked" },
     // The trial names itself on the button while it is on (8 Oct 2026, config/trial.ts).

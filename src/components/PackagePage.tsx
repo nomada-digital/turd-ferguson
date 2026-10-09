@@ -5,6 +5,7 @@ import TierEngines from "@/components/TierEngines";
 import WalkthroughForm from "@/components/scan/WalkthroughForm";
 import TierName, { TierText, type TierKey } from "@/components/TierName";
 import { ALWAYS_ON, ALWAYS_ON_SUPPORT } from "@/config/always-on";
+import { onlyIf } from "@/config/capabilities";
 import { CLUSTERS_LINE, CONTACT_URL, TIERS, TRACKED_BASIS, TRACKED_CLUSTERS, TRACKED_KEYWORDS, TRACKED_PROMPTS, checkoutUrlFor, contactUrlFor, enginesFor, type Tier } from "@/config/pricing";
 import { ld } from "@/config/schema";
 import { trialLine } from "@/config/trial";
@@ -173,7 +174,8 @@ export default function PackagePage({
             </div>
           )}
           <p style={{ margin: "8px 0 16px", fontSize: "13.5px", lineHeight: 1.6, color: T.soft }}>
-            <TierText>{tier.priceBasis ?? "Monthly, no minimum term, white-labelled. What you pay us, not what you charge on."}</TierText>
+            {/* "white-labelled" waits for a dashboard in the agency's brand (LB1, 8 Oct 2026). */}
+            <TierText>{tier.priceBasis ?? `Monthly, no minimum term${onlyIf("dashboardBranding", ", white-labelled") ?? ""}. What you pay us, not what you charge on.`}</TierText>
             {tier.key === "everywhere" ? null : (
               <span style={{ display: "block", marginTop: "4px" }}>
                 {tier.key === "tracked" ? null : <>{CLUSTERS_LINE} </>}

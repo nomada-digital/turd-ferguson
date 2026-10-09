@@ -84,6 +84,10 @@ test("every page that renders the marker is recorded here - none, since 26 Sep 2
   // sentences that stayed are true without the marker. The floor becomes an
   // exact census: the component and the rules below stay, so the next claim
   // that needs a marker joins here by a deliberate edit to this list.
+  //
+  // 8 Oct 2026 (LB1): "Written into the agreement." came off /white-label as
+  // well, and the home FAQ's "it is in the agreement" with it - /legal
+  // publishes no agreement for either to point at. Still zero markers.
   assert.deepEqual(
     USERS.map((u) => u.file),
     [],
