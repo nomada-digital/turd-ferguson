@@ -39,7 +39,9 @@ type Page = {
   $$eval<R>(sel: string, fn: (els: Element[]) => R): Promise<R>;
   evaluate<R>(fn: () => R | Promise<R>): Promise<R>;
   addScriptTag(o: { content: string }): Promise<unknown>;
-  locator(sel: string): { count(): Promise<number> };
+  locator(sel: string): { count(): Promise<number>; last(): { click(): Promise<void>; getAttribute(name: string): Promise<string | null> } };
+  waitForURL(url: RegExp, o?: object): Promise<void>;
+  waitForFunction(fn: () => unknown, a?: unknown, o?: object): Promise<unknown>;
   keyboard: { press(key: string): Promise<void> };
   on(ev: "response", fn: (r: { url(): string; request(): { resourceType(): string } }) => void): void;
 };
@@ -210,7 +212,21 @@ describe("2. task budgets", () => {
   test.todo("engine that names you least: 0 at 1440, 1 scroll at 390");
   test.todo("stop a prompt, then undo: 3 or fewer (T6 not built)");
   test.todo("add when full, refusal visible: 2 or fewer (T6 not built)");
-  test.todo("open one day's answer from the check strip: 2 or fewer (T7 not built)");
+  // DB-2 (9 Oct 2026): built - each check-grid cell is a link to one of the answers it counts, so it is one click.
+  test("open one day's answer from the check strip: 2 or fewer", async () => {
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const page = await ctx.newPage();
+    await page.goto(`${BASE}/app`, { waitUntil: "networkidle" });
+    let clicks = 0;
+    const cell = page.locator("#ov-heat-scroll a.app-heat-a").last();
+    const day = (await cell.getAttribute("href"))!.match(/day=(\d{4}-\d{2}-\d{2})/)![1]!;
+    await cell.click();
+    clicks++;
+    await page.waitForURL(new RegExp(`/clusters/[^?]+\\?.*day=${day}&engine=[a-z_]+#answer-[a-z_]+$`), { timeout: 15_000 });
+    await page.waitForFunction(() => /^Answers on /.test(document.querySelector("#ans-h")?.textContent ?? "") && !!document.querySelector("section.app-answer nav [aria-current='true']"), undefined, { timeout: 10_000 });
+    await ctx.close();
+    assert.ok(clicks <= 2, `${clicks} clicks`);
+  });
   test.todo("select a placement and see it on the chart: 1 (T13 not built)");
   test.todo("download the CSV for the range: 1 (T8 not built)");
 });

@@ -2,6 +2,7 @@ import { selectAllCounted } from "../supabase/page.ts";
 
 import { missingColumn } from "./decide.ts";
 import { type AnswerRow, type CitationRow, type Day, type Range, addDays, comparisonRange } from "./figures.ts";
+import type { LatestAnswers, LatestRow } from "./latest-answers.ts";
 import type { OverviewData } from "./overview-data.ts";
 
 /**
@@ -186,6 +187,96 @@ export function shapeRead(data: OverviewData, opts: ReadOpts = {}): OverviewData
   const keep = ids && new Set(ids);
   const answers = plan === null ? [] : data.answers.filter((a) => keep === null || keep.has(a.question_id)).map((a) => answerRow(selectColumns(a, plan.select)));
   return { ...data, clusters: s.clusters, questions: s.questions, keywords: s.keywords, answers };
+}
+
+/**
+ * The one-cluster page's answers panel (T7 part 3b; DB-2, 9 Oct 2026): one
+ * prompt's answers at one check, with their words - the day `?day=` names
+ * (latest-answers.ts pickedDay), or else the latest day with an answer on or
+ * before the range's last (audit data-3: a failed run still stores its reads,
+ * unanswered, and picked by any row it put four blank tabs over yesterday's
+ * real answers). A picked day is read as it is, answered or not, so a failed
+ * day shows its blank tabs and a day with no check shows none.
+ *
+ * One decision, taken here for both reads, as answerPlan is for the range:
+ * loadAnswerDay runs readAnswerDay on tracking_answers, the fixture repo runs
+ * shapeAnswerDay on its rows, and read-shape.test.mts holds readAnswerDay on a
+ * fake PostgREST equal to shapeAnswerDay on the fixture, every state. The
+ * client and the prompt are the page's own (its membership check and its
+ * cluster's prompts), never the URL's: `?day=` moves the date and nothing else.
+ */
+export type DayPlan = { question: string; day: Day | null; to: Day };
+
+export function dayPlan(question: string, to: Day, day: Day | null): DayPlan {
+  return { question, day, to };
+}
+
+/** The panel's columns: the words, which no other read takes, and when each answer was stored. Read again without brands_ok while it is missing. */
+export const DAY_SELECT = "engine, answered, named, response_text, brands, brands_ok, citations, created_at";
+
+/** One answer as the panel holds it, from a row as DAY_SELECT returned it. */
+export function dayRow(a: Record<string, unknown>): LatestRow {
+  return {
+    engine: a.engine as string,
+    answered: a.answered as boolean,
+    named: a.named as boolean,
+    text: typeof a.response_text === "string" ? a.response_text : null,
+    brands: Array.isArray(a.brands) ? (a.brands as unknown[]).filter((b): b is string => typeof b === "string") : [],
+    ...(a.brands_ok === false ? { brands_ok: false as const } : {}),
+    citations: Array.isArray(a.citations) ? (a.citations as LatestRow["citations"]) : [],
+    at: typeof a.created_at === "string" ? a.created_at : null,
+  };
+}
+
+/** The query-builder calls the panel's read makes: supabase-js's, or the fake PostgREST in read-shape.test.mts. */
+export type DayQuery = PromiseLike<{ data: unknown[] | null; error: { message: string } | null }> & {
+  eq(column: string, value: string | boolean): DayQuery;
+  lte(column: string, value: string): DayQuery;
+  order(column: string, options: { ascending: boolean }): DayQuery;
+  limit(count: number): DayQuery;
+};
+export type DayTable = () => { select(columns: string): DayQuery };
+
+/**
+ * The panel's read on a plan: at most one row to find the latest day, then at
+ * most one per engine - two small reads and no paging, each held to one
+ * client and one prompt. Moved here from overview-data.ts loadLatestAnswers
+ * with DB-2, so it runs under node --test.
+ */
+export async function readAnswerDay(table: DayTable, plan: DayPlan, clientId: string): Promise<LatestAnswers> {
+  let day = plan.day;
+  if (day === null) {
+    const { data, error } = await table().select("run_date").eq("client_domain_id", clientId).eq("question_id", plan.question).eq("answered", true).lte("run_date", plan.to).order("run_date", { ascending: false }).limit(1);
+    if (error) throw new Error(`could not read the latest check: ${error.message}`);
+    day = (data?.[0] as { run_date?: Day } | undefined)?.run_date ?? null;
+    if (!day) return { day: null, rows: [] };
+  }
+  const on = day;
+  const read = async (select: string) => {
+    const { data, error } = await table().select(select).eq("client_domain_id", clientId).eq("question_id", plan.question).eq("run_date", on).order("id", { ascending: true });
+    if (error) throw new Error(`could not read the check's answers: ${error.message}`);
+    return (data ?? []) as Record<string, unknown>[];
+  };
+  let rows: Record<string, unknown>[];
+  try {
+    rows = await read(DAY_SELECT);
+  } catch (err) {
+    if (!missingColumn(err, "brands_ok")) throw err;
+    rows = await read(withoutBrandsOk(DAY_SELECT));
+  }
+  return { day: on, rows: rows.map(dayRow) };
+}
+
+/** A tracking_answers row as the panel's read sees it: what the fixture stands in for, and the test's fake table holds. */
+export type StoredAnswer = AnswerRow & CitationRow & { response_text: string | null; created_at: string | null };
+
+/** The fixture's copy of readAnswerDay: one client's rows, the day picked as the read picks it, each row cut to DAY_SELECT and mapped as the read maps it. */
+export function shapeAnswerDay(rows: readonly StoredAnswer[], plan: DayPlan): LatestAnswers {
+  const mine = rows.filter((a) => a.question_id === plan.question);
+  // As readAnswerDay picks it (audit data-3): the latest day with an answer, so a failed day's blank rows never stand in.
+  const day = plan.day ?? mine.reduce<Day | null>((d, a) => (a.run_date <= plan.to && a.answered && (d === null || a.run_date > d) ? a.run_date : d), null);
+  if (!day) return { day: null, rows: [] };
+  return { day, rows: mine.filter((a) => a.run_date === day).map((a) => dayRow(selectColumns(a, DAY_SELECT))) };
 }
 
 /**

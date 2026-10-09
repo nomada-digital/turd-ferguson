@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import { expandFixture } from "./fixture-mode.ts";
-import { type LatestRow, answerTabs, brandRuns, engineTab, pageLabel, withoutLinks } from "./latest-answers.ts";
+import { type LatestRow, answerTabs, brandRuns, engineTab, pageLabel, pickedDay, withoutLinks } from "./latest-answers.ts";
 
 /**
  * T7 part 3b (30 Sep 2026; boards-3/QuestionDetail.dc.html "Latest answers"):
@@ -84,6 +84,23 @@ test("?engine= picks an engine of the tier, anything else the first", () => {
   assert.equal(engineTab("claude", ENGINES), "google_aio");
   assert.equal(engineTab(["gemini"], ENGINES), "google_aio");
   assert.equal(engineTab(undefined, ENGINES), "google_aio");
+});
+
+test("DB-2 (9 Oct 2026): ?day= is a real day from tracking's start to today; anything else is none, never an error", () => {
+  const today = "2026-09-29";
+  const started = "2026-06-10";
+  assert.equal(pickedDay("2026-09-22", today, started), "2026-09-22");
+  assert.equal(pickedDay(today, today, started), today, "today");
+  assert.equal(pickedDay(started, today, started), started, "the day tracking began");
+  assert.equal(pickedDay("2026-09-30", today, started), null, "tomorrow");
+  assert.equal(pickedDay("2026-06-09", today, started), null, "the day before tracking began");
+  assert.equal(pickedDay("2026-09-22", today, null), null, "a client not started");
+  for (const bad of ["2026-09-31", "2026-02-29", "2026-9-22", "22 Sep 2026", "2026-09-22T00:00", " 2026-09-22", "", "1900-01-01"]) {
+    assert.equal(pickedDay(bad, today, started), null, bad);
+  }
+  assert.equal(pickedDay(["2026-09-22"], today, started), null, "the key given twice");
+  assert.equal(pickedDay(undefined, today, started), null);
+  assert.equal(pickedDay("2028-02-29", "2028-03-01", started), "2028-02-29", "a leap day is a day");
 });
 
 test("fixture: the cluster notes (T7 part 4a) survive expansion and sit on c1's prompts", () => {

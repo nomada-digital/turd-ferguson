@@ -10,10 +10,11 @@ import { T } from "@/config/tokens";
 import { CLUSTER_BASE } from "@/lib/tracking/limits";
 import { clusterCards, clusterDetail, promptIndex } from "@/lib/tracking/cluster-figures";
 import { firstCheckDay, resolveComparison } from "@/lib/tracking/figures";
-import { engineTab } from "@/lib/tracking/latest-answers";
+import { engineTab, pickedDay } from "@/lib/tracking/latest-answers";
 import { noteState } from "@/lib/tracking/note";
 import { rangeFrom, rangeQuery } from "@/lib/tracking/overview-data";
 import { placedTier } from "@/lib/tracking/placement-figures";
+import { dayPlan } from "@/lib/tracking/read-shape";
 import { writeRole } from "@/lib/tracking/member";
 import { trackingRepo } from "@/lib/tracking/repo";
 import { appPath } from "@/lib/app-host";
@@ -60,8 +61,11 @@ export default async function ClientCluster({
   const cards = clusterCards(input);
   const prompt = promptIndex(sp.prompt, detail.card.prompts.length);
   const picked = detail.card.prompts[prompt];
+  // DB-2 (9 Oct 2026): `?day=` shows that check's answers instead of the latest. Only the date comes from the
+  // URL: the client is the session's member client above, the prompt one of this cluster's own (read-shape.ts dayPlan).
+  const day = pickedDay(sp.day, today, client.started_on);
   const [latest, notes, upgrade] = await Promise.all([
-    picked && detail.card.status !== "pending" ? repo.latestAnswers(client.id, picked.id, range.to) : null,
+    picked && detail.card.status !== "pending" ? repo.answerDay(client.id, dayPlan(picked.id, range.to, day)) : null,
     repo.clusterNotes(client.id, detail.card.prompts.map((p) => p.id)),
     repo.upgradeContext(client.id, email, today),
   ]);
@@ -85,6 +89,7 @@ export default async function ClientCluster({
           total={cards.length}
           prompt={prompt}
           latest={latest}
+          day={day}
           notes={notes}
           canWrite={writeRole(client) === "owner" || writeRole(client) === "editor"}
           noteState={noteState(sp.note)}

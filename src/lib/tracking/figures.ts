@@ -507,6 +507,30 @@ export type CitedPageRow = {
   prompts: { id: string; daysCited: number; daysAnswered: number }[];
 };
 
+const bareHost = (h: string) => h.toLowerCase().replace(/^www\./, "");
+
+/**
+ * One citation as the page Cited pages lists it - host and path, as
+ * CitedPageRow.page says - with its host; null with no host. Its own function
+ * since DB-2 (9 Oct 2026), so the answer a Cited pages row opens
+ * (evidence.ts citedEvidence) cites the page by the key the row counts it
+ * by: one rule, not a second copy of it.
+ */
+export function citedPage(c: { source_domain: string; url: string | null }): { page: string; host: string } | null {
+  const host = bareHost(c.source_domain || "");
+  if (!host) return null;
+  let page = host;
+  if (c.url) {
+    try {
+      const u = new URL(c.url);
+      page = `${bareHost(u.hostname)}${u.pathname.replace(/\/$/, "")}`;
+    } catch {
+      // an unparseable URL counts against its domain
+    }
+  }
+  return { page, host };
+}
+
 /**
  * Every cited page in the range (R144, 1 Oct 2026; BRIEF-4 P4): the rows
  * citedPages draws on the Overview, with nothing cut, plus first and last day
@@ -514,8 +538,7 @@ export type CitedPageRow = {
  * head, so a page's count here is the panel's.
  */
 export function citedPageRows(rows: (CitationRow & { question_id?: string; answered?: boolean })[], r: Range, domain: string): CitedPageRow[] {
-  const bare = (h: string) => h.toLowerCase().replace(/^www\./, "");
-  const own = bare(domain);
+  const own = bareHost(domain);
   const pages = new Map<string, { count: number; engines: Set<string>; host: string; first: Day; last: Day; prompts: Map<string, Set<Day>> }>();
   const answered = new Map<string, Set<Day>>();
   for (const a of rows) {
@@ -526,17 +549,9 @@ export function citedPageRows(rows: (CitationRow & { question_id?: string; answe
       answered.set(a.question_id, d);
     }
     for (const c of a.citations) {
-      const host = bare(c.source_domain || "");
-      if (!host) continue;
-      let page = host;
-      if (c.url) {
-        try {
-          const u = new URL(c.url);
-          page = `${bare(u.hostname)}${u.pathname.replace(/\/$/, "")}`;
-        } catch {
-          // an unparseable URL counts against its domain
-        }
-      }
+      const cited = citedPage(c);
+      if (!cited) continue;
+      const { page, host } = cited;
       const p = pages.get(page) ?? { count: 0, engines: new Set<string>(), host, first: a.run_date, last: a.run_date, prompts: new Map<string, Set<Day>>() };
       p.count++;
       p.engines.add(a.engine);

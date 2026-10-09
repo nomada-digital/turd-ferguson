@@ -105,7 +105,9 @@ test("no dashboard link 404s on the app host", async () => {
     for (const p of pages) {
       const res = await page.goto(`${APP}${p}`, { waitUntil: "networkidle" });
       assert.equal(res?.status(), 200, `${p} at ${width}`);
-      const links = await page.$$eval("a[href]", (as) => as.filter((a) => a.getClientRects().length > 0 || a.closest("details") !== null).map((a) => [(a as HTMLAnchorElement).href, `${a.getAttribute("href")} "${(a.textContent ?? "").trim().slice(0, 40)}"`]));
+      // DB-2 (9 Oct 2026): the Overview's heat cells are SVG links, whose .href is an SVGAnimatedString, not a URL, so
+      // every link is resolved from its attribute as the browser resolves it - the heat cells are followed too.
+      const links = await page.$$eval("a[href]", (as) => as.filter((a) => a.getClientRects().length > 0 || a.closest("details") !== null).map((a) => [new URL(a.getAttribute("href")!, document.baseURI).href, `${a.getAttribute("href")} "${(a.textContent ?? "").trim().slice(0, 40)}"`]));
       for (const [href, what] of links) if (!found.has(href)) found.set(href, `${what} on ${p} at ${width}`);
     }
     await ctx.close();

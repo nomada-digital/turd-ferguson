@@ -8,6 +8,7 @@ import { clusterCards } from "@/lib/tracking/cluster-figures";
 import { rangeLabel } from "@/lib/tracking/date-range";
 import { type CitedPageRow, type Day, type Range, type Rate, basis as basisLine, brandGaps, comparisonLabel, firstCheckDay, formatDay, resolveComparison, ungroupedRead } from "@/lib/tracking/figures";
 import { NAMED_TOP, citedWithBrand, namedPage } from "@/lib/tracking/named-figures";
+import { answerHref, namedEvidence } from "@/lib/tracking/evidence";
 import type { Compare, OverviewData } from "@/lib/tracking/overview-data";
 import { brandGapNote, runNote } from "@/lib/tracking/run-note";
 
@@ -25,7 +26,9 @@ import { appPath } from "@/lib/app-host";
  * brandBoard narrowed by the filters. Filters, "Show all" and the one-open
  * accordion are links (`?cluster=&engine=&all=1&open=`), with from/to/compare
  * kept, so the whole page works with JS off. DS21 (2 Oct 2026): `?q=`
- * searches brand names, a GET form like Clusters'.
+ * searches brand names, a GET form like Clusters'. DB-2 (9 Oct 2026): each
+ * prompt under an open row opens the latest answer in the range that named
+ * the brand, on its day and engine (evidence.ts namedEvidence).
  */
 
 const pct = (r: Rate) => (r.pct === null ? "-" : `${r.pct}%`);
@@ -201,6 +204,8 @@ export default function Named({
             <ol style={{ listStyle: "none", margin: 0, padding: 0 }}>
               {shown.map((r) => {
                 const isOpen = open === r.key;
+                // DB-2: per prompt, the answer each prompt link opens - the latest in range naming this brand, on these filters.
+                const opens = isOpen ? namedEvidence({ answers: data.answers, range, key: r.key, you: brand, only, engine, engines }) : null;
                 return (
                   <li key={r.key} style={{ borderTop: `1px solid ${T.line}`, background: r.you ? T.wash : undefined }}>
                     <Link href={href({ open: isOpen ? null : r.key })} scroll={false} aria-expanded={isOpen} className="app-nm-grid" style={{ display: "grid", gridTemplateColumns: GRID, gap: "16px", alignItems: "center", padding: "14px 24px", color: T.ink, textDecoration: "none" }}>
@@ -248,7 +253,7 @@ export default function Named({
                               <li key={p.id} style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: "8px 16px", flexWrap: "wrap", padding: "8px 0", borderTop: `1px solid ${T.hair}` }}>
                                 <span style={{ display: "flex", flexDirection: "column", gap: "2px", minWidth: 0, flex: "1 1 320px" }}>
                                   {w ? (
-                                    <Link href={`${clusterPath(w.clusterId)}?${new URLSearchParams({ ...base, prompt: String(w.index) })}`} style={{ fontSize: "14px", fontWeight: 600, color: T.ink, textDecoration: "none", overflowWrap: "anywhere" }}>
+                                    <Link href={answerHref(clusterPath(w.clusterId), { ...base, prompt: String(w.index) }, opens?.get(p.id))} style={{ fontSize: "14px", fontWeight: 600, color: T.ink, textDecoration: "none", overflowWrap: "anywhere" }}>
                                       {text.get(p.id) ?? "A stopped prompt"}
                                     </Link>
                                   ) : (

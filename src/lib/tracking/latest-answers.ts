@@ -74,6 +74,23 @@ export function engineTab(raw: string | string[] | undefined, engines: readonly 
   return typeof raw === "string" && engines.includes(raw) ? raw : engines[0]!;
 }
 
+/**
+ * `?day=` on the one-cluster page (DB-2, 9 Oct 2026): the check whose answers
+ * the panel shows instead of the latest - a real calendar day from the day
+ * tracking began to today. Anything else (not a date, 31 Sep, tomorrow, a day
+ * before tracking began, a client not yet started, the key given twice) is no
+ * day, and the page is as it is with no `?day=`: no error, the latest answers.
+ * Whose answers may be read is the page's rule, not this one's: the read is
+ * held to the page's own client and prompt (read-shape.ts readAnswerDay).
+ */
+export function pickedDay(raw: string | string[] | undefined, today: Day, startedOn: Day | null): Day | null {
+  if (typeof raw !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(raw)) return null;
+  const t = Date.parse(`${raw}T00:00:00Z`);
+  if (Number.isNaN(t) || new Date(t).toISOString().slice(0, 10) !== raw) return null;
+  if (raw > today || !startedOn || raw < startedOn) return null;
+  return raw;
+}
+
 /** `https://www.Example.com/a/b/?q=1#x` to `example.com/a/b`; null for anything that is not a web address or host. */
 export function pageLabel(raw: string): string | null {
   const s = raw.trim();

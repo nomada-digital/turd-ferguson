@@ -3,10 +3,10 @@ import "server-only";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { selectAllCounted } from "@/lib/supabase/page";
 
-import { missingColumn, trackingDay } from "./decide.ts";
-import type { LatestAnswers, LatestRow } from "./latest-answers.ts";
+import { trackingDay } from "./decide.ts";
+import type { LatestAnswers } from "./latest-answers.ts";
 import type { Angle } from "./limits.ts";
-import { type AnswerPlan, type AnswersTable, type ReadOpts, type Structure, answerPlan, boundStated, planPrompts, readAnswers } from "./read-shape.ts";
+import { type AnswerPlan, type AnswersTable, type DayPlan, type DayTable, type ReadOpts, type Structure, answerPlan, boundStated, planPrompts, readAnswerDay, readAnswers } from "./read-shape.ts";
 import { type AnswerRow, type CitationRow, type Day, type Range, type SerpRow, addDays, comparisonRange } from "./figures.ts";
 
 /**
@@ -68,25 +68,6 @@ async function paged<R>(query: (lo: number, hi: number, count: "exact" | undefin
   }
 }
 
-/**
- * tracking_answers.brands_ok arrives with 20261008020000 (8 Oct 2026, audit
- * reliability-1 / data-6). A deploy can land before its migration, and a
- * select naming a column the table lacks fails the page, so the read goes
- * again without it: every row then reads as read, which is what the
- * column's default says of the rows written before it.
- */
-async function withBrandsOk<T>(read: (cols: string) => PromiseLike<T>, cols: string): Promise<T> {
-  try {
-    return await read(`${cols}, brands_ok`);
-  } catch (err) {
-    if (!missingColumn(err, "brands_ok")) throw err;
-    return read(cols);
-  }
-}
-
-/** False only when the row says so; absent is read. */
-const brandsOkOf = (a: Record<string, unknown>): { brands_ok?: false } => (a.brands_ok === false ? { brands_ok: false } : {});
-
 export type OverviewData = {
   /** One row per cluster (BRIEF-3; R117 T9 step, 30 Sep 2026): named for its keyword, joined through keyword_id. */
   clusters: { id: string; name: string; keyword_id: string | null; tier: string; started_on: Day; stopped_on: Day | null }[];
@@ -108,46 +89,16 @@ export type OverviewData = {
 };
 
 /**
- * "Latest answers" (T7 part 3b, 30 Sep 2026): one prompt's rows at its latest
- * check on or before `to` - at most one per engine, so two small reads and
- * no paging. The overview's read leaves `response_text` out; only this page
- * needs the words. The day is the latest with an answer (8 Oct 2026, audit
- * data-3): a failed run still stores its reads, unanswered, and picked by
- * any row it replaced yesterday's real answers with four blank tabs.
+ * The one-cluster page's answers panel (T7 part 3b, 30 Sep 2026; DB-2, 9 Oct
+ * 2026): one prompt's rows, with their words, at the check the plan names -
+ * `?day=`'s, or the latest with an answer on or before the range's last day.
+ * The overview's read leaves `response_text` out; only this page needs the
+ * words. The plan, the read and its brands_ok fallback are read-shape.ts's
+ * (readAnswerDay), the same decision the fixture's shapeAnswerDay takes.
  */
-export async function loadLatestAnswers(clientId: string, questionId: string, to: Day): Promise<LatestAnswers> {
+export async function loadAnswerDay(clientId: string, plan: DayPlan): Promise<LatestAnswers> {
   const db = supabaseAdmin();
-  const { data: last, error: lastErr } = await db
-    .from("tracking_answers")
-    .select("run_date")
-    .eq("client_domain_id", clientId)
-    .eq("question_id", questionId)
-    .eq("answered", true)
-    .lte("run_date", to)
-    .order("run_date", { ascending: false })
-    .limit(1);
-  if (lastErr) throw new Error(`could not read the latest check: ${lastErr.message}`);
-  const day = (last?.[0]?.run_date as Day | undefined) ?? null;
-  if (!day) return { day: null, rows: [] };
-  const read = async (cols: string) => {
-    const { data, error } = await db.from("tracking_answers").select(cols).eq("client_domain_id", clientId).eq("question_id", questionId).eq("run_date", day);
-    if (error) throw new Error(`could not read the latest answers: ${error.message}`);
-    return (data ?? []) as unknown as Record<string, unknown>[];
-  };
-  const rows = await withBrandsOk(read, "engine, answered, named, response_text, brands, citations, created_at");
-  return {
-    day,
-    rows: rows.map((a) => ({
-      engine: a.engine as string,
-      answered: a.answered as boolean,
-      named: a.named as boolean,
-      text: typeof a.response_text === "string" ? a.response_text : null,
-      brands: Array.isArray(a.brands) ? (a.brands as unknown[]).filter((b): b is string => typeof b === "string") : [],
-      ...brandsOkOf(a),
-      citations: Array.isArray(a.citations) ? (a.citations as LatestRow["citations"]) : [],
-      at: typeof a.created_at === "string" ? a.created_at : null,
-    })),
-  };
+  return readAnswerDay((() => db.from("tracking_answers")) as unknown as DayTable, plan, clientId);
 }
 
 /**

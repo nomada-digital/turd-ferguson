@@ -12,6 +12,7 @@ import { NAMED_TOP } from "@/lib/tracking/named-figures";
 import type { Compare, OverviewData } from "@/lib/tracking/overview-data";
 import type { PlacementRow } from "@/lib/tracking/placement-figures";
 import { runNote } from "@/lib/tracking/run-note";
+import { answerHref, citedEvidence } from "@/lib/tracking/evidence";
 
 import ChipRow from "./ChipRow";
 import { ClearFilters, ClearSearch } from "./ClearLinks";
@@ -28,6 +29,8 @@ import { appPath } from "@/lib/app-host";
  * price, marketplace, difficulty or "you could place this" here, by the brief.
  * Filters, "Show all" and the accordion are links, so JS off works. DS20
  * (2 Oct 2026): `?q=` searches host and path, a GET form like Clusters'.
+ * DB-2 (9 Oct 2026): each prompt under an open row opens the latest answer in
+ * the range that cited the page, on its day and engine (evidence.ts).
  */
 
 export type CitedKind = "all" | "yours" | "others";
@@ -216,6 +219,8 @@ export default function Cited({
               {shown.map((p) => {
                 const isOpen = open === p.page;
                 const placed = live.get(p.page);
+                // DB-2: per prompt, the answer each prompt link opens - the latest in range citing this page, on these filters.
+                const opens = isOpen ? citedEvidence({ answers: data.answers, range, page: p.page, only, engine, engines }) : null;
                 return (
                   <li key={p.page} style={{ borderTop: `1px solid ${T.line}`, background: p.yours ? T.wash : undefined }}>
                     <div className="app-ct-grid" style={{ display: "grid", gridTemplateColumns: GRID, gap: "16px", alignItems: "center", padding: "14px 24px" }}>
@@ -256,7 +261,7 @@ export default function Cited({
                             <li key={q.id} style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: "8px 16px", flexWrap: "wrap", padding: "8px 0", borderTop: `1px solid ${T.hair}` }}>
                               <span style={{ display: "flex", flexDirection: "column", gap: "2px", minWidth: 0, flex: "1 1 320px" }}>
                                 {w ? (
-                                  <Link href={`${clientPath}/clusters/${encodeURIComponent(w.clusterId)}?${new URLSearchParams({ ...base, prompt: String(w.index) })}`} style={{ fontSize: "14px", fontWeight: 600, color: T.ink, textDecoration: "none", overflowWrap: "anywhere" }}>
+                                  <Link href={answerHref(`${clientPath}/clusters/${encodeURIComponent(w.clusterId)}`, { ...base, prompt: String(w.index) }, opens?.get(q.id))} style={{ fontSize: "14px", fontWeight: 600, color: T.ink, textDecoration: "none", overflowWrap: "anywhere" }}>
                                     {text.get(q.id) ?? "A stopped prompt"}
                                   </Link>
                                 ) : (

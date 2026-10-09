@@ -30,6 +30,9 @@ test("the return URL is rebuilt from checked parts only", () => {
   const sp = new URLSearchParams({ cluster: "c1", q: "q1-2", prompt: "1", from: "2026-09-02", to: "2026-09-29", compare: "month", engine: "gemini", next: "https://example.com/elsewhere" });
   assert.equal(noteReturn("tallyroo", sp), "/app/tallyroo/clusters/c1?from=2026-09-02&to=2026-09-29&compare=month&prompt=1&engine=gemini");
   assert.equal(noteReturn("tallyroo", new URLSearchParams({ cluster: "c1", q: "q1-1", prompt: "12", compare: "x" })), "/app/tallyroo/clusters/c1?prompt=0");
+  // DB-2 (9 Oct 2026): a picked day comes back as a day, or not at all.
+  assert.equal(noteReturn("tallyroo", new URLSearchParams({ cluster: "c1", q: "q1-1", prompt: "1", day: "2026-09-22", engine: "gemini" })), "/app/tallyroo/clusters/c1?prompt=1&day=2026-09-22&engine=gemini");
+  assert.equal(noteReturn("tallyroo", new URLSearchParams({ cluster: "c1", q: "q1-1", day: "22 Sep" })), "/app/tallyroo/clusters/c1?prompt=0");
   assert.equal(noteReturn("tallyroo", new URLSearchParams({ cluster: "../x", q: "q1" })), null);
   assert.equal(noteReturn("tallyroo", new URLSearchParams({ cluster: "c1" })), null);
 });
