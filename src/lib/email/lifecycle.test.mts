@@ -238,8 +238,9 @@ test("every flag ships off, and each send site asks its flag before sending", as
   assert.match(signup, /lifecycleOn\(db, "plan_ended"\)[\s\S]{0,800}sendLifecycle\(\{ memberEmail: m\.email as string, mail \}\)/);
   assert.match(signup, /: await sendLoginLink\(\{ memberEmail: o\.email, link \}\)/, "the login link stays the default while welcome is off");
   // The invite: branded only outside agency mode and with its flag on, else the plain inviteMail as before.
+  // 9 Oct 2026 (AG-1): both take everyClient, the count an invite to every client names.
   const member = read("../../app/api/app/[client]/member/route.ts");
-  assert.match(member, /!agency && \(await lifecycleOn\(db, "invite"\)\)\s*\? inviteEmail\([\s\S]{0,300}: inviteMail\(\{ inviter: email, domain: client\.domain, role: f\.role!, agency \}\)/);
+  assert.match(member, /!agency && \(await lifecycleOn\(db, "invite"\)\)\s*\? inviteEmail\([\s\S]{0,300}: inviteMail\(\{ inviter: email, domain: client\.domain, role: f\.role!, agency, everyClient \}\)/);
 });
 
 test("first_reading: flag first, the client's only finished run, no agency, the Overview's own figures", () => {
@@ -256,6 +257,13 @@ test("first_reading: flag first, the client's only finished run, no agency, the 
 test("the invite names who added you and the role", () => {
   const t = all.invite.text;
   assert.match(t, /sam@tallyroo\.com added you to the tallyroo\.com dashboard as a viewer/);
+});
+
+test("AG-1 (9 Oct 2026): an invite to every client says so; an invite to one client names that client only", () => {
+  const every = sets.invite.find((p) => /every client/.test(p.label))!.mail;
+  assert.equal(every.subject, "You've been added to the tallyroo.com dashboard and 2 more");
+  assert.match(every.text, /sam@tallyroo\.com added you to the dashboards for tallyroo\.com and the 2 other clients on their account, as an editor\./);
+  assert.doesNotMatch(all.invite.text, /other client|more/, "the one-client invite does not say there are others");
 });
 
 /**

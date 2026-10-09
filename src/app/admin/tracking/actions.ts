@@ -14,6 +14,7 @@ import { type Angle, angleFor, groupPrompts, insertCluster, insertKeyword, inser
 import { dispatchTrackingRun } from "@/lib/tracking/runner";
 import { adminEdit, adminStop, isAdminKind } from "@/lib/tracking/admin-edit";
 import { placementFields } from "@/lib/tracking/placements";
+import { clearScope } from "@/lib/tracking/scope";
 
 /**
  * /admin/tracking's writes - T2 of docs/tracked-dashboard-2026-09-29/BRIEF.md
@@ -373,7 +374,21 @@ export async function updatePlacement(_prev: AdminResult | null, form: FormData)
   return { ok: true, message: `Saved: ${status}.` };
 }
 
-/** Add or remove a dashboard member on an account. */
+/**
+ * Add or remove a dashboard member on an account.
+ *
+ * AG-1 (9 Oct 2026, scope.ts): a member someone added here keeps whatever
+ * client scope they have - none for someone new, so every client - except an
+ * owner, whose scope is cleared: owners always see every client, and the
+ * owner-only mails (runner first_reading, lifecycle-sweep) rely on that.
+ *
+ * A removal leaves the scope as it is (AG-1 review, 9 Oct 2026), as Settings'
+ * Remove does: nothing reads a removed member's scope, a Settings invite
+ * clears it before they are live, and a clear landing after an invite had
+ * made them live would leave them seeing every client. So re-adding here
+ * someone removed while limited brings them back limited, as their line on
+ * this page then says; it used to bring them back seeing every client.
+ */
 export async function setMember(_prev: AdminResult | null, form: FormData): Promise<AdminResult> {
   const refused = await refuseUnlessAdmin();
   if (refused) return refused;
@@ -394,11 +409,17 @@ export async function setMember(_prev: AdminResult | null, form: FormData): Prom
     if (error) return { ok: false, message: `Could not remove ${email}: ${error.message}` };
   } else {
     if (!["owner", "editor", "viewer"].includes(role)) return { ok: false, message: "Unknown role." };
-    const { error } = await db
+    const { data: added, error } = await db
       .from("dashboard_members")
       // Re-adding a removed member revives the same row (unique account_id, email).
-      .upsert({ account_id: accountId, email, role, removed_at: null, removed_by: null }, { onConflict: "account_id,email" });
+      .upsert({ account_id: accountId, email, role, removed_at: null, removed_by: null }, { onConflict: "account_id,email" })
+      .select("id")
+      .single();
     if (error) return { ok: false, message: `Could not add ${email}: ${error.message}` };
+    if (role === "owner") {
+      const e = await clearScope(db, { memberId: added.id as string, by: "nomada" });
+      if (e) return { ok: false, message: `${email} is owner, but still limited to some clients: ${e}` };
+    }
   }
   revalidatePath("/admin/tracking");
   return { ok: true, message: remove ? `${email} removed.` : `${email} is ${role}.` };

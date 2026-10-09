@@ -1,13 +1,14 @@
 import { keywordForm } from "../scan/dataforseo-request.ts";
 
 import { type KeywordCheck, precheckKeyword, refuseDrafts, signCheck, verifyCheck } from "./add-cluster.ts";
-import { fixtureMode, type Fixture } from "./fixture-mode.ts";
+import { fixtureAccount, fixtureClients, fixtureMode, type Fixture, type FixtureMember } from "./fixture-mode.ts";
 import { type Edit, refuseEdits } from "./edit.ts";
 import { ANGLES, angleFor, freeAngle, refuseCluster, refuseEdit, refuseGrouping, refuseKeyword, refusePrompts } from "./limits.ts";
 import { refuseRekey } from "./rekey.ts";
 import { refuseSlotText } from "./slot.ts";
 import { type StopKind, refuseRole, refuseStop, refuseUndo, stopDay } from "./stop.ts";
-import { type InviteRole, type TeamOp, refuseActor, refuseChange, refuseInvite } from "./team.ts";
+import type { InviteScope } from "./scope.ts";
+import { type InviteRole, type TeamOp, planTeam, refuseActor, removeKind } from "./team.ts";
 
 /**
  * R168 (Danny, 2 Oct 2026, danny.md lines 177-179): `TRACKING_FIXTURE_WRITE=1`
@@ -115,29 +116,57 @@ export function fixtureEditPrompts(f: Fixture, p: { clusterId: string; edits: re
 
 /**
  * The member route's invite, changeRole and removeMember on fixture.members,
- * under team.ts's rules. An invite revives a removed row with the new role, as
- * the upsert does. No mail: sendInvite is never reached on the fixture. The
- * daily invite cap is not counted here - the fixture keeps no event rows.
+ * on the client whose Settings posted (`slug`), under the route's own rules:
+ * team.ts planTeam, called as the route calls it, with the account's whole
+ * live team (AG-1, 9 Oct 2026). An invite revives a removed row with the new
+ * role and this client only, or every client, as invite's pending path does;
+ * someone live for other clients only gets this client added. A removal
+ * leaves the member's list as it is, as removeMember leaves the scope rows.
+ * No mail: sendInvite is never reached on the fixture. The daily invite cap
+ * is not counted here - the fixture keeps no event rows.
  */
-export function fixtureTeam(f: Fixture, p: { op: TeamOp; email: string; role: InviteRole | null; now: string }): FixtureWritten {
+export function fixtureTeam(f: Fixture, p: { op: TeamOp; email: string; role: InviteRole | null; scope: InviteScope | null; slug: string; now: string }): FixtureWritten {
   const actor = refuseActor(f.member.role);
   if (actor) return { ok: false, message: actor };
-  const rows = f.members.filter((m) => !m.removed_at).map((m) => ({ email: m.email, role: m.role, removed_at: null }));
-  if (p.op === "invite") {
-    const no = refuseInvite({ rows, email: p.email, invitesToday: 0 });
-    if (no) return { ok: false, message: no };
-    if (!p.role) return { ok: false, message: "Pick a role." };
+  const client = fixtureClients(f, f.member.email).find((c) => c.slug === p.slug);
+  if (!client) return { ok: false, message: "Not found." };
+  const all = f.members.filter((m) => !m.removed_at).map((m) => ({ email: m.email, role: m.role, removed_at: null, clients: m.clients ?? null }));
+  const plan = planTeam({
+    form: { op: p.op, email: p.email, role: p.role, scope: p.op === "invite" ? p.scope : null },
+    actor: f.member.email,
+    rows: all,
+    scoping: f.scoping !== false,
+    clientId: client.id,
+    clientIds: fixtureAccount(f).map((c) => c.id),
+    invitesToday: 0,
+  });
+  if (typeof plan === "string") return { ok: false, message: plan };
+  // A member with no `clients` sees every client; the key is left off rather than set to undefined.
+  const scoped = (m: FixtureMember, clients: string[] | null): FixtureMember => {
+    const out = { ...m };
+    delete out.clients;
+    return clients ? { ...out, clients } : out;
+  };
+  if (plan.op === "invite") {
+    // Live for other clients: this one joins their list. New or removed: this client only, or every client.
+    const after = (m: FixtureMember | null): string[] | null => (plan.scope === "account" ? null : plan.elsewhere && m?.clients ? [...m.clients, client.id] : [client.id]);
     const had = f.members.some((m) => m.email === p.email);
     const members = had
-      ? f.members.map((m) => (m.email === p.email ? { ...m, role: p.role!, removed_at: null } : m))
-      : [...f.members, { email: p.email, name: null, role: p.role, last_login_at: null, removed_at: null }];
+      ? f.members.map((m) => (m.email === p.email ? scoped({ ...m, role: plan.role, removed_at: null }, after(m)) : m))
+      : [...f.members, scoped({ email: p.email, name: null, role: plan.role, last_login_at: null, removed_at: null }, after(null))];
     return { ok: true, fixture: { ...f, members } };
   }
-  const no = refuseChange({ rows, actor: f.member.email, email: p.email, op: p.op, role: p.role });
-  if (no) return { ok: false, message: no };
-  if (p.op === "role" && !p.role) return { ok: false, message: "Pick a role." };
+  const kind = removeKind(plan.row);
   const hit = (m: Fixture["members"][number]) => m.email === p.email && !m.removed_at;
-  const members = f.members.map((m) => (!hit(m) ? m : p.op === "role" ? { ...m, role: p.role! } : { ...m, removed_at: p.now }));
+  const members = f.members.map((m) =>
+    !hit(m)
+      ? m
+      : plan.op === "role"
+        ? { ...m, role: plan.role }
+        : kind === "client"
+          ? scoped(m, (m.clients ?? []).filter((id) => id !== client.id))
+          : { ...m, removed_at: p.now },
+  );
   return { ok: true, fixture: { ...f, members } };
 }
 

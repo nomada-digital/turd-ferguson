@@ -365,6 +365,26 @@ const EXEMPT: Record<string, Exemption> = {
       },
     ]),
   ),
+  // AG-1 (9 Oct 2026): Settings' invite carries its scope - two radios on an
+  // account with two or more clients, or a hidden "account" while the scope
+  // table is not there yet. Nothing typed; team.ts reads only the two words,
+  // and anything else is this client only.
+  ...Object.fromEntries(
+    ["tm-inv-scope-client", "tm-inv-scope-account", "tm-inv-scope"].map((id) => [
+      id,
+      {
+        why: [
+          "the invite form's scope, a radio or a hidden field: client or account.",
+          "Nothing is typed in it. team.ts readScopeWord accepts only those two words, and",
+          "inviteScope reads anything but an explicit account as this client only.",
+        ].join(" "),
+        holds: [
+          { file: "lib/tracking/team.ts", needs: '(raw === "client" || raw === "account" ? raw : null)' },
+          { file: "lib/tracking/team.ts", needs: 'return raw === "account" ? "account" : "client";' },
+        ],
+      },
+    ]),
+  ),
   // R142 part 3 (1 Oct 2026): Settings' two asks carry `about`, and "Sign out
   // of every device" carries everywhere=1, as hidden fields.
   "set-ask-aliases": {

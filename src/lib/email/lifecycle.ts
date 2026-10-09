@@ -314,14 +314,26 @@ export function trialEnding(d: { domain: string; link: string; recap: TrialRecap
   });
 }
 
-/** Names alwayscited and the tier, so the member route sends it only outside agency mode. */
-export function invite(d: { tier: TierKey; domain: string; link: string; inviter: string; role: "editor" | "viewer" }): Rendered {
+/**
+ * Names alwayscited and the tier, so the member route sends it only outside agency mode.
+ * `everyClient` (AG-1, 9 Oct 2026): the account's client count when the invite is to
+ * every client on an account with two or more, so the mail says they will see them all;
+ * an invite to one client names that client only, as team.ts inviteMail does.
+ */
+export function invite(d: { tier: TierKey; domain: string; link: string; inviter: string; role: "editor" | "viewer"; everyClient?: number | null }): Rendered {
+  const as = d.role === "editor" ? "an editor" : "a viewer";
+  const rest = d.everyClient && d.everyClient > 1 ? d.everyClient - 1 : 0;
+  const added = rest ? `You've been added to the ${d.domain} dashboard and ${rest} more` : `You've been added to the ${d.domain} dashboard`;
   return render({
     tier: d.tier,
-    subject: `You've been added to the ${d.domain} dashboard`,
+    subject: added,
     preheader: "Sign in with this email address.",
-    heading: `You've been added to the ${d.domain} dashboard`,
-    body: [`${d.inviter} added you to the ${d.domain} dashboard as ${d.role === "editor" ? "an editor" : "a viewer"}. Sign in with this email address to see it.`],
+    heading: added,
+    body: [
+      rest
+        ? `${d.inviter} added you to the dashboards for ${d.domain} and the ${count(rest, "other client")} on their account, as ${as}. Sign in with this email address to see them.`
+        : `${d.inviter} added you to the ${d.domain} dashboard as ${as}. Sign in with this email address to see it.`,
+    ],
     cta: { href: d.link, label: "Sign in" },
     footnote: "Sign in sends a one-time link to this address.",
   });
@@ -424,7 +436,11 @@ export function previewSets(price: { us: number; uk: number }): Record<Lifecycle
       { label: "three days before the end with prompts but no check finished yet, US", mail: trialEnding({ domain, link: dash, recap: waiting, trial: us }) },
       { label: "three days before the end with nothing set up, UK", mail: trialEnding({ domain, link: dash, recap: unread, trial: uk }) },
     ],
-    invite: [{ label: "a viewer", mail: invite({ tier: "tracked", domain, link: appUrl("/login", ORIGIN), inviter: "sam@tallyroo.com", role: "viewer" }) }],
+    invite: [
+      { label: "a viewer", mail: invite({ tier: "tracked", domain, link: appUrl("/login", ORIGIN), inviter: "sam@tallyroo.com", role: "viewer" }) },
+      // AG-1 (9 Oct 2026): an invite to every client on an account with three.
+      { label: "an editor on every client of three", mail: invite({ tier: "tracked", domain, link: appUrl("/login", ORIGIN), inviter: "sam@tallyroo.com", role: "editor", everyClient: 3 }) },
+    ],
     plan_ended: [
       { label: "the alwayscited plan, paid", mail: planEnded({ tier: "cited", domain, billing }) },
       { label: "an alwaystracked trial that ended with no charge", mail: planEnded({ tier: "tracked", domain, billing, trial: true }) },

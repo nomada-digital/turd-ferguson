@@ -14,7 +14,7 @@ import { sendInvite } from "@/lib/tracking/invite-mail";
 import { clientsFor, sessionEmail } from "@/lib/tracking/member";
 import { writeFixture } from "@/lib/tracking/repo";
 import { readKept } from "@/lib/tracking/stop";
-import { type TeamDone, type TeamWhy, changeRole, invite, inviteMail, invitesToday, readTeam, readTeamForm, refuseActor, refuseChange, refuseInvite, removeMember, teamReturn, teamWhy } from "@/lib/tracking/team";
+import { type TeamDone, type TeamWhy, changeRole, invite, inviteMail, invitesToday, planTeam, readTeam, readTeamForm, refuseActor, removeMember, teamReturn, teamWhy } from "@/lib/tracking/team";
 import { dashPath, dashUrl } from "@/lib/tracking/app-redirect";
 
 export const runtime = "nodejs";
@@ -27,6 +27,12 @@ export const dynamic = "force-dynamic";
  * as the stop route; owners only. The rules are team.ts; the invite mail is
  * invite-mail.ts. The fixture is read-only unless TRACKING_FIXTURE_WRITE=1
  * (R168), which holds the change in memory; on the fixture nothing is sent.
+ *
+ * AG-1 (9 Oct 2026): every rule runs on the members who see this client, and
+ * the invite is to this client only or to every client on the account
+ * (scope.ts). The rules are team.ts planTeam, which this route and the
+ * fixture both call with the account's whole live team; the route reads and
+ * writes, and decides nothing itself (team.test.mts pins it).
  */
 export async function POST(req: Request, ctx: { params: Promise<{ client: string }> }) {
   const { client: slug } = await ctx.params;
@@ -41,7 +47,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ client: string
   if (!f) return back("refused", form?.get("op") === "invite" ? "email" : null);
   if (fixtureMode()) {
     // R168: invite, role and remove held in memory on the writable fixture; sendInvite is never reached here.
-    const r = writeFixture((fx) => fixtureTeam(fx, { op: f.op, email: f.email, role: f.role, now: new Date().toISOString() }));
+    const r = writeFixture((fx) => fixtureTeam(fx, { op: f.op, email: f.email, role: f.role, scope: f.scope, slug, now: new Date().toISOString() }));
     if (r && !r.ok) console.warn(`[app] fixture team ${f.op} refused: ${r.message}`);
     return r?.ok ? back(f.op === "invite" ? "invited" : f.op === "role" ? "role" : "removed") : back("refused", r ? teamWhy(r.message) : null);
   }
@@ -63,33 +69,40 @@ export async function POST(req: Request, ctx: { params: Promise<{ client: string
   const { data: row, error: rowErr } = await db.from("client_domains").select("account_id").eq("id", client.id).maybeSingle();
   if (rowErr || !row) return refused(`could not read the client's account: ${rowErr?.message ?? "none"}`);
   const accountId = row.account_id as string;
-  const rows = await readTeam(db, accountId);
-  if (typeof rows === "string") return refused(rows);
+  const team = await readTeam(db, accountId);
+  if (typeof team === "string") return refused(team);
+  // AG-1: the clients /app can show on this account - how many decides whether the invite asks, and an invite to every client is counted on each.
+  const { data: ids, error: nErr } = await db.from("client_domains").select("id").eq("account_id", accountId).not("slug", "is", null);
+  if (nErr || !ids) return refused(`could not read the account's clients: ${nErr?.message ?? "none"}`);
+  const clientIds = ids.map((c) => c.id as string);
+  // The daily cap is counted for an invite only.
+  const n = f.op === "invite" ? await invitesToday(db, { email, today: trackingDay() }) : 0;
+  if (typeof n === "string") return refused(n);
+  const plan = planTeam({ form: f, actor: email, rows: team.rows, scoping: team.scoping, clientId: client.id, clientIds, invitesToday: n });
+  if (typeof plan === "string") return refused(plan);
 
-  if (f.op === "invite") {
-    const today = trackingDay();
-    const n = await invitesToday(db, { email, today });
-    if (typeof n === "string") return refused(n);
-    const no = refuseInvite({ rows, email: f.email, invitesToday: n });
-    if (no) return refused(no);
+  if (plan.op === "invite") {
     // Read before the write: agency mode must be known, or the mail could name a nomada tier.
     const { data: account, error: aErr } = await db.from("accounts").select("upsell_mode").eq("id", accountId).maybeSingle();
     if (aErr || !account) return refused(`could not read the account: ${aErr?.message ?? "none"}`);
-    const r = await invite(db, { accountId, clientId: client.id, email: f.email, role: f.role!, by: email });
+    const r = await invite(db, { accountId, clientId: client.id, email: f.email, role: plan.role, by: email, scope: plan.scope, elsewhere: plan.elsewhere });
     if (!r.ok) return refused(r.message);
     const agency = upsellMode(account.upsell_mode) === "agency";
+    // The mail says when they will see every client; an invite to one client names that client only.
+    const everyClient = plan.scope === "account" && clientIds.length > 1 ? clientIds.length : null;
     // The branded invite (R159) names alwayscited and the tier, so never in agency mode; off until its flag is on.
     const mail =
       !agency && (await lifecycleOn(db, "invite"))
-        ? inviteEmail({ tier: (client.tier in TIER_PLAIN ? client.tier : "tracked") as TierKey, domain: client.domain, link: appUrl("/login", siteUrl()), inviter: email, role: f.role! })
-        : inviteMail({ inviter: email, domain: client.domain, role: f.role!, agency });
+        ? inviteEmail({ tier: (client.tier in TIER_PLAIN ? client.tier : "tracked") as TierKey, domain: client.domain, link: appUrl("/login", siteUrl()), inviter: email, role: f.role!, everyClient })
+        : inviteMail({ inviter: email, domain: client.domain, role: f.role!, agency, everyClient });
     if (!(await sendInvite({ to: f.email, replyTo: email, ...mail }))) console.warn("[app] invite saved but the mail was not sent");
     return back("invited");
   }
 
-  const no = refuseChange({ rows, actor: email, email: f.email, op: f.op, role: f.role });
-  if (no) return refused(no);
-  const r = f.op === "role" ? await changeRole(db, { accountId, email: f.email, role: f.role! }) : await removeMember(db, { accountId, email: f.email, by: email });
+  const r =
+    plan.op === "role"
+      ? await changeRole(db, { accountId, email: f.email, role: plan.role })
+      : await removeMember(db, { accountId, email: f.email, by: email, clientId: client.id, row: plan.row });
   if (!r.ok) return refused(r.message);
   return back(f.op === "role" ? "role" : "removed");
 }

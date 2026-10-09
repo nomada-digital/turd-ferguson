@@ -92,7 +92,10 @@ function declaredUnique(): Map<string, Set<string>> {
       const table = m[1].replace(/^public\./, "");
       const { body } = balanced(sql, m.index + m[0].length - 1);
       for (const item of topLevelItems(body)) {
-        const constraint = /^unique\s*\(([^)]*)\)/i.exec(item);
+        // A table-level `primary key (a, b)` is a unique key too (9 Oct 2026, AG-1:
+        // dashboard_member_clients is keyed on the pair). Before this it was read as a
+        // column named "primary", which no upsert names.
+        const constraint = /^(?:constraint\s+[a-z_0-9]+\s+)?(?:unique|primary\s+key)\s*\(([^)]*)\)/i.exec(item);
         if (constraint) {
           add(table, constraint[1].split(","));
           continue;
@@ -196,6 +199,8 @@ test("the sweep can see both ends", () => {
   // Known-good spot checks, so a parser that returns plausible rubbish fails here.
   assert.ok(unique.get("scan_sources")?.has("domain,scan_id"), "scan_sources (scan_id, domain)");
   assert.ok(unique.get("scan_answers")?.has("engine,question_id"), "scan_answers (question_id, engine)");
+  // A table-level primary key (9 Oct 2026), the shape the column walk used to misread.
+  assert.ok(unique.get("dashboard_member_clients")?.has("client_domain_id,member_id"), "dashboard_member_clients primary key (member_id, client_domain_id)");
 });
 
 test("every upsert names an onConflict", () => {
@@ -256,11 +261,16 @@ test("the four sites are the ones we think they are", () => {
       // signup (checkout/signup.ts), the client and its owner on T2's keys.
       "client_domains:account_id,domain,market,topic",
       "client_domains:account_id,domain,market,topic",
+      // 9 Oct 2026, AG-1: a member limited to one more client, or a removed scope row
+      // brought back (scope.ts addScope), on the table's primary key in
+      // 20261009010000_member_clients.sql. Sorts ahead of dashboard_members.
+      "dashboard_member_clients:client_domain_id,member_id",
       "dashboard_members:account_id,email",
       "dashboard_members:account_id,email",
       "dashboard_members:account_id,email",
       // 1 Oct 2026, R142 part 2: an owner's invite on Settings (team.ts invite),
       // the same key, clearing removed_at so a removed member comes back on their row.
+      // 9 Oct 2026 (AG-1): one site still - team.ts writeMember, called not yet live and then live.
       "dashboard_members:account_id,email",
       // 30 Sep 2026, R91: the Stripe webhook's one orders row per completed
       // Session (checkout/signup.ts writeOrder), on the unique column in

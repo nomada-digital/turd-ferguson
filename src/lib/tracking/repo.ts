@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import { trackingDay } from "./decide.ts";
 import type { Day, Range } from "./figures.ts";
-import { expandFixture, fixtureLive, fixtureMode, fixtureSetupConfirmed, fixtureSignedOut, fixtureState, fixtureUnreadable, type Fixture } from "./fixture-mode.ts";
+import { expandFixture, fixtureClients, fixtureMode, fixtureSettings, fixtureSetupConfirmed, fixtureSignedOut, fixtureState, fixtureUnreadable, type Fixture } from "./fixture-mode.ts";
 import { type FixtureWritten, fixtureWrites } from "./fixture-writes.ts";
 import { type MemberClient, clientsFor, sessionEmail } from "./member.ts";
 import type { LatestAnswers } from "./latest-answers.ts";
@@ -106,8 +106,8 @@ const fixtureRepo: TrackingRepo = {
     return fixture().member.email;
   },
   async clientsFor(email) {
-    const f = fixture();
-    return fixtureLive(f, email) ? [{ ...f.client, role: f.member.role }] : [];
+    // AG-1 (9 Oct 2026): the session's scope applies here as clientsFor applies it (fixtureClients).
+    return fixtureClients(fixture(), email);
   },
   async loadOverview(clientId, _range, _compare, opts) {
     fixtureUnreadable();
@@ -148,10 +148,7 @@ const fixtureRepo: TrackingRepo = {
     return clientId === f.client.id ? f.placements.map((p) => ({ ...p, url_key: urlKey(p.url) ?? "" })) : [];
   },
   async settings(clientId) {
-    const f = fixture();
-    if (clientId !== f.client.id) return { aliases: [], members: [], accountClients: 1 };
-    // Removed members stay in the file, as the table keeps them, and are skipped as every read skips them.
-    return { accountClients: 1, aliases: f.aliases, members: f.members.filter((m) => !m.removed_at).map((m) => ({ email: m.email, name: m.name, role: m.role, last_login_at: m.last_login_at })) };
+    return fixtureSettings(fixture(), clientId);
   },
   today() {
     return fixture().today;

@@ -84,6 +84,7 @@ export default async function ClientSettings({ params, searchParams }: { params:
           ended={client.status === "ended"}
           livePrompts={(structure.questions ?? []).filter((q) => q.stopped_on === null).length}
           accountClients={settings.accountClients}
+          scoping={settings.scoping}
         />
       </div>
     </div>
