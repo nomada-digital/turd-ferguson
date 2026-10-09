@@ -3,6 +3,7 @@ import "server-only";
 import { cookies } from "next/headers";
 
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { PAYMENT_BANNER_READ, type PaymentView, withPayment } from "@/lib/checkout/payment";
 
 import { readScopes, visibleClients } from "./scope.ts";
 import { SESSION_COOKIE, hashToken, isTokenShape } from "./session.ts";
@@ -32,7 +33,7 @@ export type MemberClient = {
   trial_cancelled_at?: string | null;
   /** client_domains.status: active, paused or ended (a cancelled subscription ends it). Absent in older fixtures. */
   status?: string;
-};
+} & Partial<PaymentView>;
 
 /** The signed-in email, or null. */
 export async function sessionEmail(): Promise<string | null> {
@@ -64,8 +65,8 @@ export async function clientsFor(email: string): Promise<(MemberClient & { role:
     .not("slug", "is", null)
     .order("created_at", { ascending: true });
   if (cErr) throw new Error(`could not read clients: ${cErr.message}`);
-  // Named fields only: account_id is used for the join and never returned.
-  return visibleClients(mine, scopes.of, (rows ?? []) as { id: string; account_id: string; [k: string]: unknown }[]).map(({ client: r, role }) => ({
+  // Named fields only: account_id is used for the join and never returned (AG-1 scope, then BL-2's payment read below).
+  const clients = visibleClients(mine, scopes.of, (rows ?? []) as { id: string; account_id: string; [k: string]: unknown }[]).map(({ client: r, role }) => ({
     id: r.id,
     slug: r.slug as string,
     domain: r.domain as string,
@@ -81,6 +82,13 @@ export async function clientsFor(email: string): Promise<(MemberClient & { role:
     status: (r.status as string | null) ?? "active",
     role,
   }));
+  // BL-2 (9 Oct 2026): the payment banner's columns, read on their own so a
+  // failure here - 20261009030000 not applied, or anything else - costs the
+  // banner and never the dashboard (payment.ts withPayment).
+  if (!clients.length) return clients;
+  const { data: paid, error: pErr } = await db.from("client_domains").select(PAYMENT_BANNER_READ).in("id", clients.map((c) => c.id));
+  if (pErr) console.warn(`[app] payment state not read, no payment banner: ${pErr.message}`);
+  return withPayment(clients, pErr ? null : ((paid ?? []) as Record<string, unknown>[]));
 }
 
 /**

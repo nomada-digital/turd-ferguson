@@ -255,6 +255,20 @@ test("8 Oct 2026: the trial states carry a trial end in real time, a cancel, or 
   assert.equal(fx.client.status, undefined, "the default client carries no status, as before");
 });
 
+test("9 Oct 2026 (BL-2): past-due is a failed card Stripe retries in three days; unpaid is the client ended for it", () => {
+  for (const st of ["past-due", "unpaid"] as const) assert.ok(FIXTURE_STATES.includes(st), st);
+  const now = Date.now();
+  const d = fixtureState(fx, { TRACKING_FIXTURE_STATE: "past-due" }).client;
+  assert.equal(d.payment_status, "past_due");
+  assert.equal(d.status, undefined, "still tracked: past due is not ended");
+  assert.ok(Math.abs((Date.parse(d.payment_retry_at ?? "") - now) / 86_400_000 - 3) < 0.01);
+  assert.match(d.payment_invoice_url ?? "", /^https:\/\/invoice\.stripe\.com\//);
+  const u = fixtureState(fx, { TRACKING_FIXTURE_STATE: "unpaid" }).client;
+  assert.deepEqual([u.status, u.payment_status, u.payment_retry_at], ["ended", "unpaid", null]);
+  assert.ok(Date.parse(u.payment_ended_at ?? "") < now);
+  assert.equal(fx.client.payment_status, undefined, "the default client carries no payment state");
+});
+
 test("8 Oct 2026 (audit reliability-1): TRACKING_FIXTURE_STATE=brands-unread is today's run with ChatGPT's brand extraction failed", () => {
   assert.ok(FIXTURE_STATES.includes("brands-unread"));
   const u = fixtureState(fx, { TRACKING_FIXTURE_STATE: "brands-unread" });

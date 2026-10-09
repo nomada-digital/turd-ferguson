@@ -187,6 +187,13 @@ const SENDERS: Record<
    * callers are signup.ts's checkout and subscription-deleted handlers, which
    * run only from the Stripe webhook once the signature verifies and the event
    * id is new, and each send first asks its app_settings flag, off by default.
+   * 9 Oct 2026 (BL-2, review of 2c6dc99): plan_ended has a second caller, a
+   * customer.subscription.updated whose status is canceled, through the same
+   * endClient, which sends only when its own update ended the client - so
+   * once, whichever of the two events lands first. Same webhook, same flag,
+   * so the reach and bound below are unchanged; payment.test.mts follows the
+   * calls and holds endClient's plan_ended to be the only send a payment
+   * handler can reach.
    * Part 5, same day: first_reading from runTrackingDay, once per client ever
    * (only when the run is the client's one finished run), the runner being
    * started only by the cron's signed dispatch - see link-mail.ts's entry.

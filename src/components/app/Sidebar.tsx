@@ -5,10 +5,11 @@ import BrandMark from "@/components/BrandMark";
 import EngineLogo from "@/components/EngineLogo";
 import TierName, { type TierKey } from "@/components/TierName";
 import { PACK_CLUSTERS, TRACKED_BASIS, TRACKED_PRICE, contactUrlFor } from "@/config/pricing";
-import { trialMoment, trialStatus } from "@/config/trial";
+import { trialStatus } from "@/config/trial";
 import { T } from "@/config/tokens";
 import { ENGINE_SPECS, type Engine } from "@/lib/scan/engines";
 import { KEYWORDS_PER_CLUSTER, PROMPTS_PER_CLUSTER } from "@/lib/tracking/limits";
+import { planBanner } from "@/lib/tracking/plan-banner";
 
 import MenuCloser from "./MenuCloser";
 import { CLUSTER_NAV, CLUSTER_TABS, NAV, PLACEMENTS_ITEM, TABS, navHref } from "./nav";
@@ -90,7 +91,20 @@ function NavIcon({ item, size }: { item: string; size: number }) {
   );
 }
 
-type Client ={ slug: string; domain: string; brand: string | null; market: string; trial_ends_at?: string | null; trial_cancelled_at?: string | null; status?: string };
+type Client = {
+  slug: string;
+  domain: string;
+  brand: string | null;
+  market: string;
+  trial_ends_at?: string | null;
+  trial_cancelled_at?: string | null;
+  status?: string;
+  /** BL-2 (9 Oct 2026): the payment state the webhook records (lib/checkout/payment.ts). */
+  payment_status?: string | null;
+  payment_retry_at?: string | null;
+  payment_invoice_url?: string | null;
+  payment_ended_at?: string | null;
+};
 
 function Lockup({ size }: { size: number }) {
   return (
@@ -151,27 +165,9 @@ export default function Sidebar({
   // The alwaystracked trial (8 Oct 2026): "Free trial - ends <date>. Then $129 a month." or the cancelled line.
   const ended = client.status === "ended";
   const trial = ended ? null : trialStatus({ trialEndsAt: client.trial_ends_at ?? null, cancelled: Boolean(client.trial_cancelled_at), market: client.market, price: TRACKED_PRICE });
-  /**
-   * The plan banner (8 Oct 2026, audit activation-12, activation-5): a strip
-   * across the top of every dashboard page at every width - the plan card is
-   * hidden on phones - for the two things a client must not miss: how long the
-   * free trial has left, and that tracking has ended.
-   */
-  const daysLeft = client.trial_ends_at ? Math.ceil((Date.parse(client.trial_ends_at) - Date.now()) / 86_400_000) : null;
-  // An ended client is not sent to checkout: a new order cannot yet bring the
-  // old client back (review of 2379757), so the owner asks us, where billing is.
-  const billing = { href: appPath(`/${client.slug}/settings`) + "#set-billing", label: "Billing" };
-  // Agency and off modes bill through the account contact, never us (review of 2379757).
-  const endedText = `Tracking has ended for ${client.brand ?? client.domain}. Everything read so far stays here`;
-  const banner: { tone: "trial" | "ended"; text: string; link: { href: string; label: string } | null } | null = ended
-    ? role === "owner" && upsell
-      ? { tone: "ended", text: `${endedText}.`, link: { href: billing.href, label: "Ask us to restart it" } }
-      : { tone: "ended", text: `${endedText} - ${upsell ? "an owner can ask us to restart it" : "your account contact can restart it"}.`, link: null }
-    : trial && client.trial_ends_at && !client.trial_cancelled_at
-      ? { tone: "trial", text: `Free trial: ${daysLeft === 1 ? "1 day" : `${daysLeft} days`} left, ends ${trialMoment(client.trial_ends_at, client.market)}.`, link: billing }
-      : trial
-        ? { tone: "trial", text: trial, link: billing }
-        : null;
+  // The plan banner (8 Oct 2026, audit activation-12, activation-5; BL-2's payment state, 9 Oct 2026): decided in plan-banner.ts.
+  const banner = planBanner({ client: { ...client, name }, role, upsell, billing: appPath(`/${client.slug}/settings`) + "#set-billing", price: TRACKED_PRICE });
+  const tone = banner ? { trial: { bg: T.wash, line: T.washLine }, ended: { bg: T.chip, line: T.line }, payment: { bg: T.warnBg, line: T.line } }[banner.tone] : null;
   // R130 (30 Sep 2026): a built screen is a link; an unbuilt one is drawn
   // disabled with "Coming soon" - no href, not focusable, aria-disabled.
   // R151 (1 Oct): the nav and tabs are AppLinks, so moving between screens is
@@ -203,9 +199,10 @@ export default function Sidebar({
       </a>
       {banner ? (
         // Page furniture, not an announcement: a labelled region rather than role=status, which re-read itself on every soft navigation (review of 2379757).
-        <aside aria-label="Your plan" className="app-banner" style={{ flex: "1 1 100%", display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "center", gap: "4px 12px", padding: "10px 16px", fontSize: "14px", lineHeight: 1.4, textAlign: "center", boxSizing: "border-box", background: banner.tone === "trial" ? T.wash : T.chip, borderBottom: `1px solid ${banner.tone === "trial" ? T.washLine : T.line}`, color: T.ink }}>
+        <aside aria-label="Your plan" className="app-banner" style={{ flex: "1 1 100%", display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "center", gap: "4px 12px", padding: "10px 16px", fontSize: "14px", lineHeight: 1.4, textAlign: "center", boxSizing: "border-box", background: tone!.bg, borderBottom: `1px solid ${tone!.line}`, color: T.ink }}>
           <span>{banner.text}</span>
-          {banner.link ? <a href={banner.link.href} style={{ display: "inline-flex", alignItems: "center", minHeight: "44px", fontWeight: 600, color: T.accent, textDecoration: "underline", textUnderlineOffset: "2px" }}>{banner.link.label}</a> : null}
+          {/* An external link is Stripe's invoice page (BL-2): no referrer, so the client's dashboard URL stays here. */}
+          {banner.link ? <a href={banner.link.href} rel={banner.link.external ? "noreferrer" : undefined} style={{ display: "inline-flex", alignItems: "center", minHeight: "44px", fontWeight: 600, color: T.accent, textDecoration: "underline", textUnderlineOffset: "2px" }}>{banner.link.label}</a> : null}
         </aside>
       ) : null}
       <header className="app-topbar" style={{ alignItems: "center", justifyContent: "space-between", height: "60px", padding: "0 16px", background: T.surface, borderBottom: `1px solid ${T.line}`, flex: "1 1 100%", minWidth: 0, boxSizing: "border-box" }}>

@@ -4,8 +4,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { siteUrl } from "@/lib/scan/verify-email";
 import { appUrl } from "@/lib/app-host";
 import { sendOrderEmail } from "@/lib/checkout/order-mail";
-import { clustersToMake, orderEmailText, orderRow, packsOn, signupResume, subscriptionScanToken, trialConverted, trialEndsAtAfter, trialStillRunning, type CompletedOrder } from "@/lib/checkout/webhook";
+import { clustersToMake, orderEmailText, orderRow, packsOn, signupResume, trialConverted, trialEndsAtAfter, trialStillRunning, type CompletedOrder } from "@/lib/checkout/webhook";
 import { readSubscription } from "@/lib/checkout/stripe";
+import { afterSubscription } from "@/lib/checkout/payment";
+import { clientOfSubscription, recordPayment } from "@/lib/checkout/subscription-events";
 import { TRACKED_PRICE } from "@/config/pricing";
 import { trialCharge, trialMoment } from "@/config/trial";
 import { dayAfter, slugFor, trackingDay } from "@/lib/tracking/decide";
@@ -305,27 +307,6 @@ async function writeOrder(db: SupabaseClient, o: CompletedOrder, clientId: strin
   return { text: "already written by an earlier attempt", inserted: false };
 }
 
-async function clientOfSubscription(db: SupabaseClient, sub: Record<string, unknown>): Promise<string | null | false> {
-  const token = subscriptionScanToken(sub);
-  if (token) {
-    const { data: scan, error } = await db.from("scans").select("id").eq("public_token", token).maybeSingle();
-    if (error) return false;
-    if (scan) {
-      const { data: c, error: cErr } = await db.from("client_domains").select("id").eq("source_scan_id", scan.id).order("created_at", { ascending: false }).limit(1);
-      if (cErr) return false;
-      if (c?.[0]?.id) return c[0].id as string;
-    }
-  }
-  // An order with no scan (R158) carries no token, so its subscription found no
-  // client and a cancellation ended nothing. The order row holds both ids
-  // (8 Oct 2026, found building the trial's cancel).
-  const id = typeof sub.id === "string" ? sub.id : "";
-  if (!id) return null;
-  const { data: o, error: oErr } = await db.from("orders").select("client_domain_id").eq("stripe_subscription_id", id).not("client_domain_id", "is", null).limit(1);
-  if (oErr) return false;
-  return (o?.[0]?.client_domain_id as string | undefined) ?? null;
-}
-
 /**
  * Packs become cluster_limit (limits.ts: 10 + 5 per pack), and trial_ends_at
  * follows Stripe's trial_end when the trial moves or ends (trialEndsAtAfter,
@@ -333,19 +314,29 @@ async function clientOfSubscription(db: SupabaseClient, sub: Record<string, unkn
  * and the cron's trial emails would have told a paying client nothing is
  * charged). No client for the subscription: nothing to do. A failed write is
  * false, so Stripe retries.
+ *
+ * BL-2 (9 Oct 2026): then the subscription's status (payment.ts). past_due is
+ * recorded for the owner's banner; unpaid, paused and incomplete_expired end
+ * the client; canceled ends it through endClient, as
+ * customer.subscription.deleted does; a client ended for payment whose
+ * subscription is paid again is made active. Only for a client an order row
+ * ties to the subscription (subscription-events.ts, review of 2c6dc99).
  */
-export async function onSubscriptionUpdated(db: SupabaseClient, sub: Record<string, unknown>, previous: Record<string, unknown> = {}): Promise<boolean> {
-  const clientId = await clientOfSubscription(db, sub);
-  if (clientId === false) return false;
-  if (trialConverted(sub, previous)) console.info(`[stripe] trial converted to paid: ${String(sub.id)} client ${clientId ?? "none"}`);
-  if (!clientId) return true;
+export async function onSubscriptionUpdated(db: SupabaseClient, sub: Record<string, unknown>, previous: Record<string, unknown> = {}, at: number = Math.floor(Date.now() / 1000)): Promise<boolean> {
+  const client = await clientOfSubscription(db, sub);
+  if (client === false) return false;
+  if (trialConverted(sub, previous)) console.info(`[stripe] trial converted to paid: ${String(sub.id)} client ${client?.id ?? "none"}`);
+  if (!client) return true;
   const trialEndsAt = trialEndsAtAfter(sub, previous);
   const { error } = await db
     .from("client_domains")
     .update({ cluster_limit: clusterLimitFor(packsOn(sub)), ...(trialEndsAt === undefined ? {} : { trial_ends_at: trialEndsAt }) })
-    .eq("id", clientId);
-  if (error) console.error(`[stripe] cluster_limit${trialEndsAt === undefined ? "" : " and trial_ends_at"} not set: ${error.message}`);
-  return !error;
+    .eq("id", client.id);
+  if (error) {
+    console.error(`[stripe] cluster_limit${trialEndsAt === undefined ? "" : " and trial_ends_at"} not set: ${error.message}`);
+    return false;
+  }
+  return recordPayment(db, client, String(sub.id), at, (row) => afterSubscription(row, sub, at), () => endClient(db, client.id, sub));
 }
 
 /**
@@ -360,11 +351,24 @@ export async function onSubscriptionUpdated(db: SupabaseClient, sub: Record<stri
  * (planEndedOwners, lifecycle-sweep.ts). Which version is planEndedInTrial's:
  * Stripe's trial_end on this payload first, so a trial_ends_at that signup
  * failed to write cannot hand an uncharged trial the receipt line.
+ *
+ * BL-2 (9 Oct 2026): the subscription's canceled status is recorded too, so a
+ * client ended for payment and then cancelled stays ended when it is read.
+ * Review of 2c6dc99 (same day): a client guessed from the scan, because no
+ * order row names the subscription, is still ended here as before BL-2, so a
+ * subscription whose order row was refused does not track for ever; only the
+ * payment step is withheld from it (subscription-events.ts).
  */
-export async function onSubscriptionDeleted(db: SupabaseClient, sub: Record<string, unknown>): Promise<boolean> {
-  const clientId = await clientOfSubscription(db, sub);
-  if (clientId === false) return false;
-  if (!clientId) return true;
+export async function onSubscriptionDeleted(db: SupabaseClient, sub: Record<string, unknown>, at: number = Math.floor(Date.now() / 1000)): Promise<boolean> {
+  const client = await clientOfSubscription(db, sub);
+  if (client === false) return false;
+  if (!client) return true;
+  if (!(await endClient(db, client.id, sub))) return false;
+  return recordPayment(db, client, String(sub.id), at, (row) => ({ ...afterSubscription(row, { ...sub, status: "canceled" }, at), cancel: false }), null);
+}
+
+/** The end of a subscription, for .deleted and an .updated that says canceled: false only when Stripe should retry. */
+async function endClient(db: SupabaseClient, clientId: string, sub: Record<string, unknown>): Promise<boolean> {
   const { data: ended, error } = await db
     .from("client_domains")
     .update({ status: "ended" })
@@ -395,8 +399,10 @@ export async function onSubscriptionDeleted(db: SupabaseClient, sub: Record<stri
  */
 export async function onTrialWillEnd(db: SupabaseClient, sub: Record<string, unknown>): Promise<boolean> {
   if (!trialStillRunning(sub)) return true;
-  const clientId = await clientOfSubscription(db, sub);
-  if (clientId === false) return false;
-  if (!clientId) return true;
+  const client = await clientOfSubscription(db, sub);
+  if (client === false) return false;
+  // An email goes only to a client an order row ties to the subscription, never one guessed from its scan (9 Oct 2026, review of 2c6dc99).
+  if (!client?.exact) return true;
+  const clientId = client.id;
   return mailTrialEnding(db, lifecycleIo(), clientId);
 }

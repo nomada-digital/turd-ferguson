@@ -180,7 +180,10 @@ test("clientsFor applies the scope, on Supabase and on the fixture", () => {
   assert.ok(body.length > 200, "clientsFor is gone from member.ts");
   const at = (s: string) => body.indexOf(s);
   assert.ok(at('.from("dashboard_members")') >= 0 && at("readScopes(db, mine.map((m) => m.id))") > at('.from("dashboard_members")'), "clientsFor reads the members' scope");
-  assert.ok(at("return visibleClients(mine, scopes.of,") > at("readScopes("), "clientsFor returns only what visibleClients lets through");
+  // 9 Oct 2026 (merge of wave 2 packages 2 and 3): the scoped list is held in `clients` and returned through
+  // BL-2's payment read, which only adds the banner's columns to the clients visibleClients let through.
+  assert.ok(at("const clients = visibleClients(mine, scopes.of,") > at("readScopes("), "clientsFor keeps only what visibleClients lets through");
+  assert.ok(at("return withPayment(clients,") > at("const clients = visibleClients(mine, scopes.of,"), "clientsFor returns the scoped list, with payment state added and nothing else");
   const repo = code(readFileSync(join(ROOT, "src/lib/tracking/repo.ts"), "utf8"));
   assert.match(repo, /async clientsFor\(email\) \{\s*return fixtureClients\(fixture\(\), email\);/, "the fixture's clientsFor applies the scope");
 });

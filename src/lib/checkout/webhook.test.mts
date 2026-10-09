@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { checkoutRequest } from "./session.ts";
-import { clustersToMake, completedOrder, HANDLED_EVENTS, handleWebhook, orderEmailText, orderRow, packsOn, signStripePayload, signupResume, subscriptionScanToken, trialEndsAtAfter, trialStillRunning, verifyStripeSignature, type WebhookDeps } from "./webhook.ts";
+import { clustersToMake, completedOrder, eventTime, HANDLED_EVENTS, handleWebhook, orderEmailText, orderRow, packsOn, signStripePayload, signupResume, subscriptionScanToken, trialEndsAtAfter, trialStillRunning, verifyStripeSignature, type WebhookDeps } from "./webhook.ts";
+import { invoiceSubscription } from "./payment.ts";
 
 /**
  * BRIEF-3 C4 (30 Sep 2026): the webhook's rules against recorded fixtures.
@@ -34,6 +35,13 @@ const updated = {
 };
 const deleted = { id: "evt_fixture_deleted", type: "customer.subscription.deleted", data: { object: { id: "sub_fixture", metadata: { scan_token: TOKEN } } } };
 const trialWillEnd = { id: "evt_fixture_trial_will_end", type: "customer.subscription.trial_will_end", data: { object: { id: "sub_fixture", status: "trialing", trial_end: NOW + 3 * 86_400, metadata: { scan_token: TOKEN } } } };
+// BL-2 (9 Oct 2026): a renewal's failed charge, in API 2025-03-31's shape (the subscription under parent).
+const paymentFailed = {
+  id: "evt_fixture_payment_failed",
+  type: "invoice.payment_failed",
+  created: NOW - 60,
+  data: { object: { id: "in_fixture", billing_reason: "subscription_cycle", next_payment_attempt: NOW + 3 * 86_400, parent: { type: "subscription_details", subscription_details: { subscription: "sub_fixture", metadata: { scan_token: TOKEN } } } } },
+};
 
 function deps(seen = new Set<string>()) {
   const calls: string[] = [];
@@ -49,9 +57,10 @@ function deps(seen = new Set<string>()) {
       seen.delete(id);
     },
     completed: async (o) => (calls.push(`completed ${o.email} ${o.scanToken}`), true),
-    updated: async (s) => (calls.push(`updated ${packsOn(s)}`), true),
-    deleted: async (s) => (calls.push(`deleted ${subscriptionScanToken(s)}`), true),
+    updated: async (s, _p, at) => (calls.push(`updated ${packsOn(s)} at ${at}`), true),
+    deleted: async (s, at) => (calls.push(`deleted ${subscriptionScanToken(s)} at ${at}`), true),
     trialWillEnd: async (s) => (calls.push(`trial_will_end ${subscriptionScanToken(s)}`), true),
+    paymentFailed: async (i, at) => (calls.push(`payment_failed ${invoiceSubscription(i)?.id} at ${at}`), true),
   };
   return { d, calls, seen };
 }
@@ -95,16 +104,34 @@ test("each handled event reaches its handler, with the fixture's values", async 
   await post(updated, d);
   await post(deleted, d);
   await post(trialWillEnd, d);
+  await post(paymentFailed, d);
+  // The fixtures but paymentFailed carry no created time, so they are dated when they arrive (NOW).
   assert.deepEqual(calls, [
     "record evt_fixture_completed",
     `completed owner@example.com ${TOKEN}`,
     "record evt_fixture_updated",
-    "updated 2",
+    `updated 2 at ${NOW}`,
     "record evt_fixture_deleted",
-    `deleted ${TOKEN}`,
+    `deleted ${TOKEN} at ${NOW}`,
     "record evt_fixture_trial_will_end",
     `trial_will_end ${TOKEN}`,
+    "record evt_fixture_payment_failed",
+    `payment_failed sub_fixture at ${NOW - 60}`,
   ]);
+});
+
+/**
+ * BL-2 (9 Oct 2026): the payment writes are ordered by when Stripe made each
+ * event (payment.ts), so the time handed on is Stripe's own `created`, and
+ * the arrival time only when an event has none.
+ */
+test("the event's created time reaches the subscription and invoice handlers, and arrival time stands in for a missing one", async () => {
+  assert.equal(eventTime({ created: NOW - 5 }, NOW), NOW - 5);
+  for (const bad of [undefined, null, "1790000000", 0, -1, 1.5]) assert.equal(eventTime({ created: bad }, NOW), NOW, `created ${String(bad)}`);
+  const { d, calls } = deps();
+  await post({ ...updated, id: "evt_dated_updated", created: NOW - 120 }, d);
+  await post({ ...deleted, id: "evt_dated_deleted", created: NOW - 30 }, d);
+  assert.deepEqual(calls.filter((c) => !c.startsWith("record")), [`updated 2 at ${NOW - 120}`, `deleted ${TOKEN} at ${NOW - 30}`]);
 });
 
 /**
@@ -114,7 +141,10 @@ test("each handled event reaches its handler, with the fixture's values", async 
  * subscription still trialing - Stripe also sends it when a trial is ended early.
  */
 test("trial_will_end is handled, and only for a subscription still in its trial", () => {
-  assert.deepEqual([...HANDLED_EVENTS], ["checkout.session.completed", "customer.subscription.updated", "customer.subscription.deleted", "customer.subscription.trial_will_end"]);
+  // invoice.payment_failed is the fifth, from 9 Oct 2026 (BL-2): each failed attempt's retry date and invoice page
+  // for the owner's past-due banner (payment.ts). Like trial_will_end, Stripe posts it only once the endpoint is
+  // subscribed to it - Danny's step.
+  assert.deepEqual([...HANDLED_EVENTS], ["checkout.session.completed", "customer.subscription.updated", "customer.subscription.deleted", "customer.subscription.trial_will_end", "invoice.payment_failed"]);
   const nowMs = NOW * 1000;
   assert.equal(trialStillRunning(trialWillEnd.data.object, nowMs), true);
   assert.equal(trialStillRunning({ status: "trialing" }, nowMs), true, "no trial_end on the payload: Stripe's word that it is trialing stands");

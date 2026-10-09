@@ -28,7 +28,26 @@ export function fixtureMode(env: Record<string, string | undefined> = process.en
 }
 
 export type Fixture = {
-  client: { id: string; slug: string; brand: string; domain: string; market: string; tier: string; started_on: string; question_limit: number; keyword_limit: number; cluster_limit: number; status?: string; trial_ends_at?: string | null; trial_cancelled_at?: string | null };
+  client: {
+    id: string;
+    slug: string;
+    brand: string;
+    domain: string;
+    market: string;
+    tier: string;
+    started_on: string;
+    question_limit: number;
+    keyword_limit: number;
+    cluster_limit: number;
+    status?: string;
+    trial_ends_at?: string | null;
+    trial_cancelled_at?: string | null;
+    /** BL-2 (9 Oct 2026): the payment state the webhook records; only the past-due and unpaid states set it. */
+    payment_status?: string | null;
+    payment_retry_at?: string | null;
+    payment_invoice_url?: string | null;
+    payment_ended_at?: string | null;
+  };
   member: { email: string; role: string };
   today: Day;
   data: OverviewData;
@@ -104,7 +123,7 @@ export function fixtureUnreadable(env: Record<string, string | undefined> = proc
  * swept - the default names 5 brands, cites 6 pages and has 6 placements.
  */
 /** Every TRACKING_FIXTURE_STATE, unset being `default`. Anything else serves the default. */
-export const FIXTURE_STATES = ["default", "signup", "signup-typed", "new", "young", "partial", "failed", "unreadable", "stopped", "ungrouped", "pilot-mixed", "uncited", "long", "trial", "trial-ending", "trial-cancelled", "ended", "brands-unread", "two-clients"] as const;
+export const FIXTURE_STATES = ["default", "signup", "signup-typed", "new", "young", "partial", "failed", "unreadable", "stopped", "ungrouped", "pilot-mixed", "uncited", "long", "trial", "trial-ending", "trial-cancelled", "ended", "brands-unread", "two-clients", "past-due", "unpaid"] as const;
 
 /**
  * AG-1 (audit security-2, 9 Oct 2026; also what M7's Home needs): an account
@@ -190,6 +209,23 @@ function trialState(f: Fixture, state: string, now: number): Fixture {
   return { ...f, client: { ...f.client, trial_ends_at: ends, trial_cancelled_at: state === "trial-cancelled" ? at(-1) : null } };
 }
 
+/**
+ * BL-2 (9 Oct 2026): a failed payment, as the Stripe webhook records it
+ * (lib/checkout/payment.ts). `past-due` is the first failure: Stripe tries
+ * the card again in three days, and the invoice has its own page - a made-up
+ * URL of Stripe's shape, which goes nowhere. `unpaid` is the end of the
+ * retries: the client ended yesterday because Stripe stopped charging. The
+ * times are real time, as the trial's are, because the banner compares them
+ * with the clock.
+ */
+export const FIXTURE_INVOICE_URL = "https://invoice.stripe.com/i/acct_fixture/test_fixture_invoice";
+
+function paymentState(f: Fixture, state: "past-due" | "unpaid", now: number): Fixture {
+  const at = (days: number) => new Date(Math.floor((now + days * 86_400_000) / 60_000) * 60_000).toISOString();
+  if (state === "unpaid") return { ...f, client: { ...f.client, status: "ended", payment_status: "unpaid", payment_retry_at: null, payment_invoice_url: FIXTURE_INVOICE_URL, payment_ended_at: at(-1) } };
+  return { ...f, client: { ...f.client, payment_status: "past_due", payment_retry_at: at(3), payment_invoice_url: FIXTURE_INVOICE_URL, payment_ended_at: null } };
+}
+
 const LONG_RIVALS = 18;
 const LONG_PAGES = 16;
 const LONG_PLACEMENTS = 12;
@@ -250,6 +286,7 @@ export function fixtureState(f: Fixture, env: Record<string, string | undefined>
   if (env.TRACKING_FIXTURE_STATE === "brands-unread") return brandsUnread(as);
   const st = env.TRACKING_FIXTURE_STATE ?? "";
   if (st === "trial" || st === "trial-ending" || st === "trial-cancelled" || st === "ended") return trialState(as, st, Date.now());
+  if (st === "past-due" || st === "unpaid") return paymentState(as, st, Date.now());
   if (env.TRACKING_FIXTURE_STATE !== "ungrouped") return as;
   return { ...as, placements: [], data: { ...as.data, clusters: [], questions: as.data.questions.map((q) => ({ ...q, cluster_id: null })) } };
 }
