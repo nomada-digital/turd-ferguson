@@ -1,3 +1,5 @@
+import { APP_PREFIX } from "../app-host.ts";
+
 /**
  * Dashboard usage events - BRIEF-2 T10 (R98, 30 Sep 2026). The UX loop's
  * signal: which /app features are used, recorded in `dashboard_events` with no
@@ -80,7 +82,7 @@ export function usagePath(path: unknown): string | null {
  * app host to the unprefixed path, so no client slug there is "app".
  */
 export function dashPath(path: string): string {
-  return path === "/app" || path.startsWith("/app/") ? path : `/app${path === "/" ? "" : path}`;
+  return path === APP_PREFIX || path.startsWith(`${APP_PREFIX}/`) ? path : `${APP_PREFIX}${path === "/" ? "" : path}`;
 }
 
 /** The client slug a dashboard path is under, or null. */
