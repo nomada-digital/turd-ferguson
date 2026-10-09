@@ -43,10 +43,16 @@ const FOR: [string, string][] = [
   ["PR agencies", "/pr-agencies"],
 ];
 
+/**
+ * Help (MK-2, 9 Oct 2026) sits beside Contact: the help centre is where a
+ * client looks before writing, and the footer is on every page that is not
+ * the dashboard. The header's links are Danny's (R29, R63), so it is not there.
+ */
 const COMPANY: [string, string][] = [
   ["About", "/about"],
   ["Evidence", "/case-studies"],
   ["Blog", "/blog"],
+  ["Help", "/help"],
   ["Contact", "/contact"],
 ];
 

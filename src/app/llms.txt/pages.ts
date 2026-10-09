@@ -24,6 +24,14 @@ import { metadata as llmChecker } from "@/app/llm-visibility-checker/page";
 import { metadata as legal } from "@/app/legal/page";
 import { metadata as about } from "@/app/about/page";
 import { metadata as contact } from "@/app/contact/page";
+import { metadata as help } from "@/app/help/page";
+import { metadata as helpStart } from "@/app/help/getting-started/page";
+import { metadata as helpClusters } from "@/app/help/clusters/page";
+import { metadata as helpCheck } from "@/app/help/daily-check/page";
+import { metadata as helpDashboard } from "@/app/help/dashboard/page";
+import { metadata as helpTeam } from "@/app/help/team/page";
+import { metadata as helpTrial } from "@/app/help/trial-and-cancelling/page";
+import { metadata as helpBilling } from "@/app/help/billing/page";
 
 /**
  * What /llms.txt lists: the pages `sitemap.ts` offers, grouped, each with the
@@ -78,6 +86,20 @@ export const SECTIONS: { heading: string; pages: LlmsPage[] }[] = [
     pages: [
       { path: "/llm-visibility-checker", meta: llmChecker },
       { path: "/coverage-check", meta: coverageCheck },
+    ],
+  },
+  {
+    // MK-2, 9 Oct 2026: the help centre for alwaystracked clients.
+    heading: "Help",
+    pages: [
+      { path: "/help", meta: help },
+      { path: "/help/getting-started", meta: helpStart },
+      { path: "/help/clusters", meta: helpClusters },
+      { path: "/help/daily-check", meta: helpCheck },
+      { path: "/help/dashboard", meta: helpDashboard },
+      { path: "/help/team", meta: helpTeam },
+      { path: "/help/trial-and-cancelling", meta: helpTrial },
+      { path: "/help/billing", meta: helpBilling },
     ],
   },
   {
