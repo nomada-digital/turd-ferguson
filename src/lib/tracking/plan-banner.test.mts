@@ -53,7 +53,7 @@ test("ended for payment says why; ended any other way reads as before", () => {
  * Review of 355d223 (9 Oct 2026): an unpaid end withheld the invoice it still
  * held, and sent the owner to us for something paying fixes. Stripe moves an
  * unpaid subscription to active when the invoice is paid
- * (docs.stripe.com/billing/subscriptions/overview, read 9 Oct 2026), and
+ * (Stripe's docs, /billing/subscriptions/overview, read 9 Oct 2026), and
  * afterSubscription then restores the client.
  */
 test("an unpaid end gives the owner the invoice to pay, for a week; other payment ends still ask us", () => {
@@ -67,7 +67,7 @@ test("an unpaid end gives the owner the invoice to pay, for a week; other paymen
   for (const payment_status of ["paused", "incomplete_expired"]) assert.equal(draw({ ...ended, payment_status })!.link?.label, "Ask us to restart it", payment_status);
   // Cancelled after it stopped (payment.ts clears payment_ended_at): final, as before.
   assert.equal(draw({ ...ended, payment_status: "canceled", payment_ended_at: null })!.link?.label, "Ask us to restart it");
-  // Stripe's links expire (docs.stripe.com/invoicing/hosted-invoice-page): after a week, Ask us.
+  // Stripe's links expire (Stripe's docs, /invoicing/hosted-invoice-page): after a week, Ask us.
   const day = 86_400_000;
   assert.equal(draw({ ...ended, payment_ended_at: new Date(NOW - (UNPAID_INVOICE_DAYS * day - 60_000)).toISOString() })!.link?.label, "Pay the invoice");
   assert.equal(draw({ ...ended, payment_ended_at: new Date(NOW - UNPAID_INVOICE_DAYS * day).toISOString() })!.link?.label, "Ask us to restart it");

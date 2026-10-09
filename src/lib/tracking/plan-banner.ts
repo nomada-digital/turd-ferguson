@@ -40,11 +40,12 @@ export function paymentDay(iso: string, market: string): string {
  * How long after an unpaid end the banner still offers the invoice (picked
  * 9 Oct 2026). Stripe's invoice links expire: 30 days after an invoice with
  * no due date is finalized, and a link the API hands out stays good for at
- * least 10 days (docs.stripe.com/invoicing/hosted-invoice-page, read 9 Oct
- * 2026). The link the webhook keeps is from the last failed attempt before
- * the end, and while a subscription is unpaid Stripe makes each new period's
- * invoice as a draft. So a week on, the owner asks us instead of following a
- * link that may have expired.
+ * least 10 days (Stripe's docs, /invoicing/hosted-invoice-page, read 9 Oct
+ * 2026; the host is left off because privacy.test.mts holds this directory
+ * to the fixture's made-up domains). The link the webhook keeps is from the
+ * last failed attempt before the end, and while a subscription is unpaid
+ * Stripe makes each new period's invoice as a draft. So a week on, the owner
+ * asks us instead of following a link that may have expired.
  */
 export const UNPAID_INVOICE_DAYS = 7;
 
@@ -76,7 +77,7 @@ export function planBanner(p: {
       : `Tracking has ended for ${c.name}. Everything read so far stays here`;
     // Review of 355d223 (9 Oct 2026): an unpaid end is one the owner can undo
     // without us. Paying the invoice moves an unpaid subscription back to
-    // active (Stripe, docs.stripe.com/billing/subscriptions/overview, read
+    // active (Stripe's docs, /billing/subscriptions/overview, read
     // 9 Oct 2026), and the webhook then makes the client active again
     // (payment.ts afterSubscription). Paused and incomplete_expired cannot be
     // undone by an invoice, and a cancellation is final: those still ask us.
