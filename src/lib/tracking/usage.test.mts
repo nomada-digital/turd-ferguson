@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { USAGE_EVENTS, readUsage, usagePath, usageProps, usageSlug, weekOf, weeklyUsage } from "./usage.ts";
+import { USAGE_EVENTS, dashPath, readUsage, usagePath, usageProps, usageSlug, weekOf, weeklyUsage } from "./usage.ts";
 
 test("the event list is the brief's sixteen, T10 (30 Sep 2026)", () => {
   assert.equal(USAGE_EVENTS.length, 16);
@@ -94,4 +94,15 @@ test("every usage event has a sender, bar the recorded exemption", async () => {
   const missing = USAGE_EVENTS.filter((e) => !sent(e) && !EXEMPT[e]);
   assert.deepEqual(missing, []);
   for (const e of Object.keys(EXEMPT)) assert.ok(!sent(e), `${e} now has a sender: drop its exemption`);
+});
+
+test("the app host's unprefixed paths are read in their /app form (M1, 9 Oct 2026)", () => {
+  assert.equal(dashPath("/tallyroo/clusters"), "/app/tallyroo/clusters");
+  assert.equal(dashPath("/tallyroo"), "/app/tallyroo");
+  assert.equal(dashPath("/app/tallyroo/reports"), "/app/tallyroo/reports", "the main host's form is left as it is");
+  assert.equal(dashPath("/app"), "/app");
+  assert.equal(dashPath("/"), "/app");
+  assert.equal(usageSlug(dashPath("/tallyroo/reports")), "tallyroo");
+  assert.equal(usagePath(dashPath("/tallyroo/reports")), "/reports");
+  assert.equal(usageSlug(dashPath("/login")), null, "the app host's login is not a client");
 });

@@ -25,6 +25,7 @@ type Page = {
   waitForURL(url: string | RegExp | ((u: URL) => boolean), o?: object): Promise<void>;
   evaluate<R>(fn: () => R | Promise<R>): Promise<R>;
   $$eval<R>(sel: string, fn: (els: Element[]) => R): Promise<R>;
+  waitForRequest(fn: (r: { url(): string; method(): string; postData(): string | null }) => boolean, o?: object): Promise<{ url(): string; postData(): string | null }>;
 };
 type Context = { newPage(): Promise<Page>; close(): Promise<void> };
 type Browser = { newContext(o: object): Promise<Context>; close(): Promise<void> };
@@ -225,5 +226,17 @@ test("Stop on the app host, clicked in Chromium, lands back with its toast and n
   assert.equal(u.host, `app.localhost:${PORT}`);
   assert.equal(u.pathname, "/tallyroo/clusters");
   assert.deepEqual(refused, []);
+  await ctx.close();
+});
+
+test("the usage beacon records on the app host, in the /app form the server reads", async () => {
+  const { ctx, page } = await open();
+  const posted = page.waitForRequest((r) => r.method() === "POST" && new URL(r.url()).pathname === "/api/app/tallyroo/event", { timeout: 15_000 });
+  await page.goto(`${APP}/tallyroo/reports`, { waitUntil: "networkidle" });
+  const req = await posted;
+  assert.equal(new URL(req.url()).host, `app.localhost:${PORT}`);
+  const body = JSON.parse(req.postData() ?? "{}") as { event?: string; path?: string };
+  assert.equal(body.event, "view");
+  assert.equal(body.path, "/app/tallyroo/reports");
   await ctx.close();
 });

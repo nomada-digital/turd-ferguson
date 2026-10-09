@@ -70,6 +70,19 @@ export function usagePath(path: unknown): string | null {
   return `/${rest.join("/")}`;
 }
 
+/**
+ * A dashboard path in its `/app` form, whichever host it was read on (9 Oct
+ * 2026). On the dashboard's own host (APP_HOST, M1) the browser's path drops
+ * the prefix - `/tallyroo/clusters` - and usageSlug and usagePath read only
+ * the `/app` form, so every event there was silently dropped. The beacon is
+ * mounted only in the `/app` layout, so a path without the prefix is always
+ * the app host's form of a dashboard path; the proxy sends `/app/*` on the
+ * app host to the unprefixed path, so no client slug there is "app".
+ */
+export function dashPath(path: string): string {
+  return path === "/app" || path.startsWith("/app/") ? path : `/app${path === "/" ? "" : path}`;
+}
+
 /** The client slug a dashboard path is under, or null. */
 export function usageSlug(path: string): string | null {
   const m = /^\/app\/([A-Za-z0-9-]{1,64})(?:[/?#]|$)/.exec(path);

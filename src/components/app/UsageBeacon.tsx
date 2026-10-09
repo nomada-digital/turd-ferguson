@@ -3,7 +3,7 @@
 import { usePathname } from "next/navigation";
 import { useEffect } from "react";
 
-import { PROP_KEYS, isUsageEvent, usageSlug } from "@/lib/tracking/usage";
+import { PROP_KEYS, dashPath, isUsageEvent, usageSlug } from "@/lib/tracking/usage";
 
 /**
  * Sends the dashboard's usage events (BRIEF-2 T10, R98, 30 Sep 2026) to
@@ -21,7 +21,7 @@ import { PROP_KEYS, isUsageEvent, usageSlug } from "@/lib/tracking/usage";
  */
 function send(slug: string, event: string, props: Record<string, string> = {}) {
   if (!isUsageEvent(event)) return;
-  const body = JSON.stringify({ event, path: window.location.pathname, props });
+  const body = JSON.stringify({ event, path: dashPath(window.location.pathname), props });
   fetch(`/api/app/${encodeURIComponent(slug)}/event`, { method: "POST", body, keepalive: true, headers: { "content-type": "application/json" } }).catch(() => {});
 }
 
@@ -36,7 +36,8 @@ function propsOf(el: Element): Record<string, string> {
 
 export function UsageBeacon() {
   const pathname = usePathname();
-  const slug = pathname ? usageSlug(pathname) : null;
+  // dashPath: on the app host the path has no /app prefix (M1), and the slug and route are read from the /app form.
+  const slug = pathname ? usageSlug(dashPath(pathname)) : null;
 
   useEffect(() => {
     if (!slug) return;
