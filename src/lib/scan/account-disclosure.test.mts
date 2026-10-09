@@ -181,8 +181,10 @@ const RECORDED: Record<string, string> = {
   // 8 Oct 2026 (audit copy-4, package E): slug and trial_ends_at joined, for
   // plan_ended's Billing link and its trial version; the id is still used only
   // to find the owners, server-side.
+  // 9 Oct 2026 (BL-2, review of 2c6dc99): the select is endClient's, which a
+  // customer.subscription.updated saying canceled now reaches too. Same use.
   "src/lib/checkout/signup.ts :: account_id, domain, tier, slug, trial_ends_at":
-    "the Stripe webhook's subscription-deleted handler finds the ended client's owners to mail; the webhook answers Stripe with a status only, and no visitor makes the request.",
+    "the Stripe webhook's endClient (subscription deleted, or updated to canceled) finds the ended client's owners to mail; the webhook answers Stripe with a status only, and no visitor makes the request.",
   // 8 Oct 2026 (audit activation-1, package E): the trial and setup emails.
   // Server-only callers, no visitor request: the CRON_SECRET-gated cron and
   // the signed Stripe webhook's trial_will_end. The id finds the account's

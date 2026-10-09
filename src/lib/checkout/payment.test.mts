@@ -202,13 +202,69 @@ test("census: the webhook writes payment state only over an older event, only to
   // Deletion still ends the client (and mails plan_ended) before the canceled status is recorded.
   const del = signup.slice(signup.indexOf("export async function onSubscriptionDeleted("), signup.indexOf("async function endClient("));
   assert.ok(del.indexOf("endClient(db, client.id, sub)") > 0 && del.indexOf("endClient(db, client.id, sub)") < del.indexOf("recordPayment("), "onSubscriptionDeleted ends the client first");
-  // Never a client email from the payment step: the failed-payment emails are Stripe's, Danny's setting (LB4).
-  assert.ok(!/\b(send|mail)[A-Z]\w*\(/.test(events.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, "")), "subscription-events.ts sends mail");
   const member = readFileSync(new URL("../tracking/member.ts", import.meta.url), "utf8");
   assert.ok(member.includes(".select(PAYMENT_BANNER_READ)"), "the banner's columns are not read on their own");
   assert.ok(member.includes("withPayment(clients, pErr ? null :"), "a failed payment read is not handed on as null");
   const main = member.match(/\.select\("id, account_id[^"]*"\)/)?.[0] ?? "";
   assert.ok(main && !main.includes("payment_"), "the clients read names a payment column, so its failure would hold back the dashboard");
+});
+
+/**
+ * The mail a payment handler can reach (9 Oct 2026, review of 2c6dc99). The
+ * census this replaces read one slice of signup.ts for a send call and passed
+ * while recordPayment, inside the slice, cancelled through endClient, outside
+ * it, which sends plan_ended. So this one follows the calls: from each
+ * handler that takes a payment step, through every function of signup.ts,
+ * subscription-events.ts and payment.ts it calls - an arrow handed on
+ * included - and lists every send it meets.
+ */
+function functionsOf(text: string): Map<string, string> {
+  // Doc comments and whole-line comments only, so a URL in a string is not cut.
+  const code = text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/[^\n]*$/gm, "");
+  const heads = [...code.matchAll(/^(?:export )?(?:async )?function (\w+)[<(]/gm)];
+  return new Map(heads.map((h, i) => [h[1]!, code.slice(h.index, heads[i + 1]?.index ?? code.length)]));
+}
+
+test("census: the only mail a payment handler can reach is endClient's plan_ended, behind its flag", () => {
+  const files = { signup: src("./signup.ts"), events: src("./subscription-events.ts"), payment: src("./payment.ts") };
+  const fns = new Map<string, string>();
+  for (const [file, text] of Object.entries(files)) {
+    for (const [name, body] of functionsOf(text)) {
+      assert.ok(!fns.has(name), `${name} is defined twice (${file}), so the walk cannot tell which is called`);
+      fns.set(name, body);
+    }
+  }
+  const sends = new Map<string, string[]>();
+  const reached = new Set<string>();
+  const queue = ["onSubscriptionUpdated", "onSubscriptionDeleted", "onInvoicePaymentFailed"];
+  while (queue.length) {
+    const name = queue.shift()!;
+    if (reached.has(name)) continue;
+    reached.add(name);
+    const body = fns.get(name);
+    assert.ok(body, `no function ${name}`);
+    for (const m of body.slice(body.indexOf("(")).matchAll(/\b(\w+)\(/g)) {
+      if (fns.has(m[1]!) && m[1] !== name) queue.push(m[1]!);
+      if (/^(send|mail)[A-Z]/.test(m[1]!)) sends.set(name, [...(sends.get(name) ?? []), m[1]!]);
+    }
+  }
+  // The floor: the walk crosses all three files and reaches the end a cancellation takes.
+  for (const f of ["clientOfSubscription", "subscriptionClient", "recordPayment", "paymentRow", "endClient", "afterSubscription", "afterFailedInvoice"]) assert.ok(reached.has(f), `the walk no longer reaches ${f}`);
+  assert.ok(reached.size >= 10, `only ${reached.size} functions reached`);
+  assert.deepEqual(Object.fromEntries(sends), { endClient: ["sendLifecycle"] }, "a payment handler reaches a send other than endClient's plan_ended");
+  // That send is plan_ended, after its flag (off until Danny approves it, R159), to the ended client's live owners.
+  const end = fns.get("endClient")!;
+  assert.match(end, /if \(row && \(await lifecycleOn\(db, "plan_ended"\)\)\) \{[\s\S]*const mail = planEnded\([\s\S]*sendLifecycle\(\{ memberEmail: m\.email as string, mail \}\)/);
+  // Only a call that ended the client sends: a second end (.updated canceled, then .deleted) finds no row.
+  assert.ok(end.includes('.neq("status", "ended")'), "endClient ends a client already ended, so plan_ended could go twice");
+  // A cancellation's end is endClient or nothing, wherever recordPayment is called.
+  const ends = [...Object.values(files).join("\n").matchAll(/recordPayment\(db, client, [^\n]*?, (null|\(\) => endClient\(db, client\.id, sub\))\);/g)].map((m) => m[1]);
+  assert.deepEqual(ends.sort(), ["() => endClient(db, client.id, sub)", "null", "null"]);
+  assert.equal([...Object.values(files).join("\n").matchAll(/recordPayment\(db, /g)].length, 3, "a recordPayment call the line above does not read");
+  // Every import from a mail module is a send this walk can see by name, or the flag.
+  for (const m of files.signup.matchAll(/^import \{([^}]*)\} from "[^"]*-mail";$/gm)) {
+    for (const id of m[1]!.split(",").map((x) => x.trim()).filter(Boolean)) assert.ok(/^(send|mail)[A-Z]/.test(id) || id === "lifecycleOn", `${id} comes from a mail module under a name the walk does not treat as a send`);
+  }
 });
 
 test("the migration adds every column the webhook and the dashboard name, additively", () => {

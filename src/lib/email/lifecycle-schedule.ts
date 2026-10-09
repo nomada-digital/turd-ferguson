@@ -127,7 +127,8 @@ export function endedInTrial(p: { trialEndsAt: string | null; endedAt: number | 
 const secs = (v: unknown) => (typeof v === "number" ? v * 1000 : null);
 
 /**
- * Which plan_ended a customer.subscription.deleted gets: the trial's when
+ * Which plan_ended a customer.subscription.deleted (or, from 9 Oct 2026,
+ * an .updated saying canceled: BL-2) gets: the trial's when
  * the subscription ended inside its trial. The trial's end is Stripe's own
  * trial_end on the deleted subscription, else client_domains.trial_ends_at
  * (8 Oct 2026, review of 7e133a7). The column alone was not enough: signup

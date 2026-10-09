@@ -315,8 +315,11 @@ export function invite(d: { tier: TierKey; domain: string; link: string; inviter
 }
 
 /**
- * The plan has ended (customer.subscription.deleted). Two corrections
- * (8 Oct 2026, audit copy-4):
+ * The plan has ended (customer.subscription.deleted; from 9 Oct 2026, BL-2,
+ * also customer.subscription.updated with status canceled - both through
+ * signup.ts endClient, which sends it only when its own update ended the
+ * client, so once whichever lands first). Two corrections (8 Oct 2026, audit
+ * copy-4):
  *
  * - a trial that ended without a charge says so, with no receipt line - there
  *   is no receipt - and says restarting is a paid plan, because noTrialLine

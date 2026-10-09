@@ -16,7 +16,9 @@ import type { Rendered } from "@/lib/email/lifecycle";
  *
  * - the signed Stripe webhook (checkout/signup.ts): the welcome, or
  *   trial_started for a trial order, to the owner signup just stored;
- *   plan_ended to the ended client's live owners; and trial_ending on
+ *   plan_ended to the ended client's live owners, on
+ *   customer.subscription.deleted or (9 Oct 2026, BL-2) an .updated whose
+ *   status is canceled, once whichever lands first; and trial_ending on
  *   customer.subscription.trial_will_end, through lifecycle-sweep.ts;
  * - the tracking runner (tracking/runner.ts), started only by the cron's
  *   signed dispatch: first_reading, after the client's first finished run;
