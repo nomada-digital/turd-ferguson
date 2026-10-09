@@ -43,12 +43,13 @@ export async function POST(req: Request, ctx: { params: Promise<{ client: string
   // ON-1: five drafted prompts, or null for the one free slot's text.
   const drafts = readDrafts((k) => form?.get(k) ?? null);
   const setup = sp.get("to") === "setup";
-  const backDrafts = (ok: boolean, message = "") =>
-    NextResponse.redirect(dashUrl(req, setup ? draftsReturn(slug, f.id, ok, slotWhyOf(message)) : stopReturn(slug, { ...f, back: { ...f.back, open: f.id } }, ok ? "added" : "refused", undefined, slotWhyOf(message))), 303);
+  // ON-1 review (9 Oct 2026): a text refusal names its field (0-4), never its text, so the card marks that one.
+  const backDrafts = (ok: boolean, message = "", at: number | null = null) =>
+    NextResponse.redirect(dashUrl(req, setup ? draftsReturn(slug, f.id, ok, slotWhyOf(message), at) : stopReturn(slug, { ...f, back: { ...f.back, open: f.id } }, ok ? "added" : "refused", undefined, slotWhyOf(message))), 303);
   if (drafts && fixtureMode()) {
     const r = writeFixture((fx) => fixtureFillDrafts(fx, { clusterId: f.id, prompts: drafts, today: fx.today, role: fx.member.role }));
     if (r && !r.ok) console.warn(`[app] fixture drafts refused: ${r.message}`);
-    return backDrafts(!!r?.ok, r && !r.ok ? r.message : "");
+    return backDrafts(!!r?.ok, r && !r.ok ? r.message : "", r && !r.ok && "at" in r && typeof r.at === "number" ? r.at : null);
   }
   if (fixtureMode()) {
     // R168: with TRACKING_FIXTURE_WRITE=1 the new prompt is held in memory; otherwise the fixture refuses it.
@@ -65,7 +66,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ client: string
   if (drafts) {
     const d = await fillDrafts(supabaseAdmin(), { clientId: client.id, clusterId: f.id, prompts: drafts, today: trackingDay(), by: email, role: writeRole(client) });
     if (!d.ok) console.warn(`[app] drafted prompts refused: ${d.message}`);
-    return backDrafts(d.ok, d.ok ? "" : d.message);
+    return d.ok ? backDrafts(true) : backDrafts(false, d.message, d.at ?? null);
   }
   const r = await fillSlot(supabaseAdmin(), { clientId: client.id, clusterId: f.id, angle: sp.get("angle"), text, today: trackingDay(), by: email, role: writeRole(client) });
   if (!r.ok) {

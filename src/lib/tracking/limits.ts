@@ -2,6 +2,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { namesSubject } from "../scan/brand-name.ts";
 
+import { PROMPT_TRACKED } from "./prompt-text.ts";
+
 /**
  * alwaystracked's limits, enforced on the server - C2 of
  * docs/tracked-dashboard-2026-09-29/BRIEF-3-clusters.md (Danny, 29 Sep 2026).
@@ -172,6 +174,11 @@ export async function insertPrompts(db: SupabaseClient, clientId: string, cluste
     .from("tracked_questions")
     .insert(rows.map((r) => ({ ...r, client_domain_id: clientId, cluster_id: clusterId })))
     .select("id");
+  // ON-1 review (9 Oct 2026): the room and text reads above are not a lock. Two saves of a cluster's drafts at once -
+  // a double click before the page hydrates, or setup and Clusters in two tabs - both pass them, and one cluster would
+  // be asked ten prompts a day. tracked_questions_cluster_live_text_uniq (20261009040000) refuses the second insert,
+  // and as one statement it refuses all its rows: it is the duplicate refusal, in the slot rule's own words.
+  if (error?.code === "23505") return { ok: false, message: PROMPT_TRACKED };
   if (error) return { ok: false, message: `Could not add the prompts: ${error.message}` };
   return { ok: true, ids: (data ?? []).map((r) => r.id as string) };
 }

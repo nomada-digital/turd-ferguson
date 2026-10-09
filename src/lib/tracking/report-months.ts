@@ -52,7 +52,7 @@ export type MonthFigures = {
 
 /** One month's figures, read exactly as the Overview reads `range` on its default comparison. */
 export function monthFigures(data: OverviewData, range: Range, opts: { startedOn: Day | null; today: Day; engines: readonly string[] }): MonthFigures {
-  const o = overview({ range, compare: "prev", startedOn: opts.startedOn, engines: opts.engines, questions: data.questions, answers: data.answers, serp: data.serp, keywordCount: keywordsIn(data.keywords, range) });
+  const o = overview({ range, compare: "prev", startedOn: opts.startedOn, engines: opts.engines, questions: data.questions, answers: data.answers, serp: data.serp, keywordCount: keywordsIn(data.keywords, range), runs: data.runs });
   const firstWeek = o.compareKind === "start";
   const firstReading = o.compareKind === "first";
   // The Overview's own test for reading by cluster (Overview.tsx clusterInput).

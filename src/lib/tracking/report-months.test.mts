@@ -83,6 +83,12 @@ test("8 Oct 2026 (audit data-10): a young client's month compares with its first
   const early = monthFigures(young.data, { from: "2026-09-01", to: addDays(start, 3) }, { startedOn: start, today: young.today, engines });
   assert.equal(early.lfl?.firstReading, true);
   assert.equal(early.lfl?.firstWeek, false);
+  // Review of ON-3 (9 Oct 2026): a partial or failed first check is never the reading a card compares with.
+  for (const status of ["partial", "failed"]) {
+    const runs = (young.data.runs ?? []).map((r) => (r.run_date === start ? { ...r, status } : r));
+    const card = monthFigures({ ...young.data, runs }, { from: "2026-09-01", to: addDays(start, 3) }, { startedOn: start, today: young.today, engines });
+    assert.equal(card.lfl, null, `${status}: no change against a first check that did not read every engine`);
+  }
   const src = readFileSync(new URL("../../components/app/Reports.tsx", import.meta.url), "utf8");
   // 9 Oct 2026 (ON-3): the line grew a third case, the first reading; the first week's words are unchanged.
   assert.match(src, /f\.lfl\.firstWeek \? " in the first week" : f\.lfl\.firstReading \? " on the first reading" : ""/, "the card says which period it is against");

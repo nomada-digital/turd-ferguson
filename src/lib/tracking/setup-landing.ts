@@ -14,7 +14,7 @@
 export const SETUP_CONFIRMED_EVENT = "setup_confirmed";
 
 import { appPath } from "../app-host.ts";
-import { NO_PROMPT_NO_CHECK, checkTime } from "./check-time.ts";
+import { NO_PROMPT_NO_CHECK, checkAt, checkTime, zoneDay } from "./check-time.ts";
 import { addDays, formatDay } from "./figures.ts";
 
 export const setupPath = (slug: string) => appPath(`/${slug}/setup`);
@@ -122,9 +122,33 @@ export function setupState(c: { started_on: string | null }, rows: readonly { cr
  * (decide.ts shouldTrack), so there is no first check left to promise - or
  * when it is unset. It knows nothing of prompts, so copy goes through setupChecks.
  */
-export function firstCheckWhen(startedOn: string | null, today: string, market: string): string | null {
+export function firstCheckWhen(startedOn: string | null, today: string, market: string, now: number | null = null): string | null {
   if (!startedOn || startedOn <= today) return null;
+  if (now !== null) return checkOn(startedOn, market, now);
   return `${startedOn === addDays(today, 1) ? "tomorrow" : `on ${formatDay(startedOn)}`} at ${checkTime(startedOn, market)}`;
+}
+
+/**
+ * The daily check on `day`, said from `now` in the client's zone (ON-1
+ * review, 9 Oct 2026): "today at 1:00am ET", "tomorrow at 06:00 UK time", "on
+ * 11 Oct at 1:00am ET". The tracking day is London's, so "tomorrow" worked out
+ * from it was a day early for a US client in its evening.
+ */
+export function checkOn(day: string, market: string, now: number): string {
+  const local = zoneDay(checkAt(day), market);
+  const here = zoneDay(now, market);
+  const word = local === here ? "today" : local === addDays(here, 1) ? "tomorrow" : `on ${formatDay(local)}`;
+  return `${word} at ${checkTime(day, market)}`;
+}
+
+/**
+ * When prompts saved now are first asked (ON-1 review): they are added for
+ * the next tracking day (stop.ts stopDay), and a client is checked only from
+ * its start, so the later of the two, said from `now` in the client's zone.
+ */
+export function firstAsked(p: { today: string; startedOn: string | null; market: string; now: number }): string {
+  const added = addDays(p.today, 1);
+  return checkOn(p.startedOn && p.startedOn > added ? p.startedOn : added, p.market, p.now);
 }
 
 /**
@@ -137,8 +161,9 @@ export function firstCheckWhen(startedOn: string | null, today: string, market: 
  * count them. `first` is set only for a first check still to come, for the
  * mail's subject.
  */
-export function setupChecks(c: { startedOn: string | null; today: string; market: string; livePrompts: number }): { first: string | null; line: string } {
+export function setupChecks(c: { startedOn: string | null; today: string; market: string; livePrompts: number; now?: number }): { first: string | null; line: string } {
   if (c.livePrompts < 1) return { first: null, line: NO_PROMPT_NO_CHECK };
-  const first = firstCheckWhen(c.startedOn, c.today, c.market);
+  // `now` (ON-1 review): the first check's day said in the client's zone (checkOn).
+  const first = firstCheckWhen(c.startedOn, c.today, c.market, c.now ?? null);
   return { first, line: first ? `The first check runs ${first}.` : `Checks run every day at ${checkTime(addDays(c.today, 1), c.market)}.` };
 }

@@ -21,7 +21,8 @@ export default function SubmitButton({ children, busy: busyText, style, form }: 
     if (!form) return;
     let held = false;
     const onSubmit = (e: SubmitEvent) => {
-      if (e.submitter !== ref.current) return;
+      // A submit a page check stopped first (DraftsCheck, ON-1 review) never posts, so it is not busy.
+      if (e.submitter !== ref.current || e.defaultPrevented) return;
       if (held) e.preventDefault();
       else {
         held = true;

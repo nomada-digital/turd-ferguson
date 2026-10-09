@@ -89,6 +89,7 @@ export default async function ClientDashboard({
           livePrompts: data.questions.filter((q) => q.stopped_on === null).length,
           members: team.members,
           reportOpened,
+          now: repo.now(),
         })
       : null;
 

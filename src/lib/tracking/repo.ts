@@ -49,6 +49,11 @@ export interface TrackingRepo {
   settings(clientId: string): Promise<SettingsData>;
   /** The tracking day the dashboard treats as today. */
   today(): Day;
+  /**
+   * The moment the dashboard treats as now, epoch ms (ON-1 review, 9 Oct 2026): the clock in production; on the
+   * fixture, noon UTC on its own frozen today, so a check time said from now is the same on every run.
+   */
+  now(): number;
   /** A login link's state, read without spending it (R163); null when the read failed. */
   linkState(token: string): Promise<LinkState | null>;
   /** Whether the client's setup is confirmed (R166); null when the read failed. */
@@ -59,7 +64,7 @@ export interface TrackingRepo {
   reportOpened(clientId: string): Promise<boolean | null>;
 }
 
-const supabaseRepo: TrackingRepo = { sessionEmail, clientsFor, linkState: loadLinkState, setupConfirmed: loadSetupConfirmed, orderKeyword: loadOrderKeyword, reportOpened: loadReportOpened, loadOverview, structure: loadStructure, latestAnswers: loadLatestAnswers, clusterNotes: loadClusterNotes, upgradeContext: loadUpgradeContext, placements: loadPlacements, settings: loadSettings, today: () => trackingDay() };
+const supabaseRepo: TrackingRepo = { sessionEmail, clientsFor, linkState: loadLinkState, setupConfirmed: loadSetupConfirmed, orderKeyword: loadOrderKeyword, reportOpened: loadReportOpened, loadOverview, structure: loadStructure, latestAnswers: loadLatestAnswers, clusterNotes: loadClusterNotes, upgradeContext: loadUpgradeContext, placements: loadPlacements, settings: loadSettings, today: () => trackingDay(), now: () => Date.now() };
 
 /**
  * The fixture as served, and as R168's writes leave it. On globalThis, because
@@ -154,6 +159,9 @@ const fixtureRepo: TrackingRepo = {
   },
   today() {
     return fixture().today;
+  },
+  now() {
+    return Date.parse(`${fixture().today}T12:00:00Z`);
   },
   async linkState(token) {
     return fixtureLinkState(token, fixture().member.email);

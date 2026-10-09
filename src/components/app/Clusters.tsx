@@ -8,17 +8,18 @@ import DraftPrompts from "./DraftPrompts";
 import EngineLogo from "@/components/EngineLogo";
 import { APP_LIMITS } from "@/config/contact";
 import { ADMIN_LIMITS } from "@/lib/tracking/decide";
-import { PROMPT_MIN } from "@/lib/tracking/slot";
+import { PROMPT_MIN, SLOT_WHY, fullLine } from "@/lib/tracking/slot";
 import { CONTACT_URL, PACK_CLUSTERS, PACK_KEYWORDS, PACK_PROMPTS, contactUrlFor } from "@/config/pricing";
 import { T } from "@/config/tokens";
 import { ENGINE_SPECS, type Engine } from "@/lib/scan/engines";
 import { type ClusterCard, type ClusterFilter as Filter, clusterCards, daysOfLine, filterClusters, namedCount, neverCount, pendingBasis, searchPrompts } from "@/lib/tracking/cluster-figures";
 import { checkTime } from "@/lib/tracking/check-time";
-import { type Range, addDays, basis as basisLine, comparisonLabel, daysIn, firstCheckDay, formatDay, resolveComparison } from "@/lib/tracking/figures";
+import { type Range, addDays, basis as basisLine, comparisonLabel, daysIn, firstCheckDay, formatDay, firstReadComplete, resolveComparison } from "@/lib/tracking/figures";
 import { type KeywordCheck, draftPrompts } from "@/lib/tracking/add-cluster";
 import { ANGLES, BRANDED_CHIP, BRANDED_NOTE, PROMPTS_PER_CLUSTER, type Subject, namesBrandIn, refuseEdit } from "@/lib/tracking/limits";
 import type { Compare, OverviewData } from "@/lib/tracking/overview-data";
 import { prefillCard } from "@/lib/tracking/order-keyword";
+import { firstAsked } from "@/lib/tracking/setup-landing";
 import { KEYWORD_FIXED_NOTE } from "@/lib/tracking/rekey";
 import { lostReads, runNote, todayRun } from "@/lib/tracking/run-note";
 import { BULK_ID, type BulkCount } from "@/lib/tracking/stop";
@@ -80,6 +81,7 @@ export default function Clusters({
   range,
   compareMode,
   startedOn,
+  now = null,
   data,
   clusterLimit,
   open,
@@ -109,6 +111,8 @@ export default function Clusters({
   compareMode: Compare;
   /** The client's started_on, the date picker's first pickable day (T5). */
   startedOn?: string | null;
+  /** The moment the page treats as now (repo.now): when drafts saved now are first asked, said in the client's zone (ON-1 review). */
+  now?: number | null;
   data: OverviewData;
   clusterLimit: number;
   open: string | null;
@@ -135,10 +139,14 @@ export default function Clusters({
   // 8 Oct 2026 (audit data-10): the comparison the Overview reads - the first week for a young client.
   // The first week's first day, from started_on and the prompts - the date picker is handed the same day.
   const firstCheck = firstCheckDay(startedOn ?? null, data.questions);
-  const cmp = resolveComparison(range, compareMode, startedOn ?? null, firstCheck);
+  // ON-3 review (9 Oct 2026): a first reading only when its check was complete.
+  const firstComplete = firstReadComplete(data.runs, firstCheck);
+  const cmp = resolveComparison(range, compareMode, startedOn ?? null, firstCheck, firstComplete);
   const before = cmp.range;
   // 9 Oct 2026 (audit copy-2): tomorrow's check time in the client's zone, from the cron (check-time.ts).
   const next = checkTime(addDays(today, 1), market);
+  // ON-1 review (9 Oct 2026): drafts saved now are first asked at the next tracking day's check, said from now in the client's zone.
+  const firstAsk = firstAsked({ today, startedOn: startedOn ?? null, market, now: now ?? Date.parse(`${today}T12:00:00Z`) });
   // Audit data-3 (8 Oct 2026): every partial or failed check in the range, not only the last.
   const partial = runNote(data, range, today);
   const cards = clusterCards({ clusters: data.clusters ?? [], questions: data.questions, keywords: data.keywords, answers: data.answers, serp: data.serp, range, before, today, engines });
@@ -194,7 +202,7 @@ export default function Clusters({
           {partial ? <p style={{ margin: 0, fontSize: "14px", lineHeight: 1.5, color: T.soft, maxWidth: "680px" }}>{partial}</p> : null}
         </div>
         {/* T5 (30 Sep 2026): the server-drawn face opens boards/DatePicker.dc.html; JS off still shows the range. */}
-        <DatePicker range={range} compare={compareMode} today={today} startedOn={startedOn ?? null} firstCheck={firstCheck} grow={false}>
+        <DatePicker range={range} compare={compareMode} today={today} startedOn={startedOn ?? null} firstCheck={firstCheck} firstComplete={firstComplete} grow={false}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={T.ink} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <rect x="3" y="5" width="18" height="16" rx="2" />
             <path d="M3 10h18M8 3v4M16 3v4" />
@@ -289,7 +297,7 @@ export default function Clusters({
           <span style={{ ...HEAD, textAlign: "right" }}>{since ? `Position, vs ${since}` : "Position"}</span>
         </div>
         {shown.map((c) => (
-          <ClusterRow key={c.id} c={c} brand={brand} subject={subject} open={c.id === openId} toggle={href({ open: c.id === openId ? "" : c.id })} since={since} act={act} refill={toast?.done === "stopped" && toast.kind === "prompt" ? toast.id : null} rekey={rekey?.card === c.id ? rekey : null} redraft={redraft === c.id} rekeyed={toast?.done === "rekeyed" && toast.id === c.id} typed={prefill === c.id ? typed : null} next={next} openHref={appPath(`/${encodeURIComponent(slug)}/clusters/${encodeURIComponent(c.id)}?${new URLSearchParams(base)}`)} setupHref={appPath(`/${encodeURIComponent(slug)}/setup#card-${encodeURIComponent(c.id)}`)} vs={vs} />
+          <ClusterRow key={c.id} c={c} brand={brand} subject={subject} open={c.id === openId} toggle={href({ open: c.id === openId ? "" : c.id })} since={since} act={act} refill={toast?.done === "stopped" && toast.kind === "prompt" ? toast.id : null} rekey={rekey?.card === c.id ? rekey : null} redraft={redraft === c.id} rekeyed={toast?.done === "rekeyed" && toast.id === c.id} typed={prefill === c.id ? typed : null} next={next} openHref={appPath(`/${encodeURIComponent(slug)}/clusters/${encodeURIComponent(c.id)}?${new URLSearchParams(base)}`)} vs={vs} firstAsk={firstAsk} />
         ))}
         {shown.length === 0 ? (
           <div style={{ padding: "32px 24px", borderTop: `1px solid ${T.line}`, fontSize: "14px", color: T.soft }}>
@@ -622,7 +630,11 @@ function Toast({ t, cards, ungrouped = [], act, next, dismiss }: { t: StopToast;
   const name = t.kind === "cluster" ? (cluster?.keyword ?? cluster?.name) : prompt?.text;
   const stoppedOn = t.kind === "cluster" ? cluster?.stoppedOn : prompt?.stoppedOn;
   const canUndo = t.id !== BULK_ID && t.done === "stopped" && !!act && !!stoppedOn && stoppedOn > act.today;
-  const text = t.id === BULK_ID ? bulkToast(t) : t.done === "refused" && t.why
+  // ON-1 review (9 Oct 2026): a refused save of five drafts on a cluster with one to four live prompts says the real count.
+  const live = cluster ? cluster.prompts.filter((p) => p.stoppedOn === null).length : 0;
+  const text = t.id === BULK_ID ? bulkToast(t) : t.done === "refused" && t.why === SLOT_WHY.full && t.kind === "cluster" && cluster
+      ? fullLine(live, PROMPTS_PER_CLUSTER)
+      : t.done === "refused" && t.why
       ? t.why
       : t.done === "refused" || !name
       ? "That change did not go through. Reload the page and try again."
@@ -683,6 +695,7 @@ function PendingEditor({
   rekeyed = false,
   typed = null,
   next,
+  firstAsk,
 }: {
   c: ClusterCard;
   kw: string;
@@ -690,6 +703,8 @@ function PendingEditor({
   act: NonNullable<Act>;
   /** Tomorrow's check time in the client's zone (check-time.ts). */
   next: string;
+  /** When drafts saved now are first asked, said in the client's zone (setup-landing.ts firstAsked). */
+  firstAsk: string;
   subject: Subject | null;
   rekey?: Rekeying | null;
   redraft?: boolean;
@@ -778,7 +793,7 @@ function PendingEditor({
         </p>
       ) : null}
       {/* ON-1 (9 Oct 2026, LB8): a keyword and no prompt - a signup with no scan - gets the five drafted from the keyword, saved through /prompt. */}
-      {drafted ? <DraftPrompts id={`cl-draft-${c.id}`} action={`${route("/prompt")}?${new URLSearchParams({ ...act.keep, kind: "cluster", id: c.id })}`} keyword={c.keyword!} drafts={drafted} note={`Nothing in this cluster is checked until they are saved. Saved today, they are first asked tomorrow at ${next}.`} /> : null}
+      {drafted ? <DraftPrompts id={`cl-draft-${c.id}`} action={`${route("/prompt")}?${new URLSearchParams({ ...act.keep, kind: "cluster", id: c.id })}`} keyword={c.keyword!} drafts={drafted} note={`Nothing in this cluster is checked until they are saved. Saved now, they are first asked ${firstAsk}.`} /> : null}
       <form id={formId} method="post" action={`${act.action.replace(/\/stop$/, "/edit")}?${new URLSearchParams({ ...act.keep, kind: "cluster", id: c.id })}`} />
       <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
         {live.map((p, i) => (
@@ -859,8 +874,8 @@ function ClusterRow({
   typed = null,
   next,
   openHref,
-  setupHref,
   vs = null,
+  firstAsk,
 }: {
   c: ClusterCard;
   brand: string;
@@ -877,10 +892,10 @@ function ClusterRow({
   /** Tomorrow's check time in the client's zone (check-time.ts). */
   next: string;
   openHref: string;
-  /** ON-1: the setup card, where a cluster with readings and no keyword is given its first one. */
-  setupHref: string;
   /** ON-3: what every change is against (Overview.tsx Chip's `vs`). */
   vs?: string | null;
+  /** When drafts saved now are first asked (setup-landing.ts firstAsked). */
+  firstAsk: string;
 }) {
   const pending = c.status === "pending";
   // A stop made today shows until tomorrow's check, with Undo; the slot is already free.
@@ -944,11 +959,11 @@ function ClusterRow({
 
       {/* ON-1 (9 Oct 2026, LB8): a cluster with no keyword and nothing read is edited as a pending one - its first keyword can be set at any time (rekey.ts keywordless). */}
       {open && (pending || (c.keyword === null && !c.prompts.some((p) => p.fixed))) && act && !stopped ? (
-        <PendingEditor c={c} kw={kw} lead={lead} act={act} subject={subject} rekey={rekey} redraft={redraft} rekeyed={rekeyed} typed={typed} next={next} />
+        <PendingEditor c={c} kw={kw} lead={lead} act={act} subject={subject} rekey={rekey} redraft={redraft} rekeyed={rekeyed} typed={typed} next={next} firstAsk={firstAsk} />
       ) : open ? (
         <div style={{ display: "flex", flexDirection: "column", gap: "14px", padding: "4px 24px 22px" }}>
           {act && bare && c.keyword ? (
-            <DraftPrompts id={`cl-draft-${c.id}`} action={`${act.action.replace(/\/stop$/, "/prompt")}?${new URLSearchParams({ ...act.keep, kind: "cluster", id: c.id })}`} keyword={c.keyword} drafts={draftPrompts(c.keyword)} note={`Nothing in this cluster is checked until they are saved. Saved today, they are first asked tomorrow at ${next}.`} />
+            <DraftPrompts id={`cl-draft-${c.id}`} action={`${act.action.replace(/\/stop$/, "/prompt")}?${new URLSearchParams({ ...act.keep, kind: "cluster", id: c.id })}`} keyword={c.keyword} drafts={draftPrompts(c.keyword)} note={`Nothing in this cluster is checked until they are saved. Saved now, they are first asked ${firstAsk}.`} />
           ) : null}
           <div className="app-cl-body" style={{ display: "flex", alignItems: "center" }}>
             <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: "4px", flexGrow: 1, minWidth: 0 }}>
@@ -1036,7 +1051,8 @@ function ClusterRow({
               <span style={{ fontSize: "13px", color: T.soft }}>
                 {/* R148 pass 9 (1 Oct 2026): a signup whose scan chose no keyword left "-" with no next step; nomada picks it (signup.ts order email). */}
                 {/* ON-1 (9 Oct 2026): "We add its Google keyword for you" promised a person. */}
-                {c.keyword === null ? (act ? <>No keyword yet. <Link href={setupHref} style={{ color: T.accent, fontWeight: 600 }}>Give it one on setup</Link></> : "No keyword yet. An owner or editor adds it.") : c.positionBefore !== null && since ? `was #${c.positionBefore} on ${since}` : pending ? `First check tomorrow at ${next}` : `Tracked since ${formatDay(c.started_on)}`}
+                {/* ON-1 review (9 Oct 2026): its prompts have readings, so it keeps no keyword it never had (rekey.ts keywordless). */}
+                {c.keyword === null ? (act ? "No keyword yet. Its prompts are already read, so for a keyword, stop this cluster and add a new one with it." : "No keyword yet.") : c.positionBefore !== null && since ? `was #${c.positionBefore} on ${since}` : pending ? `First check tomorrow at ${next}` : `Tracked since ${formatDay(c.started_on)}`}
               </span>
               {c.intent || vol ? (
                 <span style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>

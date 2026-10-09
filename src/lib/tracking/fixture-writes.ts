@@ -3,7 +3,8 @@ import { keywordForm } from "../scan/dataforseo-request.ts";
 import { type KeywordCheck, precheckKeyword, refuseDrafts, signCheck, verifyCheck } from "./add-cluster.ts";
 import { fixtureAccount, fixtureClients, fixtureMode, type Fixture, type FixtureMember } from "./fixture-mode.ts";
 import { type Edit, refuseEdits } from "./edit.ts";
-import { ANGLES, angleFor, freeAngle, refuseCluster, refuseEdit, refuseGrouping, refuseKeyword, refusePrompts } from "./limits.ts";
+import { ANGLES, PROMPTS_PER_CLUSTER, angleFor, freeAngle, refuseCluster, refuseEdit, refuseGrouping, refuseKeyword, refusePrompts } from "./limits.ts";
+import { refuseDraftsAt } from "./prompt-text.ts";
 import { refuseRekey } from "./rekey.ts";
 import { refuseSlotText } from "./slot.ts";
 import { type StopKind, refuseRole, refuseStop, refuseUndo, stopDay } from "./stop.ts";
@@ -85,7 +86,7 @@ export function fixtureFillSlot(f: Fixture, p: { clusterId: string; angle: strin
 }
 
 /** slot.ts's fillSlots on the fixture: each text against the live prompts and the ones before it, then the room for all of them. */
-export function fixtureFillSlots(f: Fixture, p: { clusterId: string; slots: readonly { text: string; angle: string | null }[]; today: Day; role: string }): FixtureWritten & { ids?: string[] } {
+export function fixtureFillSlots(f: Fixture, p: { clusterId: string; slots: readonly { text: string; angle: string | null }[]; today: Day; role: string }): (FixtureWritten & { ids?: string[] }) | { ok: false; message: string; at?: number } {
   const role = refuseRole(p.role);
   if (role) return { ok: false, message: role };
   const { clusters, questions } = f.data;
@@ -96,7 +97,7 @@ export function fixtureFillSlots(f: Fixture, p: { clusterId: string; slots: read
   const mine = live.filter((q) => q.cluster_id === p.clusterId);
   for (let i = 0; i < p.slots.length; i++) {
     const refused = refuseSlotText(p.slots[i]!.text, [...mine.map((q) => q.text), ...p.slots.slice(0, i).map((s) => s.text)]);
-    if (refused) return { ok: false, message: refused };
+    if (refused) return { ok: false, message: refused, at: i };
   }
   const room = refusePrompts({ clientLive: live.length, clusterLive: mine.length, clusterLimit: f.client.cluster_limit }, p.slots.length);
   if (room) return { ok: false, message: room };
@@ -109,10 +110,16 @@ export function fixtureFillSlots(f: Fixture, p: { clusterId: string; slots: read
   return { ...written(f, { questions: [...questions, ...rows] }), ids: rows.map((r) => r.id) };
 }
 
-/** new-cluster.ts's fillDrafts on the fixture (ON-1, 9 Oct 2026): the drafts' rule first, then the five through the free slot's write, one per angle. */
-export function fixtureFillDrafts(f: Fixture, p: { clusterId: string; prompts: string[]; today: Day; role: string }): FixtureWritten & { ids?: string[] } {
-  const r = refuseRole(p.role) ?? refuseDrafts(p.prompts);
-  if (r) return { ok: false, message: r };
+/**
+ * new-cluster.ts's fillDrafts on the fixture (ON-1, 9 Oct 2026): the drafts' rule first, then the five through the
+ * free slot's write, one per angle. Held in memory and written in one step, so there is no read-then-insert race
+ * for the database's unique index (20261009040000) to stop; refuseSlotText's key is at least as strict as it.
+ */
+export function fixtureFillDrafts(f: Fixture, p: { clusterId: string; prompts: string[]; today: Day; role: string }): (FixtureWritten & { ids?: string[] }) | { ok: false; message: string; at?: number } {
+  const role = refuseRole(p.role);
+  if (role) return { ok: false, message: role };
+  const r = refuseDraftsAt(p.prompts, PROMPTS_PER_CLUSTER);
+  if (r) return { ok: false, message: r.message, ...(r.at === null ? {} : { at: r.at }) };
   return fixtureFillSlots(f, { clusterId: p.clusterId, slots: p.prompts.map((text, i) => ({ text, angle: ANGLES[i]! })), today: p.today, role: p.role });
 }
 
@@ -275,14 +282,15 @@ export function fixtureRekey(f: Fixture, p: { clusterId: string; keyword: string
   const keyword = keywordForm(p.keyword);
   const own = c?.keyword_id ?? null;
   const live = keywords.filter((k) => k.stopped_on === null);
+  const mine = new Set(f.data.questions.filter((q) => q.cluster_id === p.clusterId).map((q) => q.id));
   const refused = refuseRekey({
     role: p.role,
     cluster: c,
     today: f.today,
     readings: own ? serp.filter((s) => s.keyword_id === own).length : 0,
     taken: live.some((k) => k.id !== own && keywordForm(k.keyword) === keyword),
-    // ON-1 (9 Oct 2026): a cluster that never had a keyword may take its first at any time.
-    keywordless: !!c && !own,
+    // ON-1 (9 Oct 2026): a cluster that never had a keyword, and none of whose prompts has a reading, may take its first at any time.
+    keywordless: !!c && !own && !f.data.answers.some((a) => mine.has(a.question_id)),
   });
   if (refused) return { ok: false, message: refused };
   const ownLive = !!own && live.some((k) => k.id === own);

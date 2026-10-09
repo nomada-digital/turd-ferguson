@@ -68,6 +68,8 @@ export type ActivationInput = {
   members: readonly { email: string; role: string }[];
   /** A CSV downloaded or Reports opened on this client. */
   reportOpened: boolean;
+  /** The moment the page treats as now (repo.now), so a first check still to come is said in the client's zone (ON-1 review). */
+  now?: number;
 };
 
 /**
@@ -79,7 +81,7 @@ export function activationSteps(p: ActivationInput): ActivationStep[] | null {
   const editor = p.role === "owner" || p.role === "editor";
   const owner = p.role === "owner";
   const setupDone = p.confirmed === true || !p.setupNeeded;
-  const { first } = setupChecks({ startedOn: p.startedOn, today: p.today, market: p.market, livePrompts: p.livePrompts });
+  const { first } = setupChecks({ startedOn: p.startedOn, today: p.today, market: p.market, livePrompts: p.livePrompts, ...(p.now === undefined ? {} : { now: p.now }) });
   const owners = p.members.filter((m) => m.role === "owner").map((m) => m.email);
   const team = p.members.length;
 

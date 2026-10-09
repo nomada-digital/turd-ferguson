@@ -114,9 +114,10 @@ export default async function CheckoutDone({ searchParams }: Props) {
           )}
         </>
       ) : (
+        // ON-1 review (9 Oct 2026): prompts are no longer agreed on the call - each cluster's five are drafted from its keyword for the buyer to edit.
         <p style={P}>
-          Stripe emails your receipt. We will email you to book the onboarding call, where we agree the prompts for
-          each keyword before anything runs.
+          Stripe emails your receipt. We will email you to book the onboarding call. Each cluster&apos;s five prompts are
+          drafted from its keyword for you to edit, and nothing runs until a cluster has them.
         </p>
       )}
       <p style={P}>

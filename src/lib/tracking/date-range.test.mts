@@ -19,7 +19,7 @@ import {
   summary,
   viewFor,
 } from "./date-range.ts";
-import { addDays } from "./figures.ts";
+import { addDays, resolveComparison } from "./figures.ts";
 
 // T5 part 1 (30 Sep 2026): the picker's rules against boards/DatePicker.dc.html,
 // whose state is today 29 Sep 2026, tracking began 4 Jul 2026, last 28 days.
@@ -108,9 +108,11 @@ test("the compare line in the board's words, flagging a period before tracking b
   // 8 Oct 2026 (audit data-10): a period reaching back before tracking began is replaced by the first week, as every
   // page now reads it - it used to be compared with and then hidden, so a client saw no change for 55 days.
   assert.equal(compareText({ from: "2026-07-20", to: TODAY }, "prev", BEGAN), "Tracking began 4 Jul, so this compares with your first week, 4 Jul - 10 Jul.");
-  // ON-3 (9 Oct 2026): a range ending inside the first week is compared with the first reading; one ending on it has nothing yet.
-  assert.equal(compareText({ from: "2026-07-04", to: "2026-07-09" }, "prev", BEGAN), "Tracking began 4 Jul, so this compares with your first reading, 4 Jul.");
-  assert.equal(compareText({ from: "2026-07-04", to: "2026-07-04" }, "prev", BEGAN), "Tracking began 4 Jul, so there is no earlier period to compare with yet.");
+  // ON-3 (9 Oct 2026): a range ending inside the first week is compared with the first reading when that check was
+  // complete; one ending on it has nothing yet. Not complete (review, same day), nothing until the first week is over.
+  assert.equal(compareText({ from: "2026-07-04", to: "2026-07-09" }, "prev", BEGAN, BEGAN, true), "Tracking began 4 Jul, so this compares with your first reading, 4 Jul.");
+  assert.equal(compareText({ from: "2026-07-04", to: "2026-07-09" }, "prev", BEGAN, BEGAN, false), "Tracking began 4 Jul, so there is no earlier period to compare with yet.");
+  assert.equal(compareText({ from: "2026-07-04", to: "2026-07-04" }, "prev", BEGAN, BEGAN, true), "Tracking began 4 Jul, so there is no earlier period to compare with yet.");
 });
 
 test("the hint, and the query Apply writes - the shape rangeFrom reads", () => {
@@ -126,7 +128,15 @@ test("the hint, and the query Apply writes - the shape rangeFrom reads", () => {
  * last 28 days, as before. rangeFrom takes it only when no range is stated.
  */
 test("the default range: since tracking began for a young client, the last 28 days otherwise", () => {
-  assert.equal(YOUNG_RANGE_DAYS, 2 * DEFAULT_RANGE_DAYS);
+  // Review of ON-3 (9 Oct 2026): two default ranges less a day - at 55 days old the last 28 days' previous period
+  // starts on started_on itself, so the old default already compares whole periods.
+  assert.equal(YOUNG_RANGE_DAYS, 2 * DEFAULT_RANGE_DAYS - 1);
+  const at54 = addDays(TODAY, -(YOUNG_RANGE_DAYS - 1));
+  const at55 = addDays(TODAY, -YOUNG_RANGE_DAYS);
+  assert.deepEqual(defaultRange(TODAY, at54), { from: at54, to: TODAY }, "54 days old: since tracking began");
+  assert.notEqual(resolveComparison({ from: addDays(TODAY, -27), to: TODAY }, "prev", at54, at54, true).kind, "prev", "at 54 the last 28 days' previous period still starts before tracking did");
+  assert.deepEqual(defaultRange(TODAY, at55), { from: addDays(TODAY, -27), to: TODAY }, "55 days old: the last 28 days");
+  assert.deepEqual(resolveComparison(defaultRange(TODAY, at55), "prev", at55), { range: { from: at55, to: addDays(TODAY, -28) }, kind: "prev", hidden: null }, "and its previous period is whole");
   const last28 = { from: "2026-09-02", to: TODAY };
   assert.deepEqual(defaultRange(TODAY, BEGAN), last28, "tracking began in July: the last 28 days");
   assert.deepEqual(defaultRange(TODAY, null), last28, "no start");

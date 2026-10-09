@@ -3,7 +3,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { keywordForm } from "../scan/dataforseo-request.ts";
 
 import { refuseDrafts } from "./add-cluster.ts";
-import { ANGLES, insertCluster, insertKeyword, insertPrompts, readClusterRefusal } from "./limits.ts";
+import { ANGLES, PROMPTS_PER_CLUSTER, insertCluster, insertKeyword, insertPrompts, readClusterRefusal } from "./limits.ts";
+import { refuseDraftsAt } from "./prompt-text.ts";
 import { type FilledAll, fillSlots } from "./slot.ts";
 import { refuseRole, stopDay } from "./stop.ts";
 
@@ -66,7 +67,10 @@ async function stopRow(db: SupabaseClient, table: "tracked_clusters" | "tracked_
  * prompts has no room for five more, which insertPrompts' rule refuses.
  */
 export async function fillDrafts(db: SupabaseClient, p: { clientId: string; clusterId: string; prompts: string[]; today: string; by: string; role: string }): Promise<FilledAll> {
-  const r = refuseRole(p.role) ?? refuseDrafts(p.prompts);
-  if (r) return { ok: false, message: r };
+  const role = refuseRole(p.role);
+  if (role) return { ok: false, message: role };
+  // ON-1 review (9 Oct 2026): which field a text refusal is about rides back, so the card marks that one.
+  const r = refuseDraftsAt(p.prompts, PROMPTS_PER_CLUSTER);
+  if (r) return { ok: false, message: r.message, ...(r.at === null ? {} : { at: r.at }) };
   return fillSlots(db, { clientId: p.clientId, clusterId: p.clusterId, slots: p.prompts.map((text, i) => ({ text, angle: ANGLES[i]! })), today: p.today, by: p.by, role: p.role });
 }

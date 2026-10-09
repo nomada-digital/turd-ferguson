@@ -145,6 +145,8 @@ const KEYS: Record<string, Record<string, string>> = {
     // fixed words for "saved" or "refused" only, on the card `card` names; `why` only through slotRefusal's own keys.
     drafts: 'draftsLine(one("drafts"), one("why"),',
     why: 'draftsLine(one("drafts"), one("why"),',
+    // 9 Oct 2026, ON-1 review: which of the five fields a refused Save is about - draftAt takes one digit under five, else none.
+    at: 'draftAt(one("at"))',
   },
   // 2 Oct 2026, R173 pass 3, DS36: the catch-all reads no key; its query rides only into loginHref's next.
   "/[...rest]": {},
@@ -173,9 +175,10 @@ const ROLE_READS: Record<string, string[]> = {
  * Raised 2 Oct 2026 (R173 pass 3, DS36): 10 pages - the [...rest] catch-all.
  * Raised 8 Oct 2026: 38 keys - Settings' trial, the Cancel trial route's way back.
  * Raised 9 Oct 2026 (ON-1, LB8): 40 keys - /setup's drafts and why, the prompt route's way back after a card's drafts.
+ * Raised 9 Oct 2026 (ON-1 review): 41 keys - /setup's at, the refused field.
  */
 const PAGE_FLOOR = 10;
-const KEY_FLOOR = 40;
+const KEY_FLOOR = 41;
 
 /** The query keys a page reads by name, as written. */
 export function keysRead(src: string): string[] {

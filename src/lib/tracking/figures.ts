@@ -150,19 +150,28 @@ export function firstCheckDay(startedOn: Day | null, questions: readonly Pick<Qu
  *
  * ON-3 (9 Oct 2026, LB8): inside the first week - half the 14-day trial - a
  * range that holds the first reading and a day after it is compared with that
- * first reading ("first"), so a trial's chips say how its latest readings
- * moved from its first instead of nothing. A young client opens on "Since
- * tracking began" (date-range.ts defaultRange), which always holds it. The
- * range's own figures are counted exactly as before; only a comparison that
- * was hidden is now made, and named with its date wherever it is drawn
- * (comparisonLabel, periodPair). A range that ends on the first reading still
- * has nothing to compare, and says from when it will.
+ * first reading ("first"): the chips are then the whole range, its first day
+ * included, against that first day alone - not the latest reading against the
+ * first - instead of nothing. A young client opens on "Since tracking began"
+ * (date-range.ts defaultRange), which always holds it. The range's own
+ * figures are counted exactly as before; only a comparison that was hidden is
+ * now made, and named with its date wherever it is drawn (comparisonLabel,
+ * periodPair). A range that ends on the first reading still has nothing to
+ * compare, and says from when it will.
+ *
+ * Only when that first check read every engine the plan reads (review, 9 Oct
+ * 2026): `firstComplete` is its run's status, complete (firstReadComplete). A
+ * partial first check - one engine answered on day 1, all four after - read
+ * "+67 pts vs your first reading", an engine-mix artefact shown as a client
+ * result; a failed one named a reading that does not exist. Without it the
+ * range waits for the first week, as before ON-3, and says so.
  */
 export function resolveComparison(
   range: Range,
   compare: "prev" | "month" | "none",
   startedOn: Day | null,
   firstCheck?: Day | null,
+  firstComplete = false,
 ): { range: Range | null; kind: ComparisonKind | null; hidden: string | null } {
   const c = comparisonRange(range, compare);
   if (!c || compare === "none") return { range: null, kind: null, hidden: null };
@@ -170,16 +179,25 @@ export function resolveComparison(
   if (!startedOn || !start || c.from >= start) return { range: c, kind: compare, hidden: null };
   const first = firstWeek(start);
   if (first.to < range.to) return { range: first, kind: "start", hidden: null };
-  if (range.from <= start && start < range.to) return { range: { from: start, to: start }, kind: "first", hidden: null };
+  if (firstComplete && range.from <= start && start < range.to) return { range: { from: start, to: start }, kind: "first", hidden: null };
   return {
     range: null,
     kind: null,
-    // A range that starts after the first reading waits for the first week; one that holds it, or ends before it, for the day after it.
+    // A range that holds a complete first reading, or ends on it, waits for the day after it; any other for the first week.
     hidden:
-      range.from <= start
+      firstComplete && range.from <= start
         ? `Tracking began ${formatDay(startedOn)}, so there is no earlier reading to compare with yet. From ${formatDay(addDays(start, 1))} the changes are against your first reading, ${formatDay(start)}.`
         : `Tracking began ${formatDay(startedOn)}, so there is no earlier period to compare with yet. From ${formatDay(addDays(first.to, 1))} the changes are against your first week.`,
   };
+}
+
+/**
+ * Whether the first check read every engine the plan reads (review of ON-3,
+ * 9 Oct 2026): its day's run finished complete. Partial, failed, still
+ * running, or not read in this range's runs is no.
+ */
+export function firstReadComplete(runs: readonly { run_date: Day; status: string }[] | undefined, firstCheck: Day | null): boolean {
+  return !!firstCheck && !!runs?.some((r) => r.run_date === firstCheck && r.status === "complete");
 }
 
 /**
@@ -368,9 +386,12 @@ export function overview(input: {
   keywordCount: number;
   /** The keyword rows, for the page-1 change like-for-like; without them that change is not given. */
   keywords?: readonly { id: string; added_on: Day; stopped_on: Day | null }[];
+  /** The range's runs, any status (OverviewData.runs): a first reading is compared with only when its run was complete. */
+  runs?: readonly { run_date: Day; status: string }[];
 }): Overview {
   const { range, answers, serp } = input;
-  const resolved = resolveComparison(range, input.compare, input.startedOn, firstCheckDay(input.startedOn, input.questions));
+  const firstCheck = firstCheckDay(input.startedOn, input.questions);
+  const resolved = resolveComparison(range, input.compare, input.startedOn, firstCheck, firstReadComplete(input.runs, firstCheck));
   const compare = resolved.range;
   const compareHidden = resolved.hidden;
   // Like-for-like: live from the comparison's first day to the range's last (BRIEF decision 8).

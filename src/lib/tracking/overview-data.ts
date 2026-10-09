@@ -23,7 +23,7 @@ const DAY = /^\d{4}-\d{2}-\d{2}$/;
 /**
  * The range a URL states (BRIEF decision 3): `?from=&to=&compare=`, defaulting
  * to the last 28 days to today against the previous period - or, for a client
- * whose tracking began under eight weeks ago, "Since tracking began" (ON-3,
+ * whose tracking began under 55 days ago, "Since tracking began" (ON-3,
  * 9 Oct 2026, date-range.ts defaultRange). A malformed or reversed range
  * falls back to the default rather than erroring. A stated range always wins.
  */

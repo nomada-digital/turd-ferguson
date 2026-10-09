@@ -58,7 +58,8 @@ test("step 2 drafts five distinct prompts that pass the text rule, and refuses t
   assert.equal(d.length, 5);
   assert.equal(d[0], "What’s the best accounting software for dentists?");
   assert.equal(refuseDrafts(d), null);
-  assert.match(refuseDrafts([d[0], d[1], d[2], d[3], d[0].toUpperCase()]) ?? "", /already tracked/);
+  // ON-1 review (9 Oct 2026): two the same among the five are their own refusal - nothing is tracked yet.
+  assert.match(refuseDrafts([d[0], d[1], d[2], d[3], d[0].toUpperCase()]) ?? "", /Two of these prompts are the same/);
   assert.match(refuseDrafts([d[0], "short", d[2], d[3], d[4]]) ?? "", /characters/);
   assert.ok(refuseDrafts(d.slice(0, 4)));
 });

@@ -19,6 +19,7 @@ import {
   dailySeries,
   daysIn,
   firstCheckDay,
+  firstReadComplete,
   formatDay,
   keywordRows,
   movers,
@@ -92,18 +93,19 @@ const pct = (r: Rate) => (r.pct === null ? "-" : `${r.pct}%`);
 /**
  * What a change is against, on the chip itself (ON-3, 9 Oct 2026): "vs your
  * first reading, 3 Oct", "vs 5 Aug - 1 Sep" (figures.ts comparisonLabel). It
- * is the chip's hover title and is read out after the figure; the page says
- * it once where the eye lands too - the date face and the captions.
+ * is read out after the figure; the page says it once where the eye lands -
+ * the date face, the column heads and the captions. Not a hover title too
+ * (review, same day): a title saying the same words was read twice.
  */
 export function VsText({ vs }: { vs?: string | null }) {
-  return vs ? <span className="sr-only">{` ${vs}`}</span> : null;
+  return vs ? <span className="sr-only" data-vs="">{` ${vs}`}</span> : null;
 }
 
 function Delta({ value, unit = " pts", dark = false, vs = null }: { value: number | null; unit?: string; dark?: boolean; vs?: string | null }) {
   if (value === null) return null;
   if (value === 0)
     return (
-      <span title={vs ?? undefined} style={{ fontSize: "13px", color: dark ? D.cardHead : T.soft, whiteSpace: "nowrap" }}>
+      <span style={{ fontSize: "13px", color: dark ? D.cardHead : T.soft, whiteSpace: "nowrap" }}>
         No change
         <VsText vs={vs} />
       </span>
@@ -112,7 +114,7 @@ function Delta({ value, unit = " pts", dark = false, vs = null }: { value: numbe
   const fg = dark ? D.accent : up ? T.goodFg : T.badFg;
   const bg = dark ? D.field : up ? T.goodBg : T.badBg;
   return (
-    <span title={vs ?? undefined} style={{ display: "inline-flex", alignItems: "center", gap: "2px", padding: "2px 8px 2px 5px", borderRadius: "999px", background: bg, color: fg, fontSize: "13px", fontWeight: 600, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
+    <span style={{ display: "inline-flex", alignItems: "center", gap: "2px", padding: "2px 8px 2px 5px", borderRadius: "999px", background: bg, color: fg, fontSize: "13px", fontWeight: 600, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={fg} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
         <path d={up ? "M6 15l6-6 6 6" : "M6 9l6 6 6-6"} />
       </svg>
@@ -184,7 +186,7 @@ export default function Overview({
   // 9 Oct 2026 (audit copy-2, ia-9): every check time here is the client's zone's, labelled, from the
   // cron's hour on the day meant (check-time.ts). A bare London time was an hour wrong from 25 Oct.
   const next = checkTime(addDays(today, 1), market);
-  const o = overview({ range, compare: compareMode, startedOn, engines, questions: data.questions, answers: data.answers, serp: data.serp, keywordCount: keywordsIn(data.keywords, range), keywords: data.keywords });
+  const o = overview({ range, compare: compareMode, startedOn, engines, questions: data.questions, answers: data.answers, serp: data.serp, keywordCount: keywordsIn(data.keywords, range), keywords: data.keywords, runs: data.runs });
   // 8 Oct 2026 (audit data-10): a young client's comparison is its first week, and the charts draw no dashed
   // "same day last period" line for it - a week laid over the range's first seven days would read as a period it is not.
   // ON-3 (9 Oct 2026): nor against a first reading - one day is not a period to lay over the range.
@@ -261,7 +263,7 @@ export default function Overview({
         </a>
       ) : null}
       {/* T5 (30 Sep 2026): the face is drawn here, on the server, so JS off still shows the range; DatePicker opens boards/DatePicker.dc.html on it. */}
-      <DatePicker range={range} compare={compareMode} today={today} startedOn={startedOn} firstCheck={firstCheckDay(startedOn, data.questions)}>
+      <DatePicker range={range} compare={compareMode} today={today} startedOn={startedOn} firstCheck={firstCheckDay(startedOn, data.questions)} firstComplete={firstReadComplete(data.runs, firstCheckDay(startedOn, data.questions))}>
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={T.ink} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <rect x="3" y="5" width="18" height="16" rx="2" />
           <path d="M3 10h18M8 3v4M16 3v4" />
@@ -1017,17 +1019,17 @@ export default function Overview({
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 /** A change chip in the cards' 12px size, or the grey word when there is no change to show. */
-/** `vs` (ON-3, 9 Oct 2026): what the change is against, as VsText says it; a grey word with no change has nothing to say it of. */
+/** `vs` (ON-3, 9 Oct 2026): what the change is against, read out after it (VsText); a grey word with no change has nothing to say it of. */
 export function Chip({ value, unit, none, size = 12, vs = null }: { value: number | null; unit: string; none: string; size?: number; vs?: string | null }) {
   if (value === null || value === 0)
     return (
-      <span title={value === 0 && vs ? vs : undefined} style={{ fontSize: `${size}px`, fontWeight: 600, color: T.soft, whiteSpace: "nowrap" }}>
+      <span style={{ fontSize: `${size}px`, fontWeight: 600, color: T.soft, whiteSpace: "nowrap" }}>
         {value === 0 ? "No change" : none}
         {value === 0 ? <VsText vs={vs} /> : null}
       </span>
     );
   return (
-    <Pill up={value > 0} size={size} title={vs ?? undefined}>
+    <Pill up={value > 0} size={size}>
       {value > 0 ? "+" : "−"}
       {Math.abs(value)}
       {unit}
@@ -1065,16 +1067,16 @@ export function PositionChip({ c, size = 12, vs = null }: { c: Pick<ClusterCard,
   // One word each, so the pill fits the cards' 108px Google box (82px inside); the title says it in full.
   if (c.positionEvent === "dropped")
     return (
-      <Pill up={false} size={size} title={`Dropped out of the top 20${vs ? `, ${vs}` : ""}`}>
+      <Pill up={false} size={size} title="Dropped out of the top 20">
         Dropped
-        <VsText vs={vs ? `out of the top 20, ${vs}` : null} />
+        <VsText vs={vs} />
       </Pill>
     );
   if (c.positionEvent === "entered")
     return (
-      <Pill up size={size} title={`Entered the top 20${vs ? `, ${vs}` : ""}`}>
+      <Pill up size={size} title="Entered the top 20">
         Entered
-        <VsText vs={vs ? `the top 20, ${vs}` : null} />
+        <VsText vs={vs} />
       </Pill>
     );
   return <Chip value={c.positionEvent === "unranked" ? 0 : c.positionChange} unit="" none={c.keyword === null ? "No keyword" : noChange(c)} size={size} vs={vs} />;

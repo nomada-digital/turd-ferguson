@@ -1,3 +1,4 @@
+import DraftsCheck from "@/components/app/DraftsCheck";
 import SubmitButton from "@/components/app/SubmitButton";
 import { T } from "@/config/tokens";
 import { ADMIN_LIMITS } from "@/lib/tracking/decide";
@@ -20,7 +21,7 @@ export default function DraftPrompts({
   drafts,
   note,
   noteTone = "soft",
-  invalid = false,
+  invalidAt = null,
 }: {
   /** Unique on the page: the fields are `${id}-0` to `${id}-4`. */
   id: string;
@@ -30,8 +31,8 @@ export default function DraftPrompts({
   /** The line under the fields: what Save does, or what the last Save did. */
   note: string;
   noteTone?: "soft" | "good" | "bad";
-  /** The last Save was refused: the first field is marked and takes focus. */
-  invalid?: boolean;
+  /** The last Save was refused about this field (0-4): it is marked and takes focus (ON-1 review, 9 Oct 2026). */
+  invalidAt?: number | null;
 }) {
   const color = noteTone === "good" ? T.goodFg : noteTone === "bad" ? T.badFg : T.soft;
   return (
@@ -53,8 +54,8 @@ export default function DraftPrompts({
             minLength={PROMPT_MIN}
             maxLength={ADMIN_LIMITS.question}
             aria-describedby={`${id}-note`}
-            aria-invalid={invalid && i === 0 ? true : undefined}
-            autoFocus={invalid && i === 0}
+            aria-invalid={invalidAt === i ? true : undefined}
+            autoFocus={invalidAt === i}
             style={{ height: "44px", boxSizing: "border-box", padding: "0 12px", border: `1px solid ${T.line}`, borderRadius: "10px", fontFamily: "inherit", fontSize: "14px", color: T.ink, background: T.surface, minWidth: 0, width: "100%" }}
           />
         </div>
@@ -62,6 +63,7 @@ export default function DraftPrompts({
       <p id={`${id}-note`} role={noteTone === "good" ? "status" : noteTone === "bad" ? "alert" : undefined} style={{ margin: 0, fontSize: "13px", lineHeight: 1.5, color }}>
         {note}
       </p>
+      <DraftsCheck fields={drafts.map((_, i) => `${id}-${i}`)} note={`${id}-note`} bad={T.badFg} />
       <div>
         <SubmitButton busy="Saving..." style={{ height: "44px", padding: "0 18px", border: 0, borderRadius: "10px", background: T.accent, color: T.surface, fontFamily: "inherit", fontSize: "14px", fontWeight: 600 }}>
           Save these prompts

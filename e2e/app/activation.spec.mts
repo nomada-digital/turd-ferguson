@@ -25,6 +25,7 @@ import { draftPrompts } from "../../src/lib/tracking/add-cluster.ts";
 import { checkTime } from "../../src/lib/tracking/check-time.ts";
 import { addDays, formatDay } from "../../src/lib/tracking/figures.ts";
 import { FIXTURE_ORDER_KEYWORD, YOUNG_DAYS, expandFixture } from "../../src/lib/tracking/fixture-mode.ts";
+import { DRAFTS_RESET } from "../../src/lib/tracking/setup-drafts.ts";
 import { SLOT_WHY } from "../../src/lib/tracking/slot.ts";
 
 const ROOT = path.resolve(import.meta.dirname, "..", "..");
@@ -101,14 +102,16 @@ test("ON-1: a no-scan signup checks its keyword on setup, and saves the five pro
   await page.waitForURL(/rekey=rekeyed/, { timeout: 15_000 });
   const drafts = draftPrompts(FIXTURE_ORDER_KEYWORD);
   for (let i = 0; i < drafts.length; i++) assert.equal(await page.locator(`#setup-draft-0-${i}`).inputValue(), drafts[i], `draft ${i}`);
-  assert.match(await page.locator("#card-c1").innerText(), new RegExp(`Saved today, they are first asked tomorrow at ${TOMORROW_AT}\\.`));
+  assert.match(await page.locator("#card-c1").innerText(), new RegExp(`Saved now, they are first asked tomorrow at ${TOMORROW_AT}\\.`));
 
-  // Two the same: the route refuses, the line says why, and the first field is marked.
+  // Two the same, with no script: the route refuses with the batch's own words, marks the field it is about, and
+  // says the fields came back as drafted (ON-1 review, 9 Oct 2026).
   await page.locator("#setup-draft-0-1").fill(drafts[0]!);
   await page.getByRole("button", { name: "Save these prompts" }).click();
-  await page.waitForURL(/drafts=refused&why=duplicate/, { timeout: 15_000 });
-  assert.equal(await page.locator("#setup-draft-0-note").innerText(), SLOT_WHY.duplicate);
-  assert.equal(await page.locator("#setup-draft-0-0").getAttribute("aria-invalid"), "true");
+  await page.waitForURL(/drafts=refused&why=twin&at=1/, { timeout: 15_000 });
+  assert.equal(await page.locator("#setup-draft-0-note").innerText(), `${SLOT_WHY.twin} ${DRAFTS_RESET}`);
+  assert.equal(await page.locator("#setup-draft-0-1").getAttribute("aria-invalid"), "true");
+  assert.equal(await page.locator("#setup-draft-0-0").getAttribute("aria-invalid"), null);
 
   // Edited and saved: the card lists its five, and says when they are first asked.
   const mine = "Which invoicing app do freelance designers rate?";
@@ -134,6 +137,31 @@ test("ON-1: a no-scan signup checks its keyword on setup, and saves the five pro
   await ctx.close();
 });
 
+test("ON-1 review: with script, two drafts the same are refused before posting, every edit kept, the field marked", async () => {
+  as("signup-typed");
+  const { ctx, page } = await open("/app/tallyroo/setup");
+  await page.locator("#card-c1 form[action$='/check'] button[type=submit]").click();
+  await page.waitForURL(/ck=ok/, { timeout: 15_000 });
+  await page.getByRole("button", { name: `Use “${FIXTURE_ORDER_KEYWORD}” for this cluster` }).click();
+  await page.waitForURL(/rekey=rekeyed/, { timeout: 15_000 });
+  const before = page.url();
+  const mine = "Which invoicing app do freelance designers rate?";
+  await page.locator("#setup-draft-0-2").fill(mine);
+  await page.locator("#setup-draft-0-3").fill(mine);
+  await page.getByRole("button", { name: "Save these prompts" }).click();
+  assert.equal(page.url(), before, "nothing posted");
+  assert.equal(await page.locator("#setup-draft-0-note").innerText(), SLOT_WHY.twin);
+  assert.equal(await page.locator("#setup-draft-0-3").getAttribute("aria-invalid"), "true");
+  assert.equal(await page.evaluate(() => document.activeElement?.id ?? ""), "setup-draft-0-3");
+  assert.equal(await page.locator("#setup-draft-0-2").inputValue(), mine, "the member's edit is still there");
+  // Fixed, it saves.
+  await page.locator("#setup-draft-0-3").fill("Which invoicing app suits a freelance photographer?");
+  await page.getByRole("button", { name: "Save these prompts" }).click();
+  await page.waitForURL(/drafts=saved/, { timeout: 15_000 });
+  assert.ok((await page.locator("#card-c1").innerText()).includes(mine));
+  await ctx.close();
+});
+
 test("ON-3: a young client opens on Since tracking began, every chip says what it is against, and a URL range wins", async () => {
   as("young");
   const start = addDays(fx.today, -YOUNG_DAYS);
@@ -142,12 +170,11 @@ test("ON-3: a young client opens on Since tracking began, every chip says what i
   const face = await page.locator("#app-content header").first().innerText();
   assert.match(face, /Since tracking began/);
   assert.ok(face.includes(week), `the face names the comparison: ${face}`);
-  const titled = await page.evaluate(() => [...document.querySelectorAll("[title^='vs ']")].map((e) => e.getAttribute("title")));
-  assert.ok(titled.length >= 5, `${titled.length} chips say what they are against`);
-  assert.ok(titled.every((t) => t === titled[0]), "one comparison on the page");
-  assert.equal(titled[0], week);
-  const said = await page.evaluate(() => [...document.querySelectorAll("[title^='vs '] .sr-only")].map((e) => e.textContent));
-  assert.ok(said.length && said.every((t) => t === ` ${titled[0]}`), "and a screen reader hears it after the figure");
+  // Each chip's change is read out with what it is against; once, not as a hover title as well (review, same day).
+  const said = await page.evaluate(() => [...document.querySelectorAll("[data-vs]")].map((e) => [e.textContent, e.parentElement?.getAttribute("title") ?? null]));
+  assert.ok(said.length >= 5, `${said.length} chips say what they are against`);
+  assert.deepEqual([...new Set(said.map(([t]) => t))], [` ${week}`], "one comparison on the page");
+  assert.ok(said.every(([, title]) => title === null || !title.includes(week)), "no title repeats it");
   await ctx.close();
 
   const stated = await open(`/app/tallyroo?from=${addDays(fx.today, -6)}&to=${fx.today}`);

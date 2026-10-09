@@ -136,8 +136,9 @@ for (const width of [1280, 390]) {
           assert.equal(r?.status(), 200);
           const t = await page.evaluate(() => document.querySelector("main")?.innerText ?? document.body.innerText, null);
           assert.doesNotMatch(t, /None in the top 20|the keyword checked on Google/, "no reading of a keyword that does not exist");
-          // ON-1 (9 Oct 2026, LB8): "We add its Google keyword for you" promised a person; the member gives it one on setup.
-          if (route.endsWith("c1")) assert.match(t, /It has no Google keyword yet; an owner or editor gives it one on setup/);
+          // ON-1 (9 Oct 2026, LB8): "We add its Google keyword for you" promised a person. Its scan prompts are read, so it
+          // keeps no keyword it never had (review, same day): the page says it has none, and promises no one adds one.
+          if (route.endsWith("c1")) assert.match(t, /It has no Google keyword yet\./);
           await ctx.close();
         });
       }

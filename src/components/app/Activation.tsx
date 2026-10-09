@@ -19,7 +19,8 @@ export default function Activation({ steps }: { steps: readonly ActivationStep[]
         </h2>
         <span style={{ fontSize: "13px", fontWeight: 600, color: T.soft }}>{`${done} of ${steps.length} done`}</span>
       </div>
-      <ol style={{ listStyle: "none", margin: "12px 0 0", padding: 0, display: "flex", flexDirection: "column", gap: "10px" }}>
+      {/* role="list" because Safari drops list semantics with list-style none (as NextSteps.tsx). */}
+      <ol role="list" style={{ listStyle: "none", margin: "12px 0 0", padding: 0, display: "flex", flexDirection: "column", gap: "10px" }}>
         {steps.map((s, i) => (
           <li key={s.id} data-step={s.id} data-done={s.done ? "yes" : "no"} style={{ display: "flex", alignItems: "flex-start", gap: "12px", paddingTop: i ? "10px" : 0, borderTop: i ? `1px solid ${T.hair}` : undefined, minWidth: 0 }}>
             <span aria-hidden="true" style={{ flexShrink: 0, width: "22px", height: "22px", marginTop: "1px", borderRadius: "999px", display: "flex", alignItems: "center", justifyContent: "center", background: s.done ? T.goodBg : T.surface, border: `1.5px solid ${s.done ? T.goodFg : T.line}` }}>
