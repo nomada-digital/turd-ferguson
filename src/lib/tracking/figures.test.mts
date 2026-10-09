@@ -117,10 +117,21 @@ test("a comparison reaching before tracking began is the first week; one inside 
   assert.deepEqual(o.compare, { from: "2026-09-10", to: "2026-09-16" });
   assert.equal(o.compareKind, "start");
   assert.equal(o.compareHidden, null);
+  // ON-3 (9 Oct 2026): a range ending inside the first week that holds the first reading and a day after it is
+  // compared with that first reading, where it used to show nothing for half the trial.
   const early = overview({ range: { from: "2026-09-02", to: "2026-09-15" }, compare: "prev", startedOn: "2026-09-10", engines: [], questions: [], answers: [], serp: [], keywordCount: 10 });
-  assert.equal(early.compare, null);
-  assert.equal(early.lfl, null);
-  assert.match(early.compareHidden ?? "", /^Tracking began 10 Sep, so there is no earlier period to compare with yet\. From 17 Sep the changes are against your first week\.$/);
+  assert.deepEqual(early.compare, { from: "2026-09-10", to: "2026-09-10" });
+  assert.equal(early.compareKind, "first");
+  assert.equal(early.compareHidden, null);
+  // A range ending on the first reading has nothing to compare yet, and says from when it will.
+  const day1 = overview({ range: { from: "2026-09-02", to: "2026-09-10" }, compare: "prev", startedOn: "2026-09-10", engines: [], questions: [], answers: [], serp: [], keywordCount: 10 });
+  assert.equal(day1.compare, null);
+  assert.equal(day1.lfl, null);
+  assert.match(day1.compareHidden ?? "", /^Tracking began 10 Sep, so there is no earlier reading to compare with yet\. From 11 Sep the changes are against your first reading, 10 Sep\.$/);
+  // One that starts after the first reading and ends inside the first week waits for the first week, as before.
+  const inside = overview({ range: { from: "2026-09-12", to: "2026-09-15" }, compare: "prev", startedOn: "2026-09-10", engines: [], questions: [], answers: [], serp: [], keywordCount: 10 });
+  assert.equal(inside.compare, null);
+  assert.match(inside.compareHidden ?? "", /^Tracking began 10 Sep, so there is no earlier period to compare with yet\. From 17 Sep the changes are against your first week\.$/);
 });
 
 test("questions named, share of voice with rank, keywords on page 1", () => {
@@ -169,7 +180,8 @@ test("keyword rows: latest position, places gained over the range, one point per
     ],
     { from: "2026-09-01", to: "2026-09-03" },
   ).get("k")!;
-  assert.deepEqual(k, { position: 7, change: 4, series: [11, null, 7] });
+  // ON-3 (9 Oct 2026): the row also names the first reading its change is against, so the chip can say so.
+  assert.deepEqual(k, { position: 7, change: 4, series: [11, null, 7], since: "2026-09-01" });
 });
 
 test("cited pages: counted per page, engines listed, the client's own site marked", () => {
@@ -297,10 +309,14 @@ test("8 Oct 2026 (audit data-10): a young client compares with its first week - 
   // The previous period, where it exists, is untouched: an older client still compares with the 28 days before.
   assert.deepEqual(resolveComparison(fxRange, "prev", fx.client.started_on), { range: { from: "2026-08-05", to: "2026-09-01" }, kind: "prev", hidden: null });
   assert.deepEqual(resolveComparison(fxRange, "none", start), { range: null, kind: null, hidden: null });
-  // Before its first week is over there is nothing to compare yet, and it says when there will be.
+  // ON-3 (9 Oct 2026): before its first week is over it is compared with its first reading, and says which.
   const day3 = resolveComparison({ from: addDays(start, -25), to: addDays(start, 2) }, "prev", start);
-  assert.equal(day3.range, null);
-  assert.match(day3.hidden ?? "", /From 27 Sep the changes are against your first week\.$/);
+  assert.deepEqual(day3, { range: { from: start, to: start }, kind: "first", hidden: null });
+  assert.equal(comparisonLabel(day3.range!, day3.kind), "vs your first reading, 20 Sep");
+  // On its first day there is nothing to compare yet, and it says when there will be.
+  const day1 = resolveComparison({ from: addDays(start, -27), to: start }, "prev", start);
+  assert.equal(day1.range, null);
+  assert.match(day1.hidden ?? "", /From 21 Sep the changes are against your first reading, 20 Sep\.$/);
 });
 
 test("8 Oct 2026 (review of data-10): the date picker names the first week every page reads, whatever the first check read", () => {

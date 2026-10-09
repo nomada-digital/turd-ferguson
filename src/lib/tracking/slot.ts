@@ -72,7 +72,19 @@ export const slotRefusal = (raw: string | null): string | null => (raw !== null 
 
 export type Filled ={ ok: true; id: string } | { ok: false; message: string };
 
-export async function fillSlot(db: SupabaseClient, p: { clientId: string; clusterId: string; angle: string | null; text: string; today: string; by: string; role: string }): Promise<Filled> {
+/** One prompt to track in a cluster's free place, at an angle (or none). */
+export type Slot = { text: string; angle: string | null };
+
+export type FilledAll = { ok: true; ids: string[] } | { ok: false; message: string };
+
+/**
+ * The free-slot write for one prompt or several at once (ON-1, 9 Oct 2026):
+ * the setup card's and the Clusters row's five drafted prompts go through
+ * the same reads, the same text rule - each against the cluster's live
+ * prompts and the ones before it - and the same `insertPrompts`, whose room
+ * rule refuses all of them or none. A refusal is read before any write.
+ */
+export async function fillSlots(db: SupabaseClient, p: { clientId: string; clusterId: string; slots: readonly Slot[]; today: string; by: string; role: string }): Promise<FilledAll> {
   const r = refuseRole(p.role);
   if (r) return { ok: false, message: r };
   const { data: c, error: cErr } = await db.from("tracked_clusters").select("stopped_on").eq("id", p.clusterId).eq("client_domain_id", p.clientId).maybeSingle();
@@ -81,8 +93,16 @@ export async function fillSlot(db: SupabaseClient, p: { clientId: string; cluste
   if (c.stopped_on !== null) return { ok: false, message: "That cluster is stopped." };
   const { data: live, error: lErr } = await db.from("tracked_questions").select("text").eq("client_domain_id", p.clientId).eq("cluster_id", p.clusterId).is("stopped_on", null);
   if (lErr) return { ok: false, message: `Could not read its prompts: ${lErr.message}` };
-  const refused = refuseSlotText(p.text, (live ?? []).map((q) => q.text as string));
-  if (refused) return { ok: false, message: refused };
-  const w = await insertPrompts(db, p.clientId, p.clusterId, [{ text: p.text.trim(), source: "client", added_on: stopDay(p.today), added_by: p.by, angle: angleFor(p.angle) }]);
-  return w.ok ? { ok: true, id: w.ids[0] } : w;
+  const held = (live ?? []).map((q) => q.text as string);
+  for (let i = 0; i < p.slots.length; i++) {
+    const refused = refuseSlotText(p.slots[i]!.text, [...held, ...p.slots.slice(0, i).map((s) => s.text)]);
+    if (refused) return { ok: false, message: refused };
+  }
+  const w = await insertPrompts(db, p.clientId, p.clusterId, p.slots.map((s) => ({ text: s.text.trim(), source: "client", added_on: stopDay(p.today), added_by: p.by, angle: angleFor(s.angle) })));
+  return w.ok ? { ok: true, ids: w.ids } : w;
+}
+
+export async function fillSlot(db: SupabaseClient, p: { clientId: string; clusterId: string; angle: string | null; text: string; today: string; by: string; role: string }): Promise<Filled> {
+  const r = await fillSlots(db, { clientId: p.clientId, clusterId: p.clusterId, slots: [{ text: p.text, angle: p.angle }], today: p.today, by: p.by, role: p.role });
+  return r.ok ? { ok: true, id: r.ids[0]! } : r;
 }

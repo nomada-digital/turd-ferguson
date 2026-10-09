@@ -80,6 +80,12 @@ function refuseRoom(f: Fixture, kind: StopKind, row: { stopped_on: Day | null; c
 
 /** slot.ts's fillSlot on the fixture: a new row in the cluster at the stopped prompt's angle, first read tomorrow. */
 export function fixtureFillSlot(f: Fixture, p: { clusterId: string; angle: string | null; text: string; today: Day; role: string }): FixtureWritten & { id?: string } {
+  const r = fixtureFillSlots(f, { clusterId: p.clusterId, slots: [{ text: p.text, angle: p.angle }], today: p.today, role: p.role });
+  return r.ok ? { ok: true, fixture: r.fixture, id: r.ids?.[0] } : r;
+}
+
+/** slot.ts's fillSlots on the fixture: each text against the live prompts and the ones before it, then the room for all of them. */
+export function fixtureFillSlots(f: Fixture, p: { clusterId: string; slots: readonly { text: string; angle: string | null }[]; today: Day; role: string }): FixtureWritten & { ids?: string[] } {
   const role = refuseRole(p.role);
   if (role) return { ok: false, message: role };
   const { clusters, questions } = f.data;
@@ -88,11 +94,26 @@ export function fixtureFillSlot(f: Fixture, p: { clusterId: string; angle: strin
   if (c.stopped_on !== null) return { ok: false, message: "That cluster is stopped." };
   const live = questions.filter((q) => q.stopped_on === null);
   const mine = live.filter((q) => q.cluster_id === p.clusterId);
-  const refused = refuseSlotText(p.text, mine.map((q) => q.text)) ?? refusePrompts({ clientLive: live.length, clusterLive: mine.length, clusterLimit: f.client.cluster_limit });
-  if (refused) return { ok: false, message: refused };
-  const id = newId(f);
-  const row = { id, text: p.text.trim(), added_on: stopDay(p.today), stopped_on: null, cluster_id: p.clusterId, angle: angleFor(p.angle) };
-  return { ...written(f, { questions: [...questions, row] }), id };
+  for (let i = 0; i < p.slots.length; i++) {
+    const refused = refuseSlotText(p.slots[i]!.text, [...mine.map((q) => q.text), ...p.slots.slice(0, i).map((s) => s.text)]);
+    if (refused) return { ok: false, message: refused };
+  }
+  const room = refusePrompts({ clientLive: live.length, clusterLive: mine.length, clusterLimit: f.client.cluster_limit }, p.slots.length);
+  if (room) return { ok: false, message: room };
+  const taken = questions.map((q) => q.id);
+  const rows = p.slots.map((s) => {
+    const id = newIdOf(taken);
+    taken.push(id);
+    return { id, text: s.text.trim(), added_on: stopDay(p.today), stopped_on: null, cluster_id: p.clusterId, angle: angleFor(s.angle) };
+  });
+  return { ...written(f, { questions: [...questions, ...rows] }), ids: rows.map((r) => r.id) };
+}
+
+/** new-cluster.ts's fillDrafts on the fixture (ON-1, 9 Oct 2026): the drafts' rule first, then the five through the free slot's write, one per angle. */
+export function fixtureFillDrafts(f: Fixture, p: { clusterId: string; prompts: string[]; today: Day; role: string }): FixtureWritten & { ids?: string[] } {
+  const r = refuseRole(p.role) ?? refuseDrafts(p.prompts);
+  if (r) return { ok: false, message: r };
+  return fixtureFillSlots(f, { clusterId: p.clusterId, slots: p.prompts.map((text, i) => ({ text, angle: ANGLES[i]! })), today: p.today, role: p.role });
 }
 
 /** edit.ts's editPrompts on the fixture: a pending cluster's prompts rewritten in place, each only while it has no reading. */
@@ -260,6 +281,8 @@ export function fixtureRekey(f: Fixture, p: { clusterId: string; keyword: string
     today: f.today,
     readings: own ? serp.filter((s) => s.keyword_id === own).length : 0,
     taken: live.some((k) => k.id !== own && keywordForm(k.keyword) === keyword),
+    // ON-1 (9 Oct 2026): a cluster that never had a keyword may take its first at any time.
+    keywordless: !!c && !own,
   });
   if (refused) return { ok: false, message: refused };
   const ownLive = !!own && live.some((k) => k.id === own);
@@ -267,7 +290,7 @@ export function fixtureRekey(f: Fixture, p: { clusterId: string; keyword: string
   return written(f, {
     keywords: ownLive
       ? keywords.map((k) => (k.id === own ? { ...k, keyword, search_volume: p.volume, intent: p.intent } : k))
-      : [...keywords, { id: kId, keyword, added_on: c!.started_on, stopped_on: null, search_volume: p.volume, intent: p.intent }],
+      : [...keywords, { id: kId, keyword, added_on: c!.started_on > f.today ? c!.started_on : stopDay(f.today), stopped_on: null, search_volume: p.volume, intent: p.intent }],
     clusters: clusters.map((x) => (x.id === p.clusterId ? { ...x, name: keyword, keyword_id: kId } : x)),
   });
 }
@@ -279,9 +302,9 @@ function unused(ids: readonly string[], prefix: string): string {
   return `${prefix}${n}`;
 }
 
-/** A prompt id the fixture has not used, in readStopForm's alphabet. */
-function newId(f: Fixture): string {
-  const ids = new Set(f.data.questions.map((q) => q.id));
+/** A prompt id the fixture has not used (none of `taken`), in readStopForm's alphabet. */
+function newIdOf(taken: readonly string[]): string {
+  const ids = new Set(taken);
   let n = ids.size + 1;
   while (ids.has(`fw${n}`)) n++;
   return `fw${n}`;

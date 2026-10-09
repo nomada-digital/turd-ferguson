@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import {
+  DEFAULT_RANGE_DAYS,
+  YOUNG_RANGE_DAYS,
   bounds,
   calendarHint,
   compareText,
+  defaultRange,
   monthCells,
   moveDay,
   pickDay,
@@ -15,6 +19,7 @@ import {
   summary,
   viewFor,
 } from "./date-range.ts";
+import { addDays } from "./figures.ts";
 
 // T5 part 1 (30 Sep 2026): the picker's rules against boards/DatePicker.dc.html,
 // whose state is today 29 Sep 2026, tracking began 4 Jul 2026, last 28 days.
@@ -45,8 +50,12 @@ test("last month in January is December of the year before", () => {
 test("the trigger names the preset a range is, else counts its days", () => {
   assert.equal(rangeLabel({ from: "2026-09-02", to: TODAY }, TODAY, BEGAN), "Last 28 days");
   assert.equal(rangeLabel({ from: "2026-09-10", to: "2026-09-12" }, TODAY, BEGAN), "3 days");
-  // A young client's 28 days is still "Last 28 days"; the first preset that fits wins.
-  assert.equal(presetOf({ from: "2026-09-25", to: TODAY }, TODAY, "2026-09-25")?.id, "l7");
+  // ON-3 (9 Oct 2026): a young client's "Last 7 days", cut to its start, is every day since tracking began - its
+  // default range now - so that is the name it is given. Until then the first preset that fitted won ("l7").
+  assert.equal(presetOf({ from: "2026-09-25", to: TODAY }, TODAY, "2026-09-25")?.id, "all");
+  assert.equal(rangeLabel({ from: "2026-09-25", to: TODAY }, TODAY, "2026-09-25"), "Since tracking began");
+  // A preset that reaches its full length still wins over "Since tracking began" when the two are the same days.
+  assert.equal(presetOf({ from: "2026-09-23", to: TODAY }, TODAY, "2026-09-23")?.id, "l7");
 });
 
 test("click a start, then an end, either way round; disabled days do nothing", () => {
@@ -99,11 +108,38 @@ test("the compare line in the board's words, flagging a period before tracking b
   // 8 Oct 2026 (audit data-10): a period reaching back before tracking began is replaced by the first week, as every
   // page now reads it - it used to be compared with and then hidden, so a client saw no change for 55 days.
   assert.equal(compareText({ from: "2026-07-20", to: TODAY }, "prev", BEGAN), "Tracking began 4 Jul, so this compares with your first week, 4 Jul - 10 Jul.");
-  assert.equal(compareText({ from: "2026-07-04", to: "2026-07-09" }, "prev", BEGAN), "Tracking began 4 Jul, so there is no earlier period to compare with yet.");
+  // ON-3 (9 Oct 2026): a range ending inside the first week is compared with the first reading; one ending on it has nothing yet.
+  assert.equal(compareText({ from: "2026-07-04", to: "2026-07-09" }, "prev", BEGAN), "Tracking began 4 Jul, so this compares with your first reading, 4 Jul.");
+  assert.equal(compareText({ from: "2026-07-04", to: "2026-07-04" }, "prev", BEGAN), "Tracking began 4 Jul, so there is no earlier period to compare with yet.");
 });
 
 test("the hint, and the query Apply writes - the shape rangeFrom reads", () => {
   assert.equal(calendarHint(B, BEGAN), "Tracking began 4 Jul 2026. Today, 29 Sep, is ringed. Pick a start day, then an end day.");
   assert.deepEqual(rangeQuery({ from: "2026-09-02", to: TODAY }, "prev"), { from: "2026-09-02", to: TODAY });
   assert.deepEqual(rangeQuery({ from: "2026-09-02", to: TODAY }, "none"), { from: "2026-09-02", to: TODAY, compare: "none" });
+});
+
+/**
+ * ON-3 (9 Oct 2026, launch blocker LB8): the range a page opens on when the URL
+ * names none. A client under two default ranges old opens on "Since tracking
+ * began", so its changes are against its first readings; everyone else on the
+ * last 28 days, as before. rangeFrom takes it only when no range is stated.
+ */
+test("the default range: since tracking began for a young client, the last 28 days otherwise", () => {
+  assert.equal(YOUNG_RANGE_DAYS, 2 * DEFAULT_RANGE_DAYS);
+  const last28 = { from: "2026-09-02", to: TODAY };
+  assert.deepEqual(defaultRange(TODAY, BEGAN), last28, "tracking began in July: the last 28 days");
+  assert.deepEqual(defaultRange(TODAY, null), last28, "no start");
+  assert.deepEqual(defaultRange(TODAY, "2026-09-30"), last28, "a start still to come: nothing to begin from yet");
+  for (const age of [0, 1, 6, 9, 27, 28, 40, YOUNG_RANGE_DAYS - 1]) {
+    const started = addDays(TODAY, -age);
+    const r = defaultRange(TODAY, started);
+    assert.deepEqual(r, { from: started, to: TODAY }, `${age} days old`);
+    // A "Last N days" that is exactly these days keeps its name (presetOf); every other young range is named for what it is.
+    assert.equal(rangeLabel(r, TODAY, started), age === 6 ? "Last 7 days" : age === 27 ? "Last 28 days" : "Since tracking began", `${age} days old: the face`);
+  }
+  assert.deepEqual(defaultRange(TODAY, addDays(TODAY, -YOUNG_RANGE_DAYS)), last28, "two default ranges old");
+  // rangeFrom reads it, and only when the URL states no range.
+  const data = readFileSync(new URL("./overview-data.ts", import.meta.url), "utf8");
+  assert.match(data, /if \(bounded\) return \{ range: bounded, compare \};\n  return \{ range: defaultRange\(today, startedOn\), compare \};/);
 });

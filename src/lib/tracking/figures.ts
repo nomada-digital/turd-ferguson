@@ -108,7 +108,12 @@ export function firstWeek(startedOn: Day): Range {
   return { from: startedOn, to: addDays(startedOn, FIRST_WEEK_DAYS - 1) };
 }
 
-export type ComparisonKind = "prev" | "month" | "start";
+/**
+ * What a comparison is: the period picked, "start" - the first week standing
+ * in for one before tracking began - or "first", the first reading standing
+ * in while the first week is still running (ON-3, 9 Oct 2026).
+ */
+export type ComparisonKind = "prev" | "month" | "start" | "first";
 
 /**
  * The day the first week starts (8 Oct 2026, review of audit data-10): the
@@ -142,6 +147,16 @@ export function firstCheckDay(startedOn: Day | null, questions: readonly Pick<Qu
  * overlap the range: the change is then this period against its first seven
  * days, which is what "vs your first week" says. Pages and the date picker
  * (date-range.ts compareText) both call this, with the same firstCheck.
+ *
+ * ON-3 (9 Oct 2026, LB8): inside the first week - half the 14-day trial - a
+ * range that holds the first reading and a day after it is compared with that
+ * first reading ("first"), so a trial's chips say how its latest readings
+ * moved from its first instead of nothing. A young client opens on "Since
+ * tracking began" (date-range.ts defaultRange), which always holds it. The
+ * range's own figures are counted exactly as before; only a comparison that
+ * was hidden is now made, and named with its date wherever it is drawn
+ * (comparisonLabel, periodPair). A range that ends on the first reading still
+ * has nothing to compare, and says from when it will.
  */
 export function resolveComparison(
   range: Range,
@@ -155,10 +170,15 @@ export function resolveComparison(
   if (!startedOn || !start || c.from >= start) return { range: c, kind: compare, hidden: null };
   const first = firstWeek(start);
   if (first.to < range.to) return { range: first, kind: "start", hidden: null };
+  if (range.from <= start && start < range.to) return { range: { from: start, to: start }, kind: "first", hidden: null };
   return {
     range: null,
     kind: null,
-    hidden: `Tracking began ${formatDay(startedOn)}, so there is no earlier period to compare with yet. From ${formatDay(addDays(first.to, 1))} the changes are against your first week.`,
+    // A range that starts after the first reading waits for the first week; one that holds it, or ends before it, for the day after it.
+    hidden:
+      range.from <= start
+        ? `Tracking began ${formatDay(startedOn)}, so there is no earlier reading to compare with yet. From ${formatDay(addDays(start, 1))} the changes are against your first reading, ${formatDay(start)}.`
+        : `Tracking began ${formatDay(startedOn)}, so there is no earlier period to compare with yet. From ${formatDay(addDays(first.to, 1))} the changes are against your first week.`,
   };
 }
 
@@ -170,12 +190,22 @@ export function resolveComparison(
  */
 export function periodPair(now: Rate, before: Rate | null, kind: ComparisonKind | null): string {
   const p = (r: Rate) => (r.pct === null ? "-" : `${r.pct}%`);
-  return before ? `${p(now)} this period, ${p(before)} ${kind === "start" ? "in your first week" : "the one before"}` : `${p(now)} this period`;
+  return before ? `${p(now)} this period, ${p(before)} ${kind === "start" ? "in your first week" : kind === "first" ? "on your first reading" : "the one before"}` : `${p(now)} this period`;
 }
 
-/** "vs 5 Aug - 1 Sep", or "vs your first week, 20 Sep - 26 Sep" - the comparison as a chip or a date face says it. */
+/**
+ * "vs 5 Aug - 1 Sep", "vs your first week, 20 Sep - 26 Sep", or (ON-3) "vs
+ * your first reading, 3 Oct" - the comparison as a chip or a date face says
+ * it, so every change names what it is against and from which date.
+ */
 export function comparisonLabel(c: Range, kind: ComparisonKind | null): string {
+  if (kind === "first") return `vs your first reading, ${formatDay(c.from)}`;
   return `vs ${kind === "start" ? "your first week, " : ""}${formatDay(c.from)} - ${formatDay(c.to)}`;
+}
+
+/** What a comparison is against, in words for a column head or a caption: "your first week", "your first reading", or "the period before". */
+export function comparisonNoun(kind: ComparisonKind | null): string {
+  return kind === "start" ? "your first week" : kind === "first" ? "your first reading" : kind === "month" ? "the month before" : "the period before";
 }
 
 const within = (d: Day, r: Range) => d >= r.from && d <= r.to;
@@ -438,10 +468,15 @@ export function brandBoard(rows: AnswerRow[], r: Range, before: Range | null, yo
     .sort((x, y) => y.share.num - x.share.num);
 }
 
-/** One row per keyword: the latest position in the range, the change on the first reading in the range, and the daily positions for the sparkline. */
-export function keywordRows(rows: SerpRow[], r: Range): Map<string, { position: number | null; change: number | null; series: (number | null)[] }> {
+/**
+ * One row per keyword: the latest position in the range, the change on the
+ * first reading in the range, and the daily positions for the sparkline.
+ * `since` is that first reading's day, so the change can say what it is
+ * against (ON-3, 9 Oct 2026); null with fewer than two readings.
+ */
+export function keywordRows(rows: SerpRow[], r: Range): Map<string, { position: number | null; change: number | null; series: (number | null)[]; since: Day | null }> {
   const days = daysIn(r);
-  const out = new Map<string, { position: number | null; change: number | null; series: (number | null)[] }>();
+  const out = new Map<string, { position: number | null; change: number | null; series: (number | null)[]; since: Day | null }>();
   const byKw = new Map<string, Map<Day, number | null>>();
   for (const s of rows) {
     if (!within(s.run_date, r)) continue;
@@ -456,7 +491,7 @@ export function keywordRows(rows: SerpRow[], r: Range): Map<string, { position: 
     const first = read.length ? m.get(read[0]!)! : null;
     // A positive change is places gained: position 11 to 7 is +4.
     const change = position !== null && first !== null && read.length > 1 ? first - position : null;
-    out.set(id, { position, change, series });
+    out.set(id, { position, change, series, since: read.length > 1 ? read[0]! : null });
   }
   return out;
 }

@@ -3,6 +3,7 @@ import SubmitButton from "@/components/app/SubmitButton";
 import { rangeLabel } from "@/lib/tracking/date-range";
 
 import DatePicker from "./DatePicker";
+import DraftPrompts from "./DraftPrompts";
 
 import EngineLogo from "@/components/EngineLogo";
 import { APP_LIMITS } from "@/config/contact";
@@ -163,6 +164,8 @@ export default function Clusters({
   // The comparison's last day, whose Google reading the column compares with: the day before the range for
   // the previous period, the first week's last for a young client (audit data-10), the month before's last.
   const since = before ? formatDay(before.to) : null;
+  // ON-3 (9 Oct 2026): what every change is against, on each chip (Overview.tsx Chip's `vs`).
+  const vs = before ? comparisonLabel(before, cmp.kind) : null;
   // T11: the never filter carries the alwaysmentioned prompt; the unfiltered list, which is the
   // cluster layout's Google keywords panel (each row's position), carries alwayscited. Each only
   // when its rules allow (upgrade-prompts.ts), and each screen is judged on its own panel's facts.
@@ -282,11 +285,11 @@ export default function Clusters({
           <span />
           <span style={HEAD}>Keyword and its prompts</span>
           <span style={HEAD}>Prompts naming you</span>
-          <span style={{ ...HEAD, textAlign: "right" }}>{cmp.kind === "start" ? "Named, vs first week" : "Named, vs last period"}</span>
+          <span style={{ ...HEAD, textAlign: "right" }}>{cmp.kind === "start" ? "Named, vs first week" : cmp.kind === "first" ? "Named, vs first reading" : "Named, vs last period"}</span>
           <span style={{ ...HEAD, textAlign: "right" }}>{since ? `Position, vs ${since}` : "Position"}</span>
         </div>
         {shown.map((c) => (
-          <ClusterRow key={c.id} c={c} brand={brand} subject={subject} open={c.id === openId} toggle={href({ open: c.id === openId ? "" : c.id })} since={since} act={act} refill={toast?.done === "stopped" && toast.kind === "prompt" ? toast.id : null} rekey={rekey?.card === c.id ? rekey : null} redraft={redraft === c.id} rekeyed={toast?.done === "rekeyed" && toast.id === c.id} typed={prefill === c.id ? typed : null} next={next} openHref={appPath(`/${encodeURIComponent(slug)}/clusters/${encodeURIComponent(c.id)}?${new URLSearchParams(base)}`)} />
+          <ClusterRow key={c.id} c={c} brand={brand} subject={subject} open={c.id === openId} toggle={href({ open: c.id === openId ? "" : c.id })} since={since} act={act} refill={toast?.done === "stopped" && toast.kind === "prompt" ? toast.id : null} rekey={rekey?.card === c.id ? rekey : null} redraft={redraft === c.id} rekeyed={toast?.done === "rekeyed" && toast.id === c.id} typed={prefill === c.id ? typed : null} next={next} openHref={appPath(`/${encodeURIComponent(slug)}/clusters/${encodeURIComponent(c.id)}?${new URLSearchParams(base)}`)} setupHref={appPath(`/${encodeURIComponent(slug)}/setup#card-${encodeURIComponent(c.id)}`)} vs={vs} />
         ))}
         {shown.length === 0 ? (
           <div style={{ padding: "32px 24px", borderTop: `1px solid ${T.line}`, fontSize: "14px", color: T.soft }}>
@@ -698,6 +701,8 @@ function PendingEditor({
   const slots = c.prompts.filter((p) => p.stoppedOn !== null).slice(0, Math.max(0, 5 - live.length));
   // R179: "Redraft" fills the unread prompts' inputs with fresh drafts from the keyword, by angle; nothing changes until Save changes.
   const drafts = redraft && c.keyword ? draftPrompts(c.keyword) : null;
+  // ON-1: no prompt at all yet, so nothing to edit or refill - the five drafts instead.
+  const drafted = c.keyword && !c.prompts.length ? draftPrompts(c.keyword) : null;
   const draftFor = (p: { angle: string | null; text: string }, i: number) => (drafts ? (drafts[p.angle ? ANGLES.indexOf(p.angle as (typeof ANGLES)[number]) : i] ?? p.text) : p.text);
   const ck = rekey?.check ?? null;
   const route = (to: string) => act.action.replace(/\/stop$/, to);
@@ -709,7 +714,10 @@ function PendingEditor({
           <path d="M13.5 6.5l4 4" />
         </svg>
         <span style={{ fontSize: "14px", lineHeight: 1.5, color: T.ink }}>
-          {`Edit freely until the first check, tomorrow at ${next}. After that a prompt can be stopped and replaced, not rewritten, so its history stays true to what was asked.`}
+          {/* ON-1 (9 Oct 2026): a started cluster with no keyword opens here too; its read prompts are fixed already. */}
+          {c.status === "pending"
+            ? `Edit freely until the first check, tomorrow at ${next}. After that a prompt can be stopped and replaced, not rewritten, so its history stays true to what was asked.`
+            : `A keyword set now is checked from the next daily check, tomorrow at ${next}. A prompt with readings can be stopped and replaced, not rewritten, so its history stays true to what was asked.`}
         </span>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
@@ -741,7 +749,8 @@ function PendingEditor({
         <p id={`rk-kw-${c.id}-note`} role={ck ? (ck.ok ? "status" : "alert") : undefined} style={{ margin: 0, fontSize: "13px", lineHeight: 1.5, color: ck ? (ck.ok ? T.goodFg : T.badFg) : T.soft }}>
           {/* DS59 (2 Oct 2026, R173 pass 6): a cluster with no keyword read "Until the first check you can change it" - there was nothing to change. */}
           {/* DS62 (2 Oct 2026, R173 pass 6): owners read "Give this cluster the keyword" while viewers and /setup read "We add its Google keyword for you" - both now say it. */}
-          {ck ? ck.message : typed && !c.keyword ? "This is the keyword you gave at checkout. Check it, or type another; we check it has Google search volume and a buying intent." : !c.keyword ? `Give this cluster the Google keyword its ${PROMPTS_PER_CLUSTER} prompts are about, or leave it and we add one for you. We check it has Google search volume and a buying intent; the prompts stay as they are.` : "Until the first check you can change it. We check it has Google search volume and a buying intent; the prompts stay as they are."}
+          {/* ON-1 (9 Oct 2026, LB8): "or leave it and we add one for you" promised a person; a cluster with no prompt gets five drafted from the keyword set here. */}
+          {ck ? ck.message : typed && !c.keyword ? "This is the keyword you gave at checkout. Check it, or type another; we check it has Google search volume and a buying intent." : !c.keyword ? `Give this cluster the Google keyword its ${PROMPTS_PER_CLUSTER} prompts are about. We check it has Google search volume and a buying intent; ${live.length ? "the prompts stay as they are" : `${PROMPTS_PER_CLUSTER} prompts are then drafted from it for you to edit`}.` : "Until the first check you can change it. We check it has Google search volume and a buying intent; the prompts stay as they are."}
         </p>
       </form>
       {ck?.ok && rekey?.sig ? (
@@ -768,6 +777,8 @@ function PendingEditor({
           Fresh drafts are in the boxes below. Save changes to keep them, or leave the page to keep the old prompts.
         </p>
       ) : null}
+      {/* ON-1 (9 Oct 2026, LB8): a keyword and no prompt - a signup with no scan - gets the five drafted from the keyword, saved through /prompt. */}
+      {drafted ? <DraftPrompts id={`cl-draft-${c.id}`} action={`${route("/prompt")}?${new URLSearchParams({ ...act.keep, kind: "cluster", id: c.id })}`} keyword={c.keyword!} drafts={drafted} note={`Nothing in this cluster is checked until they are saved. Saved today, they are first asked tomorrow at ${next}.`} /> : null}
       <form id={formId} method="post" action={`${act.action.replace(/\/stop$/, "/edit")}?${new URLSearchParams({ ...act.keep, kind: "cluster", id: c.id })}`} />
       <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
         {live.map((p, i) => (
@@ -817,9 +828,11 @@ function PendingEditor({
         <StopForm act={act} kind="cluster" id={c.id} style={{ height: "44px", padding: "0 16px", border: `1px solid ${T.line}`, borderRadius: "12px", background: T.surface, color: T.ink, fontSize: "14px", fontWeight: 600 }}>
           Remove this cluster
         </StopForm>
-        <SubmitButton form={formId} busy="Saving..." style={{ height: "44px", padding: "0 18px", border: 0, borderRadius: "12px", background: T.accent, color: T.surface, fontFamily: "inherit", fontSize: "14px", fontWeight: 600 }}>
-          Save changes
-        </SubmitButton>
+        {live.some((p) => !p.fixed) ? (
+          <SubmitButton form={formId} busy="Saving..." style={{ height: "44px", padding: "0 18px", border: 0, borderRadius: "12px", background: T.accent, color: T.surface, fontFamily: "inherit", fontSize: "14px", fontWeight: 600 }}>
+            Save changes
+          </SubmitButton>
+        ) : null}
       </div>
     </div>
   );
@@ -846,6 +859,8 @@ function ClusterRow({
   typed = null,
   next,
   openHref,
+  setupHref,
+  vs = null,
 }: {
   c: ClusterCard;
   brand: string;
@@ -862,10 +877,16 @@ function ClusterRow({
   /** Tomorrow's check time in the client's zone (check-time.ts). */
   next: string;
   openHref: string;
+  /** ON-1: the setup card, where a cluster with readings and no keyword is given its first one. */
+  setupHref: string;
+  /** ON-3: what every change is against (Overview.tsx Chip's `vs`). */
+  vs?: string | null;
 }) {
   const pending = c.status === "pending";
   // A stop made today shows until tomorrow's check, with Undo; the slot is already free.
   const stopped = c.stoppedOn !== null;
+  // ON-1: no prompt in it at all - a signup with no scan - so nothing in it is checked yet.
+  const bare = !stopped && c.prompts.length === 0;
   const undoable = !!act && stopped && c.stoppedOn! > act.today;
   // The free slot (part 2c): a live cluster with fewer than 5 live prompts offers
   // the place of a stopped one, at its angle, to owners and editors.
@@ -909,22 +930,26 @@ function ClusterRow({
             <span style={{ fontSize: "17px", fontWeight: 700, fontVariantNumeric: "tabular-nums" }} title={pending ? (basis ?? undefined) : basisLine(c.now, "answers")}>
               {pctText(c.now.pct)}
             </span>
-            <Chip value={c.delta} unit=" pts" none={noChange(c)} />
+            <Chip value={c.delta} unit=" pts" none={noChange(c)} vs={vs} />
           </span>
         </span>
         <span className="app-hide-sm" style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "4px" }}>
           <span style={{ fontSize: "12px", color: T.soft }}>Google</span>
           <span style={{ display: "flex", alignItems: "center", gap: "8px" }}>
             <span style={{ fontSize: "17px", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{c.position === null ? "-" : `#${c.position}`}</span>
-            <PositionChip c={c} />
+            <PositionChip c={c} vs={vs} />
           </span>
         </span>
       </Link>
 
-      {open && pending && act && !stopped ? (
+      {/* ON-1 (9 Oct 2026, LB8): a cluster with no keyword and nothing read is edited as a pending one - its first keyword can be set at any time (rekey.ts keywordless). */}
+      {open && (pending || (c.keyword === null && !c.prompts.some((p) => p.fixed))) && act && !stopped ? (
         <PendingEditor c={c} kw={kw} lead={lead} act={act} subject={subject} rekey={rekey} redraft={redraft} rekeyed={rekeyed} typed={typed} next={next} />
       ) : open ? (
         <div style={{ display: "flex", flexDirection: "column", gap: "14px", padding: "4px 24px 22px" }}>
+          {act && bare && c.keyword ? (
+            <DraftPrompts id={`cl-draft-${c.id}`} action={`${act.action.replace(/\/stop$/, "/prompt")}?${new URLSearchParams({ ...act.keep, kind: "cluster", id: c.id })}`} keyword={c.keyword} drafts={draftPrompts(c.keyword)} note={`Nothing in this cluster is checked until they are saved. Saved today, they are first asked tomorrow at ${next}.`} />
+          ) : null}
           <div className="app-cl-body" style={{ display: "flex", alignItems: "center" }}>
             <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: "4px", flexGrow: 1, minWidth: 0 }}>
               {c.prompts.map((p) => act && slots.has(p.id) ? (
@@ -974,7 +999,7 @@ function ClusterRow({
                     {pctText(p.now.pct)}
                   </span>
                   <span style={{ display: "flex", justifyContent: "flex-end" }}>
-                    <Chip value={p.before && p.now.pct !== null && p.before.pct !== null ? p.now.pct - p.before.pct : null} unit=" pts" none={pending ? "Tomorrow" : since ? "New" : ""} />
+                    <Chip value={p.before && p.now.pct !== null && p.before.pct !== null ? p.now.pct - p.before.pct : null} unit=" pts" none={pending ? "Tomorrow" : since ? "New" : ""} vs={vs} />
                   </span>
                   {act ? (
                     !stopped && p.stoppedOn === null ? (
@@ -1006,11 +1031,12 @@ function ClusterRow({
               <span style={{ fontSize: "16px", fontWeight: 700, lineHeight: 1.3 }}>{c.keyword ?? "Needs a keyword"}</span>
               <span style={{ display: "flex", alignItems: "baseline", gap: "10px" }}>
                 <span style={{ fontSize: "36px", fontWeight: 700, letterSpacing: "-0.03em", fontVariantNumeric: "tabular-nums" }}>{c.position === null ? "-" : `#${c.position}`}</span>
-                <PositionChip c={c} />
+                <PositionChip c={c} vs={vs} />
               </span>
               <span style={{ fontSize: "13px", color: T.soft }}>
                 {/* R148 pass 9 (1 Oct 2026): a signup whose scan chose no keyword left "-" with no next step; nomada picks it (signup.ts order email). */}
-                {c.keyword === null ? "We add its Google keyword for you." : c.positionBefore !== null && since ? `was #${c.positionBefore} on ${since}` : pending ? `First check tomorrow at ${next}` : `Tracked since ${formatDay(c.started_on)}`}
+                {/* ON-1 (9 Oct 2026): "We add its Google keyword for you" promised a person. */}
+                {c.keyword === null ? (act ? <>No keyword yet. <Link href={setupHref} style={{ color: T.accent, fontWeight: 600 }}>Give it one on setup</Link></> : "No keyword yet. An owner or editor adds it.") : c.positionBefore !== null && since ? `was #${c.positionBefore} on ${since}` : pending ? `First check tomorrow at ${next}` : `Tracked since ${formatDay(c.started_on)}`}
               </span>
               {c.intent || vol ? (
                 <span style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>

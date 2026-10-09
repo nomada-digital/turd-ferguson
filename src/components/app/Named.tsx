@@ -194,7 +194,7 @@ export default function Named({
               <span style={HEAD}>Brand</span>
               <span style={{ ...HEAD, textAlign: "right" }}>Answers</span>
               <span style={{ ...HEAD, textAlign: "right" }}>Share</span>
-              <span style={{ ...HEAD, textAlign: "right" }}>{before ? (cmp.kind === "start" ? "Vs first week" : "Vs last period") : "Change"}</span>
+              <span style={{ ...HEAD, textAlign: "right" }}>{before ? (cmp.kind === "start" ? "Vs first week" : cmp.kind === "first" ? "Vs first reading" : "Vs last period") : "Change"}</span>
               <span style={HEAD}>Engines</span>
               <span style={{ ...HEAD, textAlign: "right" }}>Prompts</span>
             </div>
@@ -219,7 +219,7 @@ export default function Named({
                         {pct(r.share)}
                       </span>
                       <span className="app-nm-change" style={{ display: "flex", justifyContent: "flex-end" }}>
-                        {r.isNew ? <span style={{ fontSize: "12px", fontWeight: 600, color: T.soft }}>New</span> : before && r.answers ? <Chip value={r.delta} unit=" pts" none="-" /> : null}
+                        {r.isNew ? <span style={{ fontSize: "12px", fontWeight: 600, color: T.soft }}>New</span> : before && r.answers ? <Chip value={r.delta} unit=" pts" none="-" vs={before ? comparisonLabel(before, cmp.kind) : null} /> : null}
                       </span>
                       {/* Two grid cells on a desktop; one line on a phone, so the counts never overlap the engines. */}
                       <span className="app-nm-sub" style={{ display: "contents" }}>

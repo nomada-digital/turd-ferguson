@@ -16,7 +16,7 @@ import { urlKey } from "./placements.ts";
 import { loadPlacements } from "./placements-data.ts";
 import { type SettingsData, loadSettings } from "./settings-data.ts";
 import { orderKeyword } from "./order-keyword.ts";
-import { loadOrderKeyword, loadSetupConfirmed } from "./setup-data.ts";
+import { loadOrderKeyword, loadReportOpened, loadSetupConfirmed } from "./setup-data.ts";
 import { type UpgradeContext, loadUpgradeContext } from "./upgrade-context.ts";
 import { type ClusterNote, type Compare, type OverviewData, loadClusterNotes, loadLatestAnswers, loadOverview, loadStructure } from "./overview-data.ts";
 import { type ReadOpts, type Structure, shapeRead } from "./read-shape.ts";
@@ -55,9 +55,11 @@ export interface TrackingRepo {
   setupConfirmed(clientId: string): Promise<boolean | null>;
   /** The keyword typed at checkout on an order with no scan behind it (R180); null otherwise or on a failed read. */
   orderKeyword(clientId: string): Promise<string | null>;
+  /** ON-3: whether a CSV was downloaded or Reports opened on this client (usage events); null on a failed read. */
+  reportOpened(clientId: string): Promise<boolean | null>;
 }
 
-const supabaseRepo: TrackingRepo = { sessionEmail, clientsFor, linkState: loadLinkState, setupConfirmed: loadSetupConfirmed, orderKeyword: loadOrderKeyword, loadOverview, structure: loadStructure, latestAnswers: loadLatestAnswers, clusterNotes: loadClusterNotes, upgradeContext: loadUpgradeContext, placements: loadPlacements, settings: loadSettings, today: () => trackingDay() };
+const supabaseRepo: TrackingRepo = { sessionEmail, clientsFor, linkState: loadLinkState, setupConfirmed: loadSetupConfirmed, orderKeyword: loadOrderKeyword, reportOpened: loadReportOpened, loadOverview, structure: loadStructure, latestAnswers: loadLatestAnswers, clusterNotes: loadClusterNotes, upgradeContext: loadUpgradeContext, placements: loadPlacements, settings: loadSettings, today: () => trackingDay() };
 
 /**
  * The fixture as served, and as R168's writes leave it. On globalThis, because
@@ -162,6 +164,10 @@ const fixtureRepo: TrackingRepo = {
   async orderKeyword(clientId) {
     const f = fixture();
     return clientId === f.client.id ? orderKeyword(f.order) : null;
+  },
+  async reportOpened() {
+    // The fixture records no usage events (the event and report routes write nothing on it), so none was ever opened.
+    return false;
   },
 };
 

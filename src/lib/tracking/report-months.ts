@@ -36,8 +36,12 @@ export function reportMonths(startedOn: Day | null, today: Day): ReportMonth[] {
 export type MonthFigures = {
   /** Every answer in the month naming the client. */
   named: Rate;
-  /** The like-for-like reading against the comparison range, where one exists; `firstWeek` when that is the client's first week (8 Oct 2026, audit data-10). */
-  lfl: { now: Rate; before: Rate; delta: number; firstWeek: boolean } | null;
+  /**
+   * The like-for-like reading against the comparison range, where one exists; `firstWeek` when that is the
+   * client's first week (8 Oct 2026, audit data-10), `firstReading` when it is the first reading - a month
+   * that ends inside the first week (ON-3, 9 Oct 2026, figures.ts resolveComparison).
+   */
+  lfl: { now: Rate; before: Rate; delta: number; firstWeek: boolean; firstReading: boolean } | null;
   /** Prompts named in at least once, "n of m". */
   prompts: Rate;
   /** Cluster keywords on page 1 at the month's latest reading (Google keywords for an ungrouped client). */
@@ -50,6 +54,7 @@ export type MonthFigures = {
 export function monthFigures(data: OverviewData, range: Range, opts: { startedOn: Day | null; today: Day; engines: readonly string[] }): MonthFigures {
   const o = overview({ range, compare: "prev", startedOn: opts.startedOn, engines: opts.engines, questions: data.questions, answers: data.answers, serp: data.serp, keywordCount: keywordsIn(data.keywords, range) });
   const firstWeek = o.compareKind === "start";
+  const firstReading = o.compareKind === "first";
   // The Overview's own test for reading by cluster (Overview.tsx clusterInput).
   if (data.clusters?.length && data.questions.some((q) => q.cluster_id)) {
     const cs = clusterSummary(clusterCards({ clusters: data.clusters, questions: data.questions, keywords: data.keywords, answers: data.answers, serp: data.serp, range, before: o.compare, today: opts.today, engines: opts.engines }));
@@ -58,16 +63,16 @@ export function monthFigures(data: OverviewData, range: Range, opts: { startedOn
     // said "No readings this month yet" over 560 answers. The keywords figure stays the cluster one, as there.
     if (ungroupedRead(data.questions, data.answers, range)) {
       const delta = o.lfl ? pointsDelta(o.lfl.now, o.lfl.before) : null;
-      return { named: o.named, lfl: o.lfl && delta !== null ? { now: o.lfl.now, before: o.lfl.before, delta, firstWeek } : null, prompts: o.questions, page1: cs.page1, basis: "clusters" };
+      return { named: o.named, lfl: o.lfl && delta !== null ? { now: o.lfl.now, before: o.lfl.before, delta, firstWeek, firstReading } : null, prompts: o.questions, page1: cs.page1, basis: "clusters" };
     }
     return {
       named: cs.now,
-      lfl: cs.lflBefore && cs.lflDelta !== null ? { now: cs.lfl, before: cs.lflBefore, delta: cs.lflDelta, firstWeek } : null,
+      lfl: cs.lflBefore && cs.lflDelta !== null ? { now: cs.lfl, before: cs.lflBefore, delta: cs.lflDelta, firstWeek, firstReading } : null,
       prompts: cs.promptsNamed,
       page1: cs.page1,
       basis: "clusters",
     };
   }
   const delta = o.lfl ? pointsDelta(o.lfl.now, o.lfl.before) : null;
-  return { named: o.named, lfl: o.lfl && delta !== null ? { now: o.lfl.now, before: o.lfl.before, delta, firstWeek } : null, prompts: o.questions, page1: o.keywords, basis: "keywords" };
+  return { named: o.named, lfl: o.lfl && delta !== null ? { now: o.lfl.now, before: o.lfl.before, delta, firstWeek, firstReading } : null, prompts: o.questions, page1: o.keywords, basis: "keywords" };
 }

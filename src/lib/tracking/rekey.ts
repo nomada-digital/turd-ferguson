@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { keywordForm } from "../scan/dataforseo-request.ts";
 import { insertKeyword, readingsFor } from "./limits.ts";
-import { refuseRole } from "./stop.ts";
+import { refuseRole, stopDay } from "./stop.ts";
 
 /**
  * R179 (Danny, 2 Oct 2026, danny.md line 211): "Change keyword" on a pending
@@ -19,14 +19,25 @@ export const KEYWORD_FIXED_NOTE = "Its keyword is fixed now it has readings, so 
 
 export type RekeyCluster = { started_on: string; stopped_on: string | null } | null;
 
-/** Whether this cluster's keyword may change today: null, or the reason it may not. */
-export function refuseRekey(p: { role: string; cluster: RekeyCluster; today: string; readings: number; taken: boolean }): string | null {
+/**
+ * Whether this cluster's keyword may change today: null, or the reason it may not.
+ *
+ * `keywordless` (ON-1, 9 Oct 2026, LB8): the cluster has never had a keyword
+ * - the "Needs a keyword" cluster signup makes when there is no scan, or the
+ * scan chose none. There is no keyword history to keep true, so its start day
+ * is no reason to refuse: from the day after purchase "Use this keyword" was
+ * refused as fixed, and the setup card that drafts a no-scan cluster's
+ * prompts from its keyword was a dead end on any day but the first. It may be
+ * given its first keyword at any time, checked from the next daily check once
+ * the cluster has started (changeKeyword). A keyword it has is fixed as before.
+ */
+export function refuseRekey(p: { role: string; cluster: RekeyCluster; today: string; readings: number; taken: boolean; keywordless?: boolean }): string | null {
   const role = refuseRole(p.role);
   if (role) return role;
   if (!p.cluster) return "That cluster is not on this client.";
   if (p.cluster.stopped_on !== null) return "That cluster is stopped.";
   // A cluster started today or earlier has been, or is being, read: its keyword is part of that history.
-  if (p.cluster.started_on <= p.today || p.readings > 0) return KEYWORD_FIXED;
+  if (!p.keywordless && (p.cluster.started_on <= p.today || p.readings > 0)) return KEYWORD_FIXED;
   if (p.taken) return "You already track this keyword.";
   return null;
 }
@@ -44,13 +55,16 @@ export async function changeKeyword(db: SupabaseClient, p: Rekey): Promise<{ ok:
   const taken = (live ?? []).some((k) => k.id !== own && keywordForm(k.keyword as string) === keyword);
   const readings = own ? await readingsFor(db, "keyword", own) : 0;
   if (typeof readings === "string") return { ok: false, message: readings };
-  const refused = refuseRekey({ role: p.role, cluster: c ? { started_on: c.started_on as string, stopped_on: c.stopped_on as string | null } : null, today: p.today, readings, taken });
+  // ON-1: a cluster that never had a keyword has no keyword history to keep true.
+  const refused = refuseRekey({ role: p.role, cluster: c ? { started_on: c.started_on as string, stopped_on: c.stopped_on as string | null } : null, today: p.today, readings, taken, keywordless: !!c && !own });
   if (refused) return { ok: false, message: refused };
   if (own && (live ?? []).some((k) => k.id === own)) {
     const { error: uErr } = await db.from("tracked_keywords").update({ keyword, search_volume: p.volume, intent: p.intent }).eq("id", own).eq("client_domain_id", p.clientId);
     if (uErr) return { ok: false, message: `Could not change the keyword: ${uErr.message}` };
   } else {
-    const k = await insertKeyword(db, p.clientId, p.clusterId, { keyword, added_on: c!.started_on as string, added_by: p.by, search_volume: p.volume, intent: p.intent });
+    // A pending cluster's keyword starts with it; a keywordless one already started (ON-1) is checked from the next daily check.
+    const from = (c!.started_on as string) > p.today ? (c!.started_on as string) : stopDay(p.today);
+    const k = await insertKeyword(db, p.clientId, p.clusterId, { keyword, added_on: from, added_by: p.by, search_volume: p.volume, intent: p.intent });
     if (!k.ok) return k;
   }
   const { error: nErr } = await db.from("tracked_clusters").update({ name: keyword }).eq("id", p.clusterId).eq("client_domain_id", p.clientId);

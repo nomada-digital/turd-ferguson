@@ -4,8 +4,9 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
-import { NEXT_STEPS } from "./onboarding.ts";
+import { NEXT_STEPS, nextSteps } from "./onboarding.ts";
 import { welcome } from "../lib/email/lifecycle.ts";
+import { checkTime } from "../lib/tracking/check-time.ts";
 
 /**
  * The 3-step strip (R166, Danny, danny.md line 175, 1 Oct 2026): drawn on
@@ -38,7 +39,28 @@ test("the welcome email lists the same three steps, paid and on the trial", () =
 });
 
 test("no placement timeline in the strip", () => {
-  for (const step of NEXT_STEPS) {
+  // 9 Oct 2026 (ON-3): the timed strip the setup page and the welcome email draw is held too.
+  for (const step of [...NEXT_STEPS, ...nextSteps(checkTime("2026-10-10", "UK")), ...nextSteps(checkTime("2026-11-02", "US"))]) {
     assert.doesNotMatch(step, /placement|placed|publish|\bweeks?\b|\bmonths?\b|\bdays?\b/i, step);
   }
+});
+
+/**
+ * ON-1 and ON-3 (9 Oct 2026, launch blocker LB8): setup is self-serve and the
+ * first check waits on a cluster's prompts, so the strip promises neither a
+ * person nor "the next morning". Where the market is known it says the daily
+ * check's time in that zone (check-time.ts); the public pages know none and
+ * say no time. The welcome email is sent with the market and start.
+ */
+test("the strip describes the self-serve drafts, and says a time only where the market is known", () => {
+  assert.equal(NEXT_STEPS.length, 3);
+  assert.match(NEXT_STEPS[0], /edit the five prompts drafted from it/);
+  assert.doesNotMatch(NEXT_STEPS.join(" "), /\bwe (?:write|add|set|pick|choose)\b|next morning|by hand/i, "nothing a person does for them");
+  assert.equal(NEXT_STEPS[1], "Your first readings come from the daily check after your prompts are in.");
+  assert.equal(nextSteps(checkTime("2026-10-10", "UK"))[1], "Your first readings come from the daily check at 06:00 UK time after your prompts are in.");
+  assert.equal(nextSteps(checkTime("2026-11-02", "US"))[1], "Your first readings come from the daily check at 12:00am ET after your prompts are in.");
+  const mail = welcome({ tier: "tracked", clusters: 1, clusterLimit: 10, domain: "example.com", link: "https://example.com/x", market: "US", startedOn: "2026-10-10" });
+  for (const step of nextSteps(checkTime("2026-10-10", "US"))) assert.ok(mail.text.includes(step), `the welcome lacks "${step}"`);
+  const signup = readFileSync(join(SRC, "lib/checkout/signup.ts"), "utf8");
+  assert.match(signup, /welcome\(\{ tier: tier as TierKey, clusters, clusterLimit, domain, link, trial, market, startedOn \}\)/, "signup sends the welcome with the market and start");
 });

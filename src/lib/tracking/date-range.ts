@@ -49,9 +49,41 @@ export function presets(today: Day, startedOn: Day | null): Preset[] {
   ];
 }
 
-/** The preset a range is, if any - first match wins, so a young client's 28 days reads "Last 28 days", not "Since tracking began". */
+/**
+ * The preset a range is, if any. A "Last N days" that reaches its full length
+ * wins first; then "Since tracking began"; then the first other match. Before
+ * ON-3 the first match won, so a young client's "Last 28 days" - cut short to
+ * its start, and so the same days as "Since tracking began" - read as that
+ * preset; from 9 Oct 2026 that range is a young client's default, and the
+ * face and the picker name it for what it is, every day since tracking began.
+ */
 export function presetOf(r: Range, today: Day, startedOn: Day | null): Preset | null {
-  return presets(today, startedOn).find((p) => p.range.from === r.from && p.range.to === r.to) ?? null;
+  const all = presets(today, startedOn).filter((p) => p.range.from === r.from && p.range.to === r.to);
+  const whole = all.find((p) => (p.id === "l7" || p.id === "l28" || p.id === "l90") && !p.hint);
+  return whole ?? all.find((p) => p.id === "all") ?? all[0] ?? null;
+}
+
+/** The default range's length, "Last 28 days" (rangeFrom): every page with dates opens on it when the URL names none. */
+export const DEFAULT_RANGE_DAYS = 28;
+
+/** ON-3 (9 Oct 2026): a client whose tracking began fewer days ago than this - two default ranges - opens on "Since tracking began". */
+export const YOUNG_RANGE_DAYS = 2 * DEFAULT_RANGE_DAYS;
+
+/**
+ * The range a page opens on when the URL names none (ON-3, 9 Oct 2026; LB8).
+ * The last 28 days compared with the 28 before reached back before a young
+ * client's start, so its changes were against its first week at best and
+ * nothing at all in that week. A client whose tracking began under
+ * YOUNG_RANGE_DAYS ago opens on the "Since tracking began" preset instead -
+ * every day it has been read - and figures.ts resolveComparison compares that
+ * with its first week, or in its first week with its first reading. Older
+ * clients, and one whose start is still to come, keep the last 28 days.
+ * Only the default moves: a range in the URL always wins (rangeFrom), and
+ * nothing about how a range's figures are counted changes.
+ */
+export function defaultRange(today: Day, startedOn: Day | null): Range {
+  if (startedOn && startedOn <= today && addDays(startedOn, YOUNG_RANGE_DAYS) > today) return presets(today, startedOn).find((p) => p.id === "all")!.range;
+  return { from: addDays(today, -(DEFAULT_RANGE_DAYS - 1)), to: today };
 }
 
 /** The trigger's bold line: the preset's name, else "N days" (as Overview printed before T5). */
@@ -172,6 +204,8 @@ export function compareText(r: Range, compare: Compare, startedOn: Day | null, f
   // 8 Oct 2026 (audit data-10): a period reaching back before tracking began is replaced by the first week, as every page reads it.
   const res = resolveComparison(r, compare, startedOn, firstCheck);
   if (startedOn && res.kind === "start" && res.range) return `Tracking began ${formatDay(startedOn)}, so this compares with your first week, ${formatDay(res.range.from)} - ${formatDay(res.range.to)}.`;
+  // ON-3 (9 Oct 2026): inside the first week, the first reading.
+  if (startedOn && res.kind === "first" && res.range) return `Tracking began ${formatDay(startedOn)}, so this compares with your first reading, ${formatDay(res.range.from)}.`;
   if (startedOn && !res.range) return `Tracking began ${formatDay(startedOn)}, so there is no earlier period to compare with yet.`;
   return compare === "prev" ? `Compared with ${span}, the ${daysIn(r).length} days before.` : `Compared with ${span}.`;
 }

@@ -75,14 +75,15 @@ export default async function CheckoutDone({ searchParams }: Props) {
               {email ? "" : " and sending a sign-in link to your email"}. The first check runs tomorrow.
             </p>
           ) : (
+            // ON-1 (9 Oct 2026, LB8): "We add each cluster's keyword and prompts" promised a person; setup is the buyer's own, and nothing waits on us.
             <p style={P}>
               Stripe emails your receipt. We are setting up your dashboard for your website
-              {email ? "" : " and sending a sign-in link to your email"}. We add each cluster&apos;s keyword and
-              prompts, then the daily checks begin.
+              {email ? "" : " and sending a sign-in link to your email"}. When you sign in, check a keyword for each
+              cluster and edit the five prompts drafted from it. The daily checks begin once a cluster has its prompts.
             </p>
           )}
           {!tracked && (
-            <p style={P}>We will also email you to book the onboarding call, where we agree the prompts for each keyword.</p>
+            <p style={P}>We will also email you to book the onboarding call, where we go through the keyword and prompts you set for each cluster.</p>
           )}
           {email ? (
             // R166: one click for a fresh link to the order's address, through

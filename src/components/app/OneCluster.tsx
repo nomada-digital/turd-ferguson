@@ -114,8 +114,12 @@ export default function OneCluster({
   const input: ClusterInput = { clusters: data.clusters ?? [], questions: data.questions, keywords: data.keywords, answers: data.answers, serp: data.serp, range, before, today, engines };
   // A first week drawn dashed over the range's first days would read as a period it is not.
   const drawn = clusterChart(input, c.id);
-  const chart = drawn && cmp.kind === "start" ? { ...drawn, namedBefore: null, googleBefore: null } : drawn;
-  const chartBefore = cmp.kind === "start" ? null : before;
+  // ON-3 (9 Oct 2026): nor a first reading, one day laid over the range.
+  const oneDay = cmp.kind === "start" || cmp.kind === "first";
+  const chart = drawn && oneDay ? { ...drawn, namedBefore: null, googleBefore: null } : drawn;
+  const chartBefore = oneDay ? null : before;
+  // ON-3: what every change is against, on each chip (Overview.tsx Chip's `vs`).
+  const vs = before ? comparisonLabel(before, cmp.kind) : null;
   const hasPrev = !!chart?.namedBefore?.some((p) => p !== null);
   const pending = c.status === "pending";
   // 9 Oct 2026 (audit copy-2): tomorrow's check time in the client's zone, from the cron (check-time.ts).
@@ -181,7 +185,7 @@ export default function OneCluster({
           </div>
           <h1 style={{ margin: 0, fontSize: "32px", lineHeight: 1.15, fontWeight: 700, letterSpacing: "-0.03em" }}>{kw}</h1>
           <p style={LEDE}>
-            {`${c.prompts.length} prompt${c.prompts.length === 1 ? "" : "s"} asked every morning on ${WORDS[engines.length] ?? engines.length} engines${c.keyword === null ? ". We add its Google keyword for you" : ", and the keyword checked on Google"}. `}
+            {`${c.prompts.length} prompt${c.prompts.length === 1 ? "" : "s"} asked every morning on ${WORDS[engines.length] ?? engines.length} engines${c.keyword === null ? ". It has no Google keyword yet; an owner or editor gives it one on setup" : ", and the keyword checked on Google"}. `}
             {pending ? `First check tomorrow at ${next}.` : `Tracked since ${formatDay(c.started_on, true)}.`}
             {/* DS64 (2 Oct 2026, R173 pass 7): Clusters marked a stop and this page did not; the same words as Clusters. */}
             {c.stoppedOn !== null ? ` Stopped from ${formatDay(c.stoppedOn)}. Its history stays in your reports.` : null}
@@ -204,8 +208,8 @@ export default function OneCluster({
 
       <section aria-label="Summary" className="app-cl-sum" style={{ ...CARD, display: "flex", flexWrap: "wrap" }}>
         {/* R148 pass 7 (1 Oct 2026): before the first answer there is no count to give - "-", not "0 of 0" or "0 of 5". */}
-        {fig("Answers naming you", "cl-named", big(c.now.den ? `${c.now.num} of ${c.now.den}` : "-"), <Chip value={c.delta} unit=" pts" none={noChange(c)} />, !c.now.den ? "No answers yet" : periodPair(c.now, c.before, cmp.kind), true)}
-        {fig("Google position", "cl-google", big(c.position === null ? "-" : `#${c.position}`), <PositionChip c={c} />, `${posLine}${upFrom}`)}
+        {fig("Answers naming you", "cl-named", big(c.now.den ? `${c.now.num} of ${c.now.den}` : "-"), <Chip value={c.delta} unit=" pts" none={noChange(c)} vs={vs} />, !c.now.den ? "No answers yet" : periodPair(c.now, c.before, cmp.kind), true)}
+        {fig("Google position", "cl-google", big(c.position === null ? "-" : `#${c.position}`), <PositionChip c={c} vs={vs} />, `${posLine}${upFrom}`)}
         {fig("Prompts naming you", "cl-prompts", big(c.now.den ? `${c.promptsNamed.num} of ${c.promptsNamed.den}` : "-"), null, c.now.den ? "Each named you on at least one engine" : `${c.promptsNamed.den} prompts, none checked yet`)}
         {fig(
           "Most reliable engine",
@@ -241,7 +245,7 @@ export default function OneCluster({
             answersPerDay: c.prompts.length * engines.length,
             pending,
             firstCheckAt: next,
-            note: !pending && !hasPrev ? (cmp.kind === "start" && before ? `Tracked from ${formatDay(c.started_on)}. Its changes are against your first week, ${span(before)}.` : `Tracked from ${formatDay(c.started_on)}. No earlier period to compare yet.`) : null,
+            note: !pending && !hasPrev ? (cmp.kind === "start" && before ? `Tracked from ${formatDay(c.started_on)}. Its changes are against your first week, ${span(before)}.` : cmp.kind === "first" && before ? `Tracked from ${formatDay(c.started_on)}. Its changes are against your first reading, ${formatDay(before.from)}.` : `Tracked from ${formatDay(c.started_on)}. No earlier period to compare yet.`) : null,
             phoneLine: pending
               ? `First check tomorrow at ${next}.`
               : `${pct(c.now)} named, ${c.position === null ? (c.keyword ? "no Google position" : "no keyword yet") : `#${c.position} on Google`}.` + (hasPrev && chartBefore ? ` Dashed: ${span(chartBefore)}` : ` Tracked from ${formatDay(c.started_on)}.`),
@@ -302,7 +306,7 @@ export default function OneCluster({
                     {pct(p.now)}
                   </span>
                   <span style={{ display: "flex", justifyContent: "flex-end" }}>
-                    <Chip value={pointsDelta(p.now, p.before)} unit=" pts" none={pending ? "Tomorrow" : before ? "New" : ""} />
+                    <Chip value={pointsDelta(p.now, p.before)} unit=" pts" none={pending ? "Tomorrow" : before ? "New" : ""} vs={vs} />
                   </span>
                 </Link>
               );
@@ -322,7 +326,7 @@ export default function OneCluster({
             <span style={{ fontSize: "16px", fontWeight: 700, lineHeight: 1.3 }}>{kw}</span>
             <span style={{ display: "flex", alignItems: "baseline", gap: "10px", flexWrap: "wrap" }}>
               <span style={{ fontSize: "36px", fontWeight: 700, letterSpacing: "-0.03em", fontVariantNumeric: "tabular-nums" }}>{c.position === null ? "-" : `#${c.position}`}</span>
-              <PositionChip c={c} />
+              <PositionChip c={c} vs={vs} />
             </span>
             {c.positionBefore !== null && detail.positionBeforeOn ? <span style={{ fontSize: "13px", color: T.soft }}>{`was #${c.positionBefore} on ${formatDay(detail.positionBeforeOn)}`}</span> : null}
             <span style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>

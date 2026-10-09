@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import { clusterCards, clusterSummary } from "./cluster-figures.ts";
-import { overview } from "./figures.ts";
+import { addDays, overview } from "./figures.ts";
 import { expandFixture, fixtureState } from "./fixture-mode.ts";
 import { monthFigures, reportMonths } from "./report-months.ts";
 
@@ -77,6 +77,13 @@ test("8 Oct 2026 (audit data-10): a young client's month compares with its first
   assert.equal(card.lfl!.firstWeek, true);
   const older = monthFigures(fx.data, sept, { startedOn: fx.client.started_on, today: fx.today, engines });
   assert.equal(older.lfl?.firstWeek, false);
+  assert.equal(card.lfl!.firstReading, false);
+  // ON-3 (9 Oct 2026): a month that ends inside the first week is compared with the first reading, and says so.
+  const start = young.client.started_on;
+  const early = monthFigures(young.data, { from: "2026-09-01", to: addDays(start, 3) }, { startedOn: start, today: young.today, engines });
+  assert.equal(early.lfl?.firstReading, true);
+  assert.equal(early.lfl?.firstWeek, false);
   const src = readFileSync(new URL("../../components/app/Reports.tsx", import.meta.url), "utf8");
-  assert.match(src, /f\.lfl\.firstWeek \? " in the first week" : ""/, "the card says which period it is against");
+  // 9 Oct 2026 (ON-3): the line grew a third case, the first reading; the first week's words are unchanged.
+  assert.match(src, /f\.lfl\.firstWeek \? " in the first week" : f\.lfl\.firstReading \? " on the first reading" : ""/, "the card says which period it is against");
 });
