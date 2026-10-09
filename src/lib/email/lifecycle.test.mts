@@ -5,7 +5,8 @@ import { test } from "node:test";
 import { COMPANY_LINE, CONTACT_EMAIL } from "../../config/contact.ts";
 import { trialCharge, trialMoment } from "../../config/trial.ts";
 import { TIER_PLAIN } from "../tier-text.ts";
-import { flagFor, flagOn, LIFECYCLE_EMAILS, planEnded, previews, previewSets, setupReminder, welcome } from "./lifecycle.ts";
+import { NO_PROMPT_NO_CHECK } from "../tracking/check-time.ts";
+import { flagFor, flagOn, LIFECYCLE_EMAILS, planEnded, previews, previewSets, setupConfirmed, setupReminder, welcome } from "./lifecycle.ts";
 
 /** R159 (1 Oct 2026): the lifecycle templates' shared rules, on the preview fixtures. Nothing is sent. */
 
@@ -93,6 +94,34 @@ test("activation-16: the setup reminder says what the runner does - prompts are 
   const none = setupReminder({ tier: "tracked", domain: "example.com", link: "https://example.com/s", withPrompts: 0, clusterLimit: 10 });
   assert.match(none.text, /Nothing is checked until your first cluster has prompts/);
   assert.equal(sets.setup_reminder.length, 2, "both cases are drawn for approval");
+});
+
+/**
+ * copy-2 (9 Oct 2026) and the review of 3eaa592: setup_confirmed's subject,
+ * heading and the line under it, on each branch. The time is the client's
+ * zone's on the day; a "first" check is promised only while it is still to
+ * come; and a client with no live prompt - the runner skips it - is promised
+ * no check at all, in the Overview's words.
+ */
+test("copy-2: setup_confirmed says when checks run in the client's zone, and promises none the runner will not make", () => {
+  const base = { tier: "tracked" as const, clusters: ["invoicing software"], link: "https://example.com/app" };
+  const cases = [
+    { why: "US, started tomorrow", d: { market: "US", today: "2026-10-09", startedOn: "2026-10-10", livePrompts: 5 }, head: "Your first check runs tomorrow at 1:00am ET", line: null },
+    { why: "UK, the day after the clocks go back", d: { market: "UK", today: "2026-10-26", startedOn: "2026-10-27", livePrompts: 5 }, head: "Your first check runs tomorrow at 05:00 UK time", line: null },
+    { why: "UK, checks began before the confirm", d: { market: "UK", today: "2026-10-12", startedOn: "2026-10-10", livePrompts: 5 }, head: "Your clusters are set up", line: "Checks run every day at 06:00 UK time." },
+    { why: "US, no prompts, started tomorrow", d: { market: "US", today: "2026-10-09", startedOn: "2026-10-10", livePrompts: 0 }, head: "Your clusters are set up", line: NO_PROMPT_NO_CHECK },
+    { why: "US, no prompts, started yesterday", d: { market: "US", today: "2026-10-09", startedOn: "2026-10-08", livePrompts: 0 }, head: "Your clusters are set up", line: NO_PROMPT_NO_CHECK },
+  ];
+  for (const c of cases) {
+    const m = setupConfirmed({ ...base, ...c.d });
+    assert.equal(m.subject, c.head, c.why);
+    assert.ok(m.text.startsWith(`${c.head}\n\n${c.line ? `${c.line}\n\n` : ""}You chose these clusters:\n`), `${c.why}: heading, then ${c.line ?? "no line"}\n${m.text}`);
+    assert.ok(m.html.includes(`>${c.head}<`), `${c.why}: the HTML heading`);
+    if (c.line) assert.ok(m.html.includes(c.line), `${c.why}: the HTML line`);
+    if (!c.d.livePrompts) assert.doesNotMatch(m.subject + m.text + m.html, /\b(?:first check|every day at)\b|\d:\d\d/, `${c.why}: no check promised`);
+  }
+  assert.equal(sets.setup_confirmed.length, 4, "each branch is drawn for approval");
+  assert.ok(sets.setup_confirmed.some((p) => p.mail.text.includes(NO_PROMPT_NO_CHECK)), "the no-prompt case is one of them");
 });
 
 /**

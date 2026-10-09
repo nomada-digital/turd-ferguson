@@ -12,6 +12,7 @@ import { CONTACT_URL, PACK_CLUSTERS, PACK_KEYWORDS, PACK_PROMPTS, contactUrlFor 
 import { T } from "@/config/tokens";
 import { ENGINE_SPECS, type Engine } from "@/lib/scan/engines";
 import { type ClusterCard, type ClusterFilter as Filter, clusterCards, daysOfLine, filterClusters, namedCount, neverCount, pendingBasis, searchPrompts } from "@/lib/tracking/cluster-figures";
+import { checkTime } from "@/lib/tracking/check-time";
 import { type Range, addDays, basis as basisLine, comparisonLabel, daysIn, firstCheckDay, formatDay, resolveComparison } from "@/lib/tracking/figures";
 import { type KeywordCheck, draftPrompts } from "@/lib/tracking/add-cluster";
 import { ANGLES, BRANDED_CHIP, BRANDED_NOTE, PROMPTS_PER_CLUSTER, type Subject, namesBrandIn, refuseEdit } from "@/lib/tracking/limits";
@@ -72,6 +73,7 @@ const GRID = "28px minmax(0, 1fr) 168px 132px 132px";
 
 export default function Clusters({
   brand,
+  market,
   engines,
   today,
   range,
@@ -98,6 +100,8 @@ export default function Clusters({
   brand: string;
   /** R133: the client's brand and domain, so a prompt that names them carries the "Names the brand" chip. */
   subject?: Subject | null;
+  /** client_domains.market: the check times are said in its zone (check-time.ts, 9 Oct 2026). */
+  market: string;
   engines: readonly Engine[];
   today: string;
   range: Range;
@@ -132,6 +136,8 @@ export default function Clusters({
   const firstCheck = firstCheckDay(startedOn ?? null, data.questions);
   const cmp = resolveComparison(range, compareMode, startedOn ?? null, firstCheck);
   const before = cmp.range;
+  // 9 Oct 2026 (audit copy-2): tomorrow's check time in the client's zone, from the cron (check-time.ts).
+  const next = checkTime(addDays(today, 1), market);
   // Audit data-3 (8 Oct 2026): every partial or failed check in the range, not only the last.
   const partial = runNote(data, range, today);
   const cards = clusterCards({ clusters: data.clusters ?? [], questions: data.questions, keywords: data.keywords, answers: data.answers, serp: data.serp, range, before, today, engines });
@@ -280,7 +286,7 @@ export default function Clusters({
           <span style={{ ...HEAD, textAlign: "right" }}>{since ? `Position, vs ${since}` : "Position"}</span>
         </div>
         {shown.map((c) => (
-          <ClusterRow key={c.id} c={c} brand={brand} subject={subject} open={c.id === openId} toggle={href({ open: c.id === openId ? "" : c.id })} since={since} act={act} refill={toast?.done === "stopped" && toast.kind === "prompt" ? toast.id : null} rekey={rekey?.card === c.id ? rekey : null} redraft={redraft === c.id} rekeyed={toast?.done === "rekeyed" && toast.id === c.id} typed={prefill === c.id ? typed : null} openHref={appPath(`/${encodeURIComponent(slug)}/clusters/${encodeURIComponent(c.id)}?${new URLSearchParams(base)}`)} />
+          <ClusterRow key={c.id} c={c} brand={brand} subject={subject} open={c.id === openId} toggle={href({ open: c.id === openId ? "" : c.id })} since={since} act={act} refill={toast?.done === "stopped" && toast.kind === "prompt" ? toast.id : null} rekey={rekey?.card === c.id ? rekey : null} redraft={redraft === c.id} rekeyed={toast?.done === "rekeyed" && toast.id === c.id} typed={prefill === c.id ? typed : null} next={next} openHref={appPath(`/${encodeURIComponent(slug)}/clusters/${encodeURIComponent(c.id)}?${new URLSearchParams(base)}`)} />
         ))}
         {shown.length === 0 ? (
           <div style={{ padding: "32px 24px", borderTop: `1px solid ${T.line}`, fontSize: "14px", color: T.soft }}>
@@ -308,12 +314,12 @@ export default function Clusters({
         ) : null}
         {prompt && cta ? <UpgradePrompt copy={prompt} cta={cta} slug={slug} items={items} keep={keep} /> : null}
       </section>
-      {ungrouped.length ? <Ungrouped rows={searchPrompts(ungrouped, q)} all={ungrouped} term={q.trim()} act={act} subject={subject} targets={moveTargets(cards, data.questions)} clusters={cards.filter((c) => c.stoppedOn === null).length} today={today} /> : null}
+      {ungrouped.length ? <Ungrouped rows={searchPrompts(ungrouped, q)} all={ungrouped} term={q.trim()} act={act} subject={subject} targets={moveTargets(cards, data.questions)} clusters={cards.filter((c) => c.stoppedOn === null).length} today={today} market={market} /> : null}
       <p style={{ margin: 0, fontSize: "13px", lineHeight: 1.5, color: T.soft, maxWidth: "820px" }}>
         {/* DS72 (R173 pass 10, 2 Oct 2026): with no cluster read yet there is no number beside any engine to explain. */}
         {cards.some((c) => c.now.den > 0) ? `The number beside each engine is the days it named ${brand} for that prompt, out of the days checked. ` : ""}Stopping a prompt or a cluster keeps its history in your reports. A new prompt or cluster starts at the next daily check.
       </p>
-      {toast ? <Toast t={toast} cards={cards} ungrouped={ungrouped} act={act} dismiss={`?${new URLSearchParams(keep)}`} /> : null}
+      {toast ? <Toast t={toast} cards={cards} ungrouped={ungrouped} act={act} next={next} dismiss={`?${new URLSearchParams(keep)}`} /> : null}
     </div>
   );
 }
@@ -343,7 +349,7 @@ export function moveTargets(cards: readonly ClusterCard[], rows: readonly Prompt
     .map((c) => ({ id: c.id, label: c.keyword ?? c.name }));
 }
 
-function Ungrouped({ rows, all, term, act, subject, targets, clusters, today }: { rows: PromptRow[]; all: PromptRow[]; term: string; act: Act; subject: Subject | null; targets: Target[]; clusters: number; today: string }) {
+function Ungrouped({ rows, all, term, act, subject, targets, clusters, today, market }: { rows: PromptRow[]; all: PromptRow[]; term: string; act: Act; subject: Subject | null; targets: Target[]; clusters: number; today: string; market: string }) {
   // DS13: ticks and a bulk bar once two or more live rows can be changed together.
   const bulk = !!act && rows.filter((q) => q.stopped_on === null).length >= 2;
   // DS55: the page's search narrows this list too, and the heading counts the matches, as Who is named does.
@@ -383,7 +389,7 @@ function Ungrouped({ rows, all, term, act, subject, targets, clusters, today }: 
                 {subject && namesBrandIn(q.text, subject) ? <BrandedChip /> : null}
                 {stopping ? <span style={{ fontSize: "12px", color: T.soft }}>Stops after today’s check</span> : null}
                 {/* DS76 (2 Oct 2026): a prompt added for tomorrow is listed here but not yet asked, which the Overview's count leaves out. */}
-                {!stopping && q.added_on > today ? <span style={{ fontSize: "12px", color: T.accent, fontWeight: 600 }}>{q.added_on === addDays(today, 1) ? "First check tomorrow at 06:00" : `First check ${formatDay(q.added_on)} at 06:00`}</span> : null}
+                {!stopping && q.added_on > today ? <span style={{ fontSize: "12px", color: T.accent, fontWeight: 600 }}>{`First check ${q.added_on === addDays(today, 1) ? "tomorrow" : formatDay(q.added_on)} at ${checkTime(q.added_on, market)}`}</span> : null}
               </span>
               {act && !stopping && targets.length ? <MoveForm act={act} id={q.id} text={q.text} targets={targets} /> : null}
               {act ? (
@@ -606,7 +612,7 @@ export function bulkToast(t: Pick<StopToast, "done" | "count" | "why">): string 
 }
 
 /** The board's toast: what the stop did, and Undo while it can still be undone. */
-function Toast({ t, cards, ungrouped = [], act, dismiss }: { t: StopToast; cards: ClusterCard[]; ungrouped?: PromptRow[]; act: Act; dismiss: string }) {
+function Toast({ t, cards, ungrouped = [], act, next, dismiss }: { t: StopToast; cards: ClusterCard[]; ungrouped?: PromptRow[]; act: Act; next: string; dismiss: string }) {
   const cluster = t.kind === "cluster" ? cards.find((c) => c.id === t.id) : cards.find((c) => c.prompts.some((p) => p.id === t.id));
   const loose = t.kind === "prompt" && !cluster ? ungrouped.find((q) => q.id === t.id) : undefined;
   const prompt = t.kind === "prompt" ? (cluster?.prompts.find((p) => p.id === t.id) ?? (loose ? { text: loose.text, stoppedOn: loose.stopped_on } : undefined)) : undefined;
@@ -618,15 +624,15 @@ function Toast({ t, cards, ungrouped = [], act, dismiss }: { t: StopToast; cards
       : t.done === "refused" || !name
       ? "That change did not go through. Reload the page and try again."
       : t.done === "added" && t.kind === "cluster"
-        ? `Now tracking “${short(name)}” and 5 prompts. First results after tomorrow’s 06:00 check.`
+        ? `Now tracking “${short(name)}” and 5 prompts. First results after tomorrow’s check, at ${next}.`
       : t.done === "added"
-        ? `Now tracking “${short(name)}”. First results after tomorrow’s 06:00 check.`
+        ? `Now tracking “${short(name)}”. First results after tomorrow’s check, at ${next}.`
         : t.done === "moved" && t.kind === "prompt" && cluster
         ? `Moved “${short(name)}” into ${cluster.keyword ?? cluster.name}. It is asked every morning as before.`
         : t.done === "rekeyed"
-        ? `Keyword changed to “${short(name)}”. Its prompts are kept, and the first check uses it tomorrow at 06:00.`
+        ? `Keyword changed to “${short(name)}”. Its prompts are kept, and the first check uses it tomorrow at ${next}.`
         : t.done === "saved"
-        ? "Saved. The first check uses these prompts tomorrow at 06:00."
+        ? `Saved. The first check uses these prompts tomorrow at ${next}.`
         : t.done === "undone"
         ? `Undone. “${short(name)}” is still tracked.`
         : t.kind === "cluster" && cluster?.status === "pending"
@@ -673,11 +679,14 @@ function PendingEditor({
   redraft = false,
   rekeyed = false,
   typed = null,
+  next,
 }: {
   c: ClusterCard;
   kw: string;
   lead: string;
   act: NonNullable<Act>;
+  /** Tomorrow's check time in the client's zone (check-time.ts). */
+  next: string;
   subject: Subject | null;
   rekey?: Rekeying | null;
   redraft?: boolean;
@@ -700,7 +709,7 @@ function PendingEditor({
           <path d="M13.5 6.5l4 4" />
         </svg>
         <span style={{ fontSize: "14px", lineHeight: 1.5, color: T.ink }}>
-          Edit freely until the first check, tomorrow at 06:00. After that a prompt can be stopped and replaced, not rewritten, so its history stays true to what was asked.
+          {`Edit freely until the first check, tomorrow at ${next}. After that a prompt can be stopped and replaced, not rewritten, so its history stays true to what was asked.`}
         </span>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
@@ -835,6 +844,7 @@ function ClusterRow({
   redraft = false,
   rekeyed = false,
   typed = null,
+  next,
   openHref,
 }: {
   c: ClusterCard;
@@ -849,6 +859,8 @@ function ClusterRow({
   redraft?: boolean;
   rekeyed?: boolean;
   typed?: string | null;
+  /** Tomorrow's check time in the client's zone (check-time.ts). */
+  next: string;
   openHref: string;
 }) {
   const pending = c.status === "pending";
@@ -866,7 +878,7 @@ function ClusterRow({
   const meta = stopped
     ? `${lead ? `${lead}. ` : ""}Stopped from ${formatDay(c.stoppedOn!)}. Its history stays in your reports`
     : pending
-      ? `${lead ? `${lead}. ` : ""}Added today, first check tomorrow at 06:00${basis ? `. ${basis}` : ""}`
+      ? `${lead ? `${lead}. ` : ""}Added today, first check tomorrow at ${next}${basis ? `. ${basis}` : ""}`
       : `${lead ? `${lead}. ` : ""}Since ${formatDay(c.started_on)}`;
   const named = namedCount(c);
   const mid = BLOCK_H / 2;
@@ -910,7 +922,7 @@ function ClusterRow({
       </Link>
 
       {open && pending && act && !stopped ? (
-        <PendingEditor c={c} kw={kw} lead={lead} act={act} subject={subject} rekey={rekey} redraft={redraft} rekeyed={rekeyed} typed={typed} />
+        <PendingEditor c={c} kw={kw} lead={lead} act={act} subject={subject} rekey={rekey} redraft={redraft} rekeyed={rekeyed} typed={typed} next={next} />
       ) : open ? (
         <div style={{ display: "flex", flexDirection: "column", gap: "14px", padding: "4px 24px 22px" }}>
           <div className="app-cl-body" style={{ display: "flex", alignItems: "center" }}>
@@ -945,7 +957,7 @@ function ClusterRow({
                     {p.stoppedOn !== null && !stopped ? (
                       <span style={{ fontSize: "12px", color: T.soft, fontWeight: 600 }}>{`Stopped from ${formatDay(p.stoppedOn)}. Its history stays in your reports.`}</span>
                     ) : pending && !p.fixed ? (
-                      <span style={{ fontSize: "12px", color: T.accent, fontWeight: 600 }}>First check tomorrow at 06:00</span>
+                      <span style={{ fontSize: "12px", color: T.accent, fontWeight: 600 }}>{`First check tomorrow at ${next}`}</span>
                     ) : (
                       <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
                         {p.daysNamed.map((d) => (
@@ -998,7 +1010,7 @@ function ClusterRow({
               </span>
               <span style={{ fontSize: "13px", color: T.soft }}>
                 {/* R148 pass 9 (1 Oct 2026): a signup whose scan chose no keyword left "-" with no next step; nomada picks it (signup.ts order email). */}
-                {c.keyword === null ? "We add its Google keyword for you." : c.positionBefore !== null && since ? `was #${c.positionBefore} on ${since}` : pending ? "First check tomorrow at 06:00" : `Tracked since ${formatDay(c.started_on)}`}
+                {c.keyword === null ? "We add its Google keyword for you." : c.positionBefore !== null && since ? `was #${c.positionBefore} on ${since}` : pending ? `First check tomorrow at ${next}` : `Tracked since ${formatDay(c.started_on)}`}
               </span>
               {c.intent || vol ? (
                 <span style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
@@ -1026,7 +1038,7 @@ function ClusterRow({
           </div>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "16px", flexWrap: "wrap" }}>
             <span style={{ fontSize: "13px", color: T.soft }}>
-              {c.status === "added" ? `Added ${formatDay(c.started_on)}, so there is no earlier period to compare against yet.` : pending ? "Its prompts are asked from tomorrow's 06:00 check." : "Dates and comparisons apply to the prompts and the keyword alike."}
+              {c.status === "added" ? `Added ${formatDay(c.started_on)}, so there is no earlier period to compare against yet.` : pending ? `Its prompts are asked from tomorrow's check, at ${next}.` : "Dates and comparisons apply to the prompts and the keyword alike."}
             </span>
             <span style={{ display: "flex", gap: "10px" }}>
               {/* T7: the board's "Open cluster" goes to QuestionDetail, the one-cluster page, for every role. */}

@@ -5,7 +5,8 @@ import { TRACKED_PRICE } from "@/config/pricing";
 import { trialMoment, trialStatus } from "@/config/trial";
 import { T } from "@/config/tokens";
 import type { UpsellMode } from "@/lib/tracking/ask";
-import { formatDay } from "@/lib/tracking/figures";
+import { checkTime, nextCheckAt } from "@/lib/tracking/check-time";
+import { addDays, formatDay } from "@/lib/tracking/figures";
 import { KEYWORDS_PER_CLUSTER, PROMPTS_PER_CLUSTER } from "@/lib/tracking/limits";
 import type { Member } from "@/lib/tracking/settings-data";
 
@@ -26,13 +27,6 @@ const SECTION = { background: T.surface, border: `1px solid ${T.line}`, borderRa
 const HEAD = { margin: 0, padding: "18px 24px", fontSize: "16px", fontWeight: 700, color: T.ink } as const;
 // Each row carries the rule above it, so the head needs none of its own.
 const ROW = { display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: "8px 24px", flexWrap: "wrap", padding: "14px 24px", borderTop: `1px solid ${T.line}`, fontSize: "14px" } as const;
-
-/** The next daily run: the track cron is `0 5 * * *` UTC (vercel.json). */
-const nextRunUtc = (now: number) => {
-  const d = new Date(now);
-  const at = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 5);
-  return at > now ? at : at + 86_400_000;
-};
 
 /** A London calendar day from a timestamp, as the rest of /app writes days. */
 const dayOf = (iso: string) => formatDay(new Date(iso).toLocaleDateString("en-CA", { timeZone: "Europe/London" }), true);
@@ -76,7 +70,7 @@ export default function Settings({
 }: {
   /** Clients on this account: every member sees all of them (audit security-2). */
   accountClients?: number;
-  /** client_domains.status is ended, and how many prompts are live: neither gets "Tomorrow at 06:00" (8 Oct 2026, audit activation-4/5). */
+  /** client_domains.status is ended, and how many prompts are live: neither gets "Tomorrow at" a check time (8 Oct 2026, audit activation-4/5). */
   ended?: boolean;
   livePrompts?: number;
   domain: string;
@@ -111,8 +105,8 @@ export default function Settings({
   const owners = members.filter((m) => m.role === "owner").length;
   const names = [brand?.trim() || domain, ...aliases.filter((a) => a !== brand)];
   const trial = ended ? null : trialStatus({ trialEndsAt, cancelled: Boolean(trialCancelledAt), market, price: TRACKED_PRICE });
-  // A cancelled trial whose end comes before the next run (05:00 UTC daily, vercel.json) has no next check (review of 2379757).
-  const trialStopsFirst = Boolean(trialCancelledAt && trialEndsAt && Date.parse(trialEndsAt) <= nextRunUtc(Date.now()));
+  // A cancelled trial whose end comes before the next run (the cron's hour, check-time.ts) has no next check (review of 2379757).
+  const trialStopsFirst = Boolean(trialCancelledAt && trialEndsAt && Date.parse(trialEndsAt) <= nextCheckAt(Date.now()));
   return (
     <div className="app-col" style={{ display: "flex", flexDirection: "column", gap: "20px", minWidth: 0, maxWidth: "880px" }}>
       <header style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
@@ -143,7 +137,7 @@ export default function Settings({
         <Row label="Clusters in use">{`${clustersInUse} of ${clusterLimit}`}</Row>
         {/* DS56 (2 Oct 2026, R173 pass 6): signup sets started_on to the first check, tomorrow, so "since" read a day still to come. */}
         <Row label={startedOn && startedOn > today ? "Tracking from" : "Tracking since"}>{startedOn ? formatDay(startedOn, true) : "Not started yet"}</Row>
-        <Row label="Next check">{ended ? "None - tracking has ended" : trialStopsFirst ? `None - the trial ends ${trialMoment(trialEndsAt!, market)}` : livePrompts ? "Tomorrow at 06:00" : "Once a cluster has prompts"}</Row>
+        <Row label="Next check">{ended ? "None - tracking has ended" : trialStopsFirst ? `None - the trial ends ${trialMoment(trialEndsAt!, market)}` : livePrompts ? `Tomorrow at ${checkTime(addDays(today, 1), market)}` : "Once a cluster has prompts"}</Row>
         <div style={{ ...ROW, flexDirection: "column", alignItems: "flex-start", gap: "10px" }}>
           <span style={{ color: T.soft }}>Names we match</span>
           <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexWrap: "wrap", gap: "8px" }}>

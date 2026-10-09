@@ -18,7 +18,7 @@ import { loginHref } from "@/lib/tracking/next-path";
 import { placedTier } from "@/lib/tracking/placement-figures";
 import { writeRole } from "@/lib/tracking/member";
 import { trackingRepo } from "@/lib/tracking/repo";
-import { confirmLabel, setupCards } from "@/lib/tracking/setup-landing";
+import { confirmLabel, setupCards, setupChecks } from "@/lib/tracking/setup-landing";
 import { refuseRole } from "@/lib/tracking/stop";
 import { appPath, siteHref } from "@/lib/app-host";
 
@@ -77,6 +77,8 @@ export default async function ClientSetup({
   const [structure, confirmed, typed] = await Promise.all([repo.structure(client.id), repo.setupConfirmed(client.id), repo.orderKeyword(client.id)]);
   const cards = setupCards(structure);
   const ungrouped = ungroupedShown(structure.questions, today).length;
+  // 9 Oct 2026 (review of 3eaa592): no live prompt, no check promised - the runner skips that client, as the Overview says.
+  const checks = setupChecks({ startedOn: client.started_on, today, market: client.market, livePrompts: structure.questions.filter((q) => q.stopped_on === null).length });
   // R180: the keyword typed at checkout, with no scan behind the order, prefills the first keywordless card's field.
   const prefill = prefillCard(cards, typed);
   const canWrite = refuseRole(writeRole(client)) === null;
@@ -209,7 +211,8 @@ export default async function ClientSetup({
             <a href="#help" style={{ color: T.accent, fontWeight: 600 }}>
               Tell us
             </a>{" "}
-            before you confirm, and we make it. The first check runs the morning after.
+            {/* 9 Oct 2026 (audit copy-2): the time in the client's zone, no "first" check once checks have begun, none at all with no live prompt. */}
+            {`before you confirm, and we make it. ${checks.line}`}
           </p>
           {failed ? (
             <p role="alert" style={{ margin: "0 0 12px", fontSize: "14px", color: T.badFg }}>

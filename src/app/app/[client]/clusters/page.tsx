@@ -96,6 +96,7 @@ export default async function ClientClusters({
         <Clusters
           brand={client.brand ?? client.domain}
           subject={{ brand: client.brand, domain: client.domain }}
+          market={client.market}
           engines={engines}
           today={today}
           range={range}

@@ -238,7 +238,8 @@ for (const width of [1280, 390]) {
         const page = await ctx.newPage();
         await page.goto(BASE + HOME, { waitUntil: "load" });
         const t = await page.evaluate(() => document.body.innerText, null);
-        assert.match(t, /Your first check runs tomorrow at 06:00\./);
+        // 9 Oct 2026 (audit copy-2): the time in the client's zone, labelled - the fixture client is US, so ET.
+        assert.match(t, /Your first check runs tomorrow at \d{1,2}:00[ap]m ET\./);
         assert.match(t, /\d+ prompts are set up on/);
         assert.doesNotMatch(t, /Tracking began/, "nothing has begun yet");
         // The phone shell once opened a ~215px gap above a short page.

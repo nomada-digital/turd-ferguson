@@ -193,7 +193,9 @@ const RECORDED: Record<string, string> = {
   "src/lib/tracking/runner.ts :: account_id, tier":
     "the tracking runner, after a run, for first_reading's agency check and owners; started only by the cron's signed dispatch, it returns a status only.",
   // 2 Oct 2026, R166 / R159: setup_confirmed's agency check, after the setup route writes its one row.
-  "src/lib/tracking/setup-mail.ts :: account_id, tier":
+  // 9 Oct 2026 (audit copy-2): market and started_on joined, so the mail says the first check's time in the
+  // client's zone and promises no "first" check once checks have begun; the id is still only the agency check.
+  "src/lib/tracking/setup-mail.ts :: account_id, tier, market, started_on":
     "mailSetupConfirmed reads the confirmed client's account for its upsell mode; it returns nothing, and the setup route answers with a 303 to the Overview.",
 };
 
