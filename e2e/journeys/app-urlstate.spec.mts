@@ -58,6 +58,9 @@ after(async () => {
   server?.closeAllConnections();
 });
 
+/** The links whose one job is to clear the search: they drop q, as each control drops only the filter it changes. */
+const CLEARS = ["Clear the search", "Clear filters"];
+
 /** Placements compares nothing (DS25), so its range is from and to only. */
 const CASES: { route: string; range: string[] }[] = [
   { route: `/app/tallyroo/named?${RANGE}&compare=month&engine=chatgpt&cluster=c1&q=book`, range: ["from", "to", "compare"] },
@@ -96,7 +99,11 @@ for (const width of [1280, 390]) {
         const lost: string[] = [];
         for (const c of controls) {
           for (const k of range) if (!c.keys.includes(k)) lost.push(`${c.kind} "${c.label}" drops ${k}`);
-          if (q && c.inMain && c.kind === "a" && !c.keys.includes("q")) lost.push(`${c.kind} "${c.label}" drops q`);
+          // 9 Oct 2026: "Clear the search" and "Clear filters" (264cb40, 8 Oct, audits mobile-4/6) are the
+          // controls whose filter is the search, so each must drop q - and still keep the range above.
+          const clears = CLEARS.includes(c.label);
+          if (q && c.inMain && c.kind === "a" && clears && c.keys.includes("q")) lost.push(`${c.kind} "${c.label}" keeps q`);
+          if (q && c.inMain && c.kind === "a" && !clears && !c.keys.includes("q")) lost.push(`${c.kind} "${c.label}" drops q`);
         }
         assert.deepEqual(lost, []);
         await ctx.close();
