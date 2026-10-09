@@ -21,14 +21,15 @@ import { type ClientScope, type InviteScope, addScope, clearScope, dropScope, re
  * counted off `dashboard_events` rows with event `member_invite`.
  *
  * Per-client scope (AG-1, audit security-2; 9 Oct 2026, scope.ts): Settings
- * lists, counts and changes only the members who see the client it is on. An
- * account with two or more clients invites to this client only unless the
- * owner picks every client; a member limited to some clients loses only this
- * one on Remove, and the member goes when it was their last. A member keeps
- * one role on the account, so an invite or a role change on one client sets
- * the role they have on all of theirs.
+ * lists, counts and changes only the members who see the client it is on.
+ * Every invite is to this client only unless the owner picks every client,
+ * which the form offers on an account with two or more; a member limited to
+ * some clients loses only this one on Remove, and the member goes when it was
+ * their last. A member keeps one role on the account, so an invite or a role
+ * change on one client sets the role they have on all of theirs.
  *
- * Pure rules first so the tests run each one; the writers are the network half.
+ * Pure rules first so the tests run each one - planTeam is all of them, in
+ * the member route's order - and the writers are the network half.
  */
 
 /** Where an invited member signs in, printed in the invite email (M1, 5 Oct 2026). */
@@ -75,16 +76,30 @@ export function readTeamForm(get: (k: string) => unknown): TeamForm | null {
 }
 
 /**
- * What an invite grants (AG-1, 9 Oct 2026). An account with one client has
- * nothing else to show, so its invite is every client, as before, and the
- * form draws no choice. With two or more the owner picks, and anything but
- * an explicit "account" - a missing or garbled field included - is this
- * client only, so a bad post never shows someone more than was meant.
+ * What an invite grants (AG-1, 9 Oct 2026).
+ *
+ * Once dashboard_member_clients is there, an invite is to this client only
+ * unless the owner picked every client, and anything but an explicit
+ * "account" - a missing or garbled field included - is this client only, so
+ * a bad post never shows someone more than was meant. The form offers every
+ * client only on an account with two or more; a one-client account's invite
+ * is this client whatever the post says. Review, 9 Oct 2026: it was every
+ * client, which read as "nothing else to show" but showed the invitee any
+ * client the account gained later - a second checkout with the same email
+ * lands on the same account (signup.ts) - which is the LB2 leak again.
+ *
+ * Before the table is there nothing can be limited: a one-client account
+ * invites to every client, as every invite did before AG-1; an account with
+ * two or more invites to every client only when the form says so, and
+ * planTeam refuses anything else (SCOPE_NOT_READY).
  */
-export function inviteScope(raw: unknown, accountClients: number): InviteScope {
-  if (accountClients < 2) return "account";
+export function inviteScope(raw: unknown, accountClients: number, scoping: boolean): InviteScope {
+  if (accountClients < 2) return scoping ? "client" : "account";
   return raw === "account" ? "account" : "client";
 }
+
+/** Why an invite to one client is refused before 20261009010000 is applied; the route logs it and the page says "Reload". */
+export const SCOPE_NOT_READY = "an invite to one client needs dashboard_member_clients, which is not there yet";
 
 /** The live rows that see this client: everyone Settings on it lists, counts and may change. */
 export function onClient<T extends { clients?: ClientScope }>(rows: readonly T[], clientId: string): T[] {
@@ -117,6 +132,8 @@ export const TEAM_WHY = {
   email: "That email address does not look right. Type it in full, like name@example.com.",
   already: "They are already on the team.",
   full: `A dashboard has at most ${MEMBERS_PER_CLIENT} members. Remove someone to make room.`,
+  // AG-1 review (9 Oct 2026): an invite to every client is counted on each client it adds them to.
+  fullOther: `Another client on this account has ${MEMBERS_PER_CLIENT} members already. Invite them to this client only, or remove someone there.`,
   limit: "That is today's invite limit. Try again tomorrow.",
   self: "You cannot change or remove yourself.",
   gone: "They are not on the team.",
@@ -127,7 +144,7 @@ export const TEAM_WHY = {
 export type TeamWhy = keyof typeof TEAM_WHY;
 
 /** The refusals the invite form answers on its own field rather than in the page's toast. */
-export const INVITE_WHYS: readonly TeamWhy[] = ["email", "already", "full", "limit"];
+export const INVITE_WHYS: readonly TeamWhy[] = ["email", "already", "full", "fullOther", "limit"];
 
 /** A code from the URL, or the code of one of TEAM_WHY's sentences; anything else is null. */
 export function teamWhy(raw: unknown): TeamWhy | null {
@@ -140,13 +157,28 @@ export function teamWhy(raw: unknown): TeamWhy | null {
 /** Only an owner changes the team. */
 export const refuseActor = (role: string): string | null => (role === "owner" ? null : TEAM_WHY.actor);
 
-/** `rows` are the members who see this client (onClient): one limited to other clients is not "already" here. */
+/** `rows` are the members who see this client (onClient, in planTeam): one limited to other clients is not "already" here. */
 export function refuseInvite(p: { rows: TeamRow[]; email: string; invitesToday: number }): string | null {
   const row = p.rows.find((r) => r.email === p.email);
   if (row && row.removed_at === null) return TEAM_WHY.already;
   if (live(p.rows).length >= MEMBERS_PER_CLIENT) return TEAM_WHY.full;
   if (p.invitesToday >= INVITES_PER_OWNER_PER_DAY) return TEAM_WHY.limit;
   return null;
+}
+
+/**
+ * An invite to every client puts them on each client of the account, so each
+ * is held to MEMBERS_PER_CLIENT, not only the one whose Settings posted (AG-1
+ * review, 9 Oct 2026: ten on Ledgerline, and an every-client invite from
+ * Tallyroo made eleven). A client they already see gains no one. `rows` is
+ * the whole live team, not one client's.
+ */
+export function refuseEveryClient(p: { rows: TeamRow[]; email: string; clientIds: readonly string[] }): string | null {
+  const full = p.clientIds.some((id) => {
+    const there = onClient(live(p.rows), id);
+    return !there.some((r) => r.email === p.email) && there.length >= MEMBERS_PER_CLIENT;
+  });
+  return full ? TEAM_WHY.fullOther : null;
 }
 
 /** A change to someone else's live row; never your own, never the last owner. */
@@ -157,6 +189,49 @@ export function refuseChange(p: { rows: TeamRow[]; actor: string; email: string;
   if (row.role === "owner" && live(p.rows).filter((r) => r.role === "owner").length <= 1) return TEAM_WHY.owner;
   if (p.op === "role" && row.role === p.role) return p.role === "editor" ? TEAM_WHY.editor : TEAM_WHY.viewer;
   return null;
+}
+
+/** What the member route writes once every rule has passed: planTeam's answer. */
+export type TeamPlan =
+  | { op: "invite"; role: InviteRole; scope: InviteScope; elsewhere: TeamRow | null }
+  | { op: "role"; role: InviteRole; row: TeamRow }
+  | { op: "remove"; row: TeamRow };
+
+/**
+ * Every rule the member route runs before a write, in its order, and what to
+ * write; a refusal's words otherwise (AG-1 review, 9 Oct 2026). The route
+ * and the fixture (fixture-writes.ts fixtureTeam) both call it, so the
+ * fixture's e2e runs the route's rules, and no caller narrows the team for a
+ * rule: `rows` is the account's whole live team (readTeam).
+ *
+ * - The team on this client is who sees it (onClient). Remove and a role
+ *   change reach only them; "already" and the cap are counted on them.
+ * - The invite's scope is inviteScope's; before the scope table is there an
+ *   invite to one client is refused.
+ * - An invite to every client is held to the cap on each client too.
+ * - Someone live on the account for other clients only is `elsewhere`, found
+ *   on the whole team: invite keeps their row and adds this client to it.
+ */
+export function planTeam(p: { form: TeamForm; actor: string; rows: TeamRow[]; scoping: boolean; clientId: string; clientIds: readonly string[]; invitesToday: number }): TeamPlan | string {
+  const team = live(p.rows);
+  const here = onClient(team, p.clientId);
+  const { op, email, role } = p.form;
+  if (op === "invite") {
+    if (!role) return "Pick a role.";
+    const ids = [...new Set([p.clientId, ...p.clientIds])];
+    const scope = inviteScope(p.form.scope, ids.length, p.scoping);
+    if (scope === "client" && !p.scoping) return SCOPE_NOT_READY;
+    const no = refuseInvite({ rows: here, email, invitesToday: p.invitesToday });
+    if (no) return no;
+    const full = scope === "account" ? refuseEveryClient({ rows: team, email, clientIds: ids }) : null;
+    if (full) return full;
+    return { op, role, scope, elsewhere: team.find((r) => r.email === email) ?? null };
+  }
+  const no = refuseChange({ rows: here, actor: p.actor, email, op, role });
+  if (no) return no;
+  const row = here.find((r) => r.email === email)!;
+  if (op === "remove") return { op, row };
+  return role ? { op, role, row } : "Pick a role.";
 }
 
 // ---- Where the route sends the browser back to, and the toast the page draws. ----
@@ -242,6 +317,24 @@ export function scopeLine(clients: number | null, accountClients: number, domain
   return clients > 1 ? `Sees ${domain} and ${otherClients(clients - 1)}` : `Sees only ${domain}`;
 }
 
+/**
+ * What the invite form says about who the invitee will see (AG-1 review,
+ * 9 Oct 2026), as inviteScope decides it. `ask` is the choice, drawn on an
+ * account with two or more clients once the scope table is there: this
+ * client only, checked, or every client - which says it takes in any client
+ * added later, as it does. Otherwise one line, and before the table a hidden
+ * every-client field, since that is all an invite can be then.
+ */
+export type InviteChoice = { ask: { only: string; every: string } | null; line: string | null; hidden: InviteScope | null };
+export function inviteChoice(accountClients: number, scoping: boolean, domain: string): InviteChoice {
+  if (!scoping) {
+    const line = accountClients > 1 ? `They will see all ${accountClients} clients on this account, and any added later.` : `They will see ${domain}, and any client added to this account later.`;
+    return { ask: null, line, hidden: "account" };
+  }
+  if (accountClients > 1) return { ask: { only: `Only ${domain}`, every: `Every client on this account (${accountClients} now, and any added later)` }, line: null, hidden: null };
+  return { ask: null, line: `They will see ${domain} only, not any client added to this account later.`, hidden: null };
+}
+
 /** What Remove's confirm says they lose, as removeKind decides it. */
 export function removeLine(clients: number | null, accountClients: number, domain: string): string {
   if (accountClients < 2) return "They lose access to this dashboard at once.";
@@ -256,9 +349,10 @@ export type TeamResult = { ok: true } | { ok: false; message: string };
 /**
  * The account's live members, each with their member id and scope. A removed
  * one is not on the team, and an invite revives their row. Every member of the
- * account, not only those who see this client: the route narrows them with
+ * account, not only those who see this client: planTeam narrows them with
  * onClient, and an invite needs to know who is on the account for other
- * clients. `scoping` is false while dashboard_member_clients is not there yet.
+ * clients and who sees each client. `scoping` is false while
+ * dashboard_member_clients is not there yet.
  */
 export async function readTeam(db: SupabaseClient, accountId: string): Promise<{ rows: TeamRow[]; scoping: boolean } | string> {
   const { data, error } = await db.from("dashboard_members").select("id, email, role, removed_at").eq("account_id", accountId).is("removed_at", null);
@@ -301,27 +395,24 @@ async function writeMember(db: SupabaseClient, p: { accountId: string; email: st
 
 /**
  * Invite to this client, or to every client on the account (AG-1, 9 Oct 2026).
- * refuseInvite has already turned away anyone who sees this client.
+ * planTeam has already turned away anyone who sees this client.
  *
- * Someone on the account for other clients only (`elsewhere`) keeps their row:
- * this client joins their list, or for every client the list goes. Anyone else
- * - new, or removed - is written not yet live, their scope set, and only then
- * made live, so a write that fails on the way leaves nobody seeing more than
- * they were invited to. Their old scope rows are cleared first, so a member
- * removed while limited does not come back with it.
+ * Someone live on the account for other clients only (`elsewhere`) keeps their
+ * row (keepRow): this client joins their list, or for every client the list
+ * goes. Anyone else - new, or removed - is written not yet live, their scope
+ * set, and only then made live, so a write that fails on the way leaves
+ * nobody seeing more than they were invited to. Their old scope rows are
+ * cleared first, while they are not live, so a member removed while limited
+ * does not come back with it.
  */
 export async function invite(
   db: SupabaseClient,
   p: { accountId: string; clientId: string; email: string; role: InviteRole; by: string; scope: InviteScope; elsewhere: TeamRow | null },
 ): Promise<TeamResult> {
   const failed = (why: string): TeamResult => ({ ok: false, message: `Could not invite them: ${why}` });
-  if (p.elsewhere) {
-    if (!p.elsewhere.id) return failed("their row has no id");
-    const e = p.scope === "client" ? await addScope(db, { memberId: p.elsewhere.id, clientId: p.clientId, by: p.by }) : await clearScope(db, { memberId: p.elsewhere.id, by: p.by });
-    if (e) return failed(e);
-    const w = await writeMember(db, { ...p, live: true });
-    if ("error" in w) return failed(w.error);
-  } else {
+  const kept = p.elsewhere ? await keepRow(db, { ...p, elsewhere: p.elsewhere }) : false;
+  if (typeof kept === "string") return failed(kept);
+  if (!kept) {
     const pending = await writeMember(db, { ...p, live: false });
     if ("error" in pending) return failed(pending.error);
     const cleared = await clearScope(db, { memberId: pending.id, by: p.by });
@@ -339,6 +430,27 @@ export async function invite(
   return { ok: true };
 }
 
+/**
+ * The invite of someone live on the account for other clients only: their
+ * scope first, then their role, set only while their row is still live. True
+ * when it was. False when a Remove on another client took them off the
+ * account in between: invite then starts again as for someone removed.
+ *
+ * Never a revive (AG-1 review, 9 Oct 2026). This used writeMember's upsert,
+ * which clears removed_at; landing after a Remove of their last client, it
+ * brought them back live, and the Remove's scope clear that followed left
+ * them with no client - which reads as every client.
+ */
+async function keepRow(db: SupabaseClient, p: { accountId: string; clientId: string; role: InviteRole; by: string; scope: InviteScope; elsewhere: TeamRow }): Promise<boolean | string> {
+  const id = p.elsewhere.id;
+  if (!id) return "their row has no id";
+  const e = p.scope === "client" ? await addScope(db, { memberId: id, clientId: p.clientId, by: p.by }) : await clearScope(db, { memberId: id, by: p.by });
+  if (e) return e;
+  const { data, error } = await db.from("dashboard_members").update({ role: p.role }).eq("account_id", p.accountId).eq("id", id).is("removed_at", null).select("id");
+  if (error) return error.message;
+  return (data ?? []).length > 0;
+}
+
 export async function changeRole(db: SupabaseClient, p: { accountId: string; email: string; role: InviteRole }): Promise<TeamResult> {
   const { error } = await db.from("dashboard_members").update({ role: p.role }).eq("account_id", p.accountId).eq("email", p.email).is("removed_at", null);
   return error ? { ok: false, message: `Could not change the role: ${error.message}` } : { ok: true };
@@ -346,13 +458,17 @@ export async function changeRole(db: SupabaseClient, p: { accountId: string; ema
 
 /**
  * Remove on this client's Settings (removeKind). `row` is their live row as
- * readTeam read it, already checked by refuseChange to see this client.
+ * readTeam read it, already checked by planTeam to see this client.
  *
  * Off one of several clients: that scope row goes. Then, if a second Remove on
  * another client got there at the same moment and left them none, the member
  * goes too - a live member with no client reads as every client.
- * Off the account, or off their last client: the member row goes first, then
- * their scope, so a scope write that fails leaves nobody seeing anything.
+ * Off the account, or off their last client: the member row goes, and their
+ * scope rows are left as they are. Nothing reads a removed member's scope, and
+ * the next invite clears it while they are still not live. AG-1 review,
+ * 9 Oct 2026: clearing it here, after the member row, raced an invite on
+ * another client - one that had just made them live with that client in
+ * their scope lost it to this clear, and read as every client.
  */
 export async function removeMember(db: SupabaseClient, p: { accountId: string; email: string; by: string; clientId: string; row: TeamRow }): Promise<TeamResult> {
   if (removeKind(p.row) === "client") {
@@ -369,9 +485,5 @@ export async function removeMember(db: SupabaseClient, p: { accountId: string; e
     .eq("account_id", p.accountId)
     .eq("email", p.email)
     .is("removed_at", null);
-  if (error) return { ok: false, message: `Could not remove them: ${error.message}` };
-  const cleared = p.row.id ? await clearScope(db, { memberId: p.row.id, by: p.by }) : null;
-  // They are off the account; a scope row left live is cleared by the next invite before they can see anything.
-  if (cleared) console.warn(`[app] member removed, scope not cleared: ${cleared}`);
-  return { ok: true };
+  return error ? { ok: false, message: `Could not remove them: ${error.message}` } : { ok: true };
 }

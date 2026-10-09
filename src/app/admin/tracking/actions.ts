@@ -380,8 +380,14 @@ export async function updatePlacement(_prev: AdminResult | null, form: FormData)
  * AG-1 (9 Oct 2026, scope.ts): a member someone added here keeps whatever
  * client scope they have - none for someone new, so every client - except an
  * owner, whose scope is cleared: owners always see every client, and the
- * owner-only mails (runner first_reading, lifecycle-sweep) rely on that. A
- * removal clears the member's scope too, so a later invite starts clean.
+ * owner-only mails (runner first_reading, lifecycle-sweep) rely on that.
+ *
+ * A removal leaves the scope as it is (AG-1 review, 9 Oct 2026), as Settings'
+ * Remove does: nothing reads a removed member's scope, a Settings invite
+ * clears it before they are live, and a clear landing after an invite had
+ * made them live would leave them seeing every client. So re-adding here
+ * someone removed while limited brings them back limited, as their line on
+ * this page then says; it used to bring them back seeing every client.
  */
 export async function setMember(_prev: AdminResult | null, form: FormData): Promise<AdminResult> {
   const refused = await refuseUnlessAdmin();
@@ -394,18 +400,13 @@ export async function setMember(_prev: AdminResult | null, form: FormData): Prom
   const db = supabaseAdmin();
   if (remove) {
     // BRIEF-4 P0: a removal never deletes the row; it is marked, and every membership read skips it.
-    const { data: gone, error } = await db
+    const { error } = await db
       .from("dashboard_members")
       .update({ removed_at: new Date().toISOString(), removed_by: "nomada" })
       .eq("account_id", accountId)
       .eq("email", email)
-      .is("removed_at", null)
-      .select("id");
+      .is("removed_at", null);
     if (error) return { ok: false, message: `Could not remove ${email}: ${error.message}` };
-    for (const m of gone ?? []) {
-      const e = await clearScope(db, { memberId: m.id as string, by: "nomada" });
-      if (e) return { ok: false, message: `${email} removed, but their client list was not cleared: ${e}` };
-    }
   } else {
     if (!["owner", "editor", "viewer"].includes(role)) return { ok: false, message: "Unknown role." };
     const { data: added, error } = await db

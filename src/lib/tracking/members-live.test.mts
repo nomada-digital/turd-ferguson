@@ -73,9 +73,14 @@ const SCOPES = CALLS.filter((c) => c.table === "dashboard_member_clients");
  * .select (team.ts writeMember, the admin's setMember add), which the filter
  * below counts. The scope table's own: 4 calls - readScopes, addScope,
  * dropScope, clearScope - 3 of them reads or updates.
+ *
+ * Moved 9 Oct 2026 (AG-1 review) to 17 and 15: an invite to someone already
+ * on the account for other clients sets their role with an update that
+ * requires removed_at is null (team.ts keepRow), where it used to revive the
+ * row with writeMember's upsert.
  */
-const CALL_FLOOR = 16;
-const FILTERED_FLOOR = 14;
+const CALL_FLOOR = 17;
+const FILTERED_FLOOR = 15;
 const SCOPE_CALL_FLOOR = 4;
 const SCOPE_FILTERED_FLOOR = 3;
 

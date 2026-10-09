@@ -5,6 +5,7 @@ import { test } from "node:test";
 import { FIXTURE_SECOND_CLIENT, expandFixture, fixtureClients, fixtureSettings, fixtureState } from "./fixture-mode.ts";
 import { FIXTURE_CHECK_VOLUME, fixtureAddCluster, fixtureCheck, fixtureEditPrompts, fixtureFillSlot, fixtureGroup, fixtureStop, fixtureTeam, fixtureWrites } from "./fixture-writes.ts";
 import { addDays } from "./figures.ts";
+import { MEMBERS_PER_CLIENT, SCOPE_NOT_READY, TEAM_WHY } from "./team.ts";
 
 /**
  * R168 (Danny, 2 Oct 2026, danny.md lines 177-179): TRACKING_FIXTURE_WRITE=1,
@@ -163,6 +164,45 @@ test("AG-1 (9 Oct 2026): on the two-clients fixture an invite is to this client 
   const lead = fixtureState(fx, { TRACKING_FIXTURE_STATE: "two-clients", TRACKING_FIXTURE_ROLE: "scoped" });
   assert.deepEqual(fixtureClients(lead, lead.member.email).map((c) => c.slug), ["tallyroo"]);
   assert.equal(fixtureTeam({ ...two, member: { email: "owner@example.com", role: "owner" } }, { op: "invite", email: "x@example.com", role: "viewer", scope: null, slug: "nowhere", now }).ok, false, "an unknown client is refused");
+});
+
+/**
+ * AG-1 review (9 Oct 2026). The fixture runs the member route's planTeam, so
+ * the review's cases hold on it: a one-client invite is that client only; an
+ * every-client invite is held to the cap on Ledgerline too; and, with
+ * TRACKING_FIXTURE_SCOPING=0 (the deploy before its migration), an invite can
+ * only be to every client.
+ */
+test("AG-1 review: one-client invites are that client only; an every-client invite counts on every client; before the migration, every client only", () => {
+  const now = "2026-10-09T12:00:00Z";
+  // The default fixture has one client: the invitee is limited to it, so a client the account gains later stays hidden.
+  const one = fixtureTeam(fx, { op: "invite", email: "lead@client.example", role: "viewer", scope: "account", slug: "tallyroo", now });
+  assert.ok(one.ok);
+  assert.deepEqual(one.fixture.members.find((m) => m.email === "lead@client.example")!.clients, [fx.client.id]);
+
+  // The review's repro: Ledgerline full with Ledgerline-only members, then an every-client invite from Tallyroo.
+  const two = fixtureState(fx, { TRACKING_FIXTURE_STATE: "two-clients" });
+  const b = FIXTURE_SECOND_CLIENT.id;
+  let full = two;
+  for (let i = 0; fixtureSettings(full, b).members.length < MEMBERS_PER_CLIENT; i++) {
+    const r = fixtureTeam(full, { op: "invite", email: `l${i}@ledgerline.example`, role: "viewer", scope: "client", slug: "ledgerline", now });
+    assert.ok(r.ok);
+    full = r.fixture;
+  }
+  assert.deepEqual(fixtureTeam(full, { op: "invite", email: "late@example.com", role: "viewer", scope: "client", slug: "ledgerline", now }), { ok: false, message: TEAM_WHY.full });
+  assert.deepEqual(fixtureTeam(full, { op: "invite", email: "late@example.com", role: "viewer", scope: "account", slug: "tallyroo", now }), { ok: false, message: TEAM_WHY.fullOther });
+  assert.equal(fixtureSettings(full, b).members.length, MEMBERS_PER_CLIENT, "Ledgerline stays at ten");
+  const tallyOnly = fixtureTeam(full, { op: "invite", email: "late@example.com", role: "viewer", scope: "client", slug: "tallyroo", now });
+  assert.ok(tallyOnly.ok, "to Tallyroo only, Ledgerline is not touched");
+
+  // Before the migration: nobody is limited, the invite is to every client, and one client cannot be asked for.
+  const before = fixtureState(fx, { TRACKING_FIXTURE_STATE: "two-clients", TRACKING_FIXTURE_SCOPING: "0" });
+  assert.equal(before.scoping, false);
+  assert.deepEqual(fixtureTeam(before, { op: "invite", email: "new@example.com", role: "viewer", scope: "client", slug: "tallyroo", now }), { ok: false, message: SCOPE_NOT_READY });
+  const wide = fixtureTeam(before, { op: "invite", email: "new@example.com", role: "viewer", scope: "account", slug: "tallyroo", now });
+  assert.ok(wide.ok && !("clients" in wide.fixture.members.find((m) => m.email === "new@example.com")!));
+  const solo = fixtureTeam(fixtureState(fx, { TRACKING_FIXTURE_SCOPING: "0" }), { op: "invite", email: "new@example.com", role: "viewer", scope: null, slug: "tallyroo", now });
+  assert.ok(solo.ok && !("clients" in solo.fixture.members.find((m) => m.email === "new@example.com")!), "one client before the migration: every client, as before AG-1");
 });
 
 test("R168 part 4: Check keyword on the fixture runs the free prechecks, then a canned signed pass; the save verifies it", () => {

@@ -8,7 +8,7 @@ import type { UpsellMode } from "@/lib/tracking/ask";
 import { formatDay } from "@/lib/tracking/figures";
 import { KEYWORDS_PER_CLUSTER, PROMPTS_PER_CLUSTER } from "@/lib/tracking/limits";
 import type { Member } from "@/lib/tracking/settings-data";
-import { removeLine, scopeLine } from "@/lib/tracking/team";
+import { inviteChoice, removeLine, scopeLine } from "@/lib/tracking/team";
 
 /**
  * Settings (R142 part 1, 1 Oct 2026; BRIEF-4 P2). No board: the Clusters
@@ -80,11 +80,12 @@ export default function Settings({
   /**
    * Clients on this account (AG-1, 9 Oct 2026). With two or more, owners see
    * which clients each member sees, Remove says what it takes, and the invite
-   * asks: this client only (the default) or every client. It replaced the
+   * asks: this client only (the default) or every client. With one, the
+   * invite is this client only and says so (review, 9 Oct). It replaced the
    * 8 Oct line saying everyone saw every client (audit security-2).
    */
   accountClients?: number;
-  /** False while dashboard_member_clients is not there yet: every member sees every client, so the invite is to every client and says so. */
+  /** False while dashboard_member_clients is not there yet: every member sees every client, so the invite is to every client and says so (team.ts inviteChoice). */
   scoping?: boolean;
   /** client_domains.status is ended, and how many prompts are live: neither gets "Tomorrow at 06:00" (8 Oct 2026, audit activation-4/5). */
   ended?: boolean;
@@ -119,6 +120,7 @@ export default function Settings({
   const action = `/api/app/${encodeURIComponent(slug)}/member${keep}`;
   const askAction = `/api/app/${encodeURIComponent(slug)}/ask${keep}`;
   const owners = members.filter((m) => m.role === "owner").length;
+  const choice = inviteChoice(accountClients, scoping, domain);
   const names = [brand?.trim() || domain, ...aliases.filter((a) => a !== brand)];
   const trial = ended ? null : trialStatus({ trialEndsAt, cancelled: Boolean(trialCancelledAt), market, price: TRACKED_PRICE });
   // A cancelled trial whose end comes before the next run (05:00 UTC daily, vercel.json) has no next check (review of 2379757).
@@ -249,24 +251,25 @@ export default function Settings({
                   <option value="viewer">Viewer</option>
                 </select>
               </label>
-              {/* AG-1 (9 Oct 2026): on an account with two or more clients, this client only unless the owner picks every client. */}
-              {accountClients > 1 && scoping ? (
+              {/* AG-1 (9 Oct 2026; review the same day): who the invitee will see, as inviteChoice words it. On an account with two or more clients the owner picks, this client only checked; otherwise one line says what the invite grants. */}
+              {choice.ask ? (
                 <fieldset style={{ flexBasis: "100%", margin: 0, padding: 0, border: 0, display: "flex", flexWrap: "wrap", gap: "8px 20px", fontSize: "14px", color: T.ink }}>
                   <legend style={{ padding: 0, marginBottom: "6px", fontSize: "13px", color: T.soft }}>Who they see</legend>
                   <label style={{ display: "flex", alignItems: "center", gap: "8px", minHeight: "24px", overflowWrap: "anywhere" }}>
                     <input type="radio" id="tm-inv-scope-client" name="scope" value="client" defaultChecked style={RADIO} />
-                    {`Only ${domain}`}
+                    {choice.ask.only}
                   </label>
                   <label style={{ display: "flex", alignItems: "center", gap: "8px", minHeight: "24px" }}>
                     <input type="radio" id="tm-inv-scope-account" name="scope" value="account" style={RADIO} />
-                    {`Every client on this account (${accountClients})`}
+                    {choice.ask.every}
                   </label>
                 </fieldset>
-              ) : accountClients > 1 ? (
-                <>
-                  <input type="hidden" id="tm-inv-scope" name="scope" value="account" />
-                  <span style={{ flexBasis: "100%", fontSize: "14px", color: T.ink }}>{`They will see all ${accountClients} clients on this account.`}</span>
-                </>
+              ) : null}
+              {choice.hidden ? <input type="hidden" id="tm-inv-scope" name="scope" value={choice.hidden} /> : null}
+              {choice.line ? (
+                <span id="tm-inv-scope-line" style={{ flexBasis: "100%", fontSize: "14px", color: T.ink, overflowWrap: "anywhere" }}>
+                  {choice.line}
+                </span>
               ) : null}
               <SubmitButton busy="Sending invite..." style={DARK}>Send invite</SubmitButton>
               {/* R151 (3 Oct 2026): the refusal on the form it is about (Baymard forms, inline errors; WCAG 2.2 3.3.1). The address is not carried back, so the field is empty. */}

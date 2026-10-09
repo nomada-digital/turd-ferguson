@@ -314,3 +314,16 @@ test("AG-1: two-clients is one account with two clients, and the scoped viewer s
   assert.deepEqual(fixtureClients(fx, fx.member.email).map((c) => c.slug), ["tallyroo"]);
   assert.throws(() => fixtureState(fx, { TRACKING_FIXTURE_ROLE: "scoped" }), /no such member/, "only two-clients has a scoped member");
 });
+
+test("AG-1 review (9 Oct 2026): TRACKING_FIXTURE_SCOPING=0 is the deploy before its migration - nobody is limited and Settings says so", () => {
+  const before = fixtureState(fx, { TRACKING_FIXTURE_STATE: "two-clients", TRACKING_FIXTURE_SCOPING: "0" });
+  const settings = fixtureSettings(before, before.client.id);
+  assert.equal(settings.scoping, false);
+  assert.equal(settings.accountClients, 2);
+  assert.ok(settings.members.every((m) => m.clients === null), "no scope rows: every member sees every client");
+  assert.equal(fixtureSettings(before, FIXTURE_SECOND_CLIENT.id).members.length, settings.members.length, "both clients list the same team");
+  const lead = fixtureState(fx, { TRACKING_FIXTURE_STATE: "two-clients", TRACKING_FIXTURE_ROLE: "scoped", TRACKING_FIXTURE_SCOPING: "0" });
+  assert.deepEqual(fixtureClients(lead, lead.member.email).map((c) => c.slug), ["tallyroo", "ledgerline"], "lead@ sees both, as they would with no table");
+  assert.equal(fixtureSettings(fx, fx.client.id).scoping, true, "unset is the table being there");
+  assert.equal(fixtureState(fx, {}).scoping, undefined);
+});

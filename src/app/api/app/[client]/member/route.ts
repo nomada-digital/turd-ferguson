@@ -14,7 +14,7 @@ import { sendInvite } from "@/lib/tracking/invite-mail";
 import { clientsFor, sessionEmail } from "@/lib/tracking/member";
 import { writeFixture } from "@/lib/tracking/repo";
 import { readKept } from "@/lib/tracking/stop";
-import { type TeamDone, type TeamWhy, changeRole, invite, inviteMail, inviteScope, invitesToday, onClient, readTeam, readTeamForm, refuseActor, refuseChange, refuseInvite, removeMember, teamReturn, teamWhy } from "@/lib/tracking/team";
+import { type TeamDone, type TeamWhy, changeRole, invite, inviteMail, invitesToday, planTeam, readTeam, readTeamForm, refuseActor, removeMember, teamReturn, teamWhy } from "@/lib/tracking/team";
 import { dashPath, dashUrl } from "@/lib/tracking/app-redirect";
 
 export const runtime = "nodejs";
@@ -28,9 +28,11 @@ export const dynamic = "force-dynamic";
  * invite-mail.ts. The fixture is read-only unless TRACKING_FIXTURE_WRITE=1
  * (R168), which holds the change in memory; on the fixture nothing is sent.
  *
- * AG-1 (9 Oct 2026): every rule runs on the members who see this client
- * (onClient), and the invite is to this client only or to every client on the
- * account (inviteScope, scope.ts).
+ * AG-1 (9 Oct 2026): every rule runs on the members who see this client, and
+ * the invite is to this client only or to every client on the account
+ * (scope.ts). The rules are team.ts planTeam, which this route and the
+ * fixture both call with the account's whole live team; the route reads and
+ * writes, and decides nothing itself (team.test.mts pins it).
  */
 export async function POST(req: Request, ctx: { params: Promise<{ client: string }> }) {
   const { client: slug } = await ctx.params;
@@ -69,29 +71,25 @@ export async function POST(req: Request, ctx: { params: Promise<{ client: string
   const accountId = row.account_id as string;
   const team = await readTeam(db, accountId);
   if (typeof team === "string") return refused(team);
-  // AG-1: only the members who see this client are its team here; the count decides whether the invite asks.
-  const rows = onClient(team.rows, client.id);
-  const { count: accountClients, error: nErr } = await db.from("client_domains").select("id", { count: "exact", head: true }).eq("account_id", accountId).not("slug", "is", null);
-  if (nErr || accountClients === null) return refused(`could not count the account's clients: ${nErr?.message ?? "no count"}`);
+  // AG-1: the clients /app can show on this account - how many decides whether the invite asks, and an invite to every client is counted on each.
+  const { data: ids, error: nErr } = await db.from("client_domains").select("id").eq("account_id", accountId).not("slug", "is", null);
+  if (nErr || !ids) return refused(`could not read the account's clients: ${nErr?.message ?? "none"}`);
+  const clientIds = ids.map((c) => c.id as string);
+  // The daily cap is counted for an invite only.
+  const n = f.op === "invite" ? await invitesToday(db, { email, today: trackingDay() }) : 0;
+  if (typeof n === "string") return refused(n);
+  const plan = planTeam({ form: f, actor: email, rows: team.rows, scoping: team.scoping, clientId: client.id, clientIds, invitesToday: n });
+  if (typeof plan === "string") return refused(plan);
 
-  if (f.op === "invite") {
-    const scope = inviteScope(f.scope, accountClients);
-    // Before 20261009010000 is applied there is nowhere to write one client; Settings then offers every client only.
-    if (scope === "client" && !team.scoping) return refused("an invite to one client needs dashboard_member_clients, which is not there yet");
-    const today = trackingDay();
-    const n = await invitesToday(db, { email, today });
-    if (typeof n === "string") return refused(n);
-    const no = refuseInvite({ rows, email: f.email, invitesToday: n });
-    if (no) return refused(no);
+  if (plan.op === "invite") {
     // Read before the write: agency mode must be known, or the mail could name a nomada tier.
     const { data: account, error: aErr } = await db.from("accounts").select("upsell_mode").eq("id", accountId).maybeSingle();
     if (aErr || !account) return refused(`could not read the account: ${aErr?.message ?? "none"}`);
-    const elsewhere = team.rows.find((r) => r.email === f.email) ?? null;
-    const r = await invite(db, { accountId, clientId: client.id, email: f.email, role: f.role!, by: email, scope, elsewhere });
+    const r = await invite(db, { accountId, clientId: client.id, email: f.email, role: plan.role, by: email, scope: plan.scope, elsewhere: plan.elsewhere });
     if (!r.ok) return refused(r.message);
     const agency = upsellMode(account.upsell_mode) === "agency";
     // The mail says when they will see every client; an invite to one client names that client only.
-    const everyClient = scope === "account" && accountClients > 1 ? accountClients : null;
+    const everyClient = plan.scope === "account" && clientIds.length > 1 ? clientIds.length : null;
     // The branded invite (R159) names alwayscited and the tier, so never in agency mode; off until its flag is on.
     const mail =
       !agency && (await lifecycleOn(db, "invite"))
@@ -101,13 +99,10 @@ export async function POST(req: Request, ctx: { params: Promise<{ client: string
     return back("invited");
   }
 
-  const no = refuseChange({ rows, actor: email, email: f.email, op: f.op, role: f.role });
-  if (no) return refused(no);
-  const target = rows.find((r) => r.email === f.email)!;
   const r =
-    f.op === "role"
-      ? await changeRole(db, { accountId, email: f.email, role: f.role! })
-      : await removeMember(db, { accountId, email: f.email, by: email, clientId: client.id, row: target });
+    plan.op === "role"
+      ? await changeRole(db, { accountId, email: f.email, role: plan.role })
+      : await removeMember(db, { accountId, email: f.email, by: email, clientId: client.id, row: plan.row });
   if (!r.ok) return refused(r.message);
   return back(f.op === "role" ? "role" : "removed");
 }

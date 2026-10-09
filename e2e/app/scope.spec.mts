@@ -24,7 +24,7 @@ import assert from "node:assert/strict";
 
 const ROOT = path.resolve(import.meta.dirname, "..", "..");
 const require = createRequire(path.join(os.homedir(), "code/.parity/package.json"));
-type Locator = { click(): Promise<void>; count(): Promise<number>; innerText(): Promise<string>; isChecked(): Promise<boolean> };
+type Locator = { click(): Promise<void>; count(): Promise<number>; innerText(): Promise<string>; isChecked(): Promise<boolean>; getAttribute(name: string): Promise<string | null> };
 type Page = {
   goto(url: string, o?: object): Promise<{ status(): number } | null>;
   locator(sel: string): Locator;
@@ -63,11 +63,13 @@ after(async () => {
   server?.closeAllConnections();
 });
 
-/** Serve this fixture state and role from the next request on. */
-function as(state: string, role = "owner") {
+/** Serve this fixture state and role from the next request on; `scoping` false is the deploy before its migration (TRACKING_FIXTURE_SCOPING=0). */
+function as(state: string, role = "owner", scoping = true) {
   if (state === "default") delete process.env.TRACKING_FIXTURE_STATE;
   else process.env.TRACKING_FIXTURE_STATE = state;
   process.env.TRACKING_FIXTURE_ROLE = role;
+  if (scoping) delete process.env.TRACKING_FIXTURE_SCOPING;
+  else process.env.TRACKING_FIXTURE_SCOPING = "0";
   delete (globalThis as Record<symbol, unknown>)[Symbol.for("alwayscited.trackingFixture")];
 }
 
@@ -88,7 +90,8 @@ test("an owner invites someone to Tallyroo only, the default, with no script; Le
   const { ctx, page } = await open("/app/tallyroo/settings", false);
   await page.locator("#set-invite summary").click();
   assert.equal(await page.locator("#tm-inv-scope-client").isChecked(), true, "this client only is the default");
-  assert.match(await page.locator("#set-invite fieldset").innerText(), /Only tallyroo\.com[\s\S]*Every client on this account \(2\)/);
+  // AG-1 review (9 Oct 2026): every client says it takes in any client added later, as it does.
+  assert.match(await page.locator("#set-invite fieldset").innerText(), /Only tallyroo\.com[\s\S]*Every client on this account \(2 now, and any added later\)/);
   await page.fill("#tm-inv-email", "marketing@example.com");
   await page.locator("#set-invite button[type=submit]").click();
   await page.waitForURL(/team=invited/, { timeout: 15_000 });
@@ -128,11 +131,33 @@ test("an account-wide member sees both clients", async () => {
   await ctx.close();
 });
 
-test("a one-client account is as before: no scope lines and no choice on the invite", async () => {
+// AG-1 review (9 Oct 2026): a one-client invite is that client only, so a client the account gains later is not shown to them; the form says so.
+test("a one-client account: no scope lines and no choice, and the invite says it is this client only", async () => {
   as("default");
   const { ctx, page } = await open("/app/tallyroo/settings");
   assert.doesNotMatch(await team(page), /Sees /);
+  await page.locator("#set-invite summary").click();
   assert.equal(await page.locator("#set-invite fieldset").count(), 0);
   assert.equal(await page.locator("#tm-inv-scope").count(), 0);
+  assert.equal(await page.locator("#tm-inv-scope-line").innerText(), "They will see tallyroo.com only, not any client added to this account later.");
   await ctx.close();
+});
+
+test("before the migration (TRACKING_FIXTURE_SCOPING=0), two clients: no choice, a hidden every-client field, and the line that says so", async () => {
+  as("two-clients", "owner", false);
+  const { ctx, page } = await open("/app/tallyroo/settings", false);
+  await page.locator("#set-invite summary").click();
+  assert.equal(await page.locator("#set-invite fieldset").count(), 0);
+  assert.equal(await page.locator("input[type=radio][name=scope]").count(), 0);
+  assert.equal(await page.locator("#tm-inv-scope").getAttribute("value"), "account");
+  assert.equal(await page.locator("#tm-inv-scope-line").innerText(), "They will see all 2 clients on this account, and any added later.");
+  await page.fill("#tm-inv-email", "early@example.com");
+  await page.locator("#set-invite button[type=submit]").click();
+  await page.waitForURL(/team=invited/, { timeout: 15_000 });
+  assert.match(await team(page), /early@example\.com\s+Sees both clients on this account/);
+  const b = await open("/app/ledgerline/settings");
+  assert.match(await team(b.page), /early@example\.com/, "with no scope table everyone is on both teams, and Settings said so");
+  await b.ctx.close();
+  await ctx.close();
+  as("two-clients");
 });

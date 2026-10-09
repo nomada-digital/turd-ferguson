@@ -16,8 +16,13 @@ import type { SupabaseClient } from "@supabase/supabase-js";
  * So a live member must never be left with all their rows removed - that
  * reads as every client. Removing a member's last client removes the member
  * (team.ts removeMember), and an invite writes the scope before the member's
- * row goes live (team.ts invite). Owners are never limited: an owner invites
- * only editors and viewers, and /admin/tracking clears the scope of anyone it
+ * row goes live (team.ts invite). A member's rows are cleared only while the
+ * member is not live - the first write of an invite - or to widen them on
+ * purpose: an invite to every client, an owner made in /admin/tracking. A
+ * removal leaves them: nothing reads a removed member's scope, and a clear
+ * after the removal could land after an invite had made them live again
+ * (AG-1 review, 9 Oct 2026). Owners are never limited: an owner invites only
+ * editors and viewers, and /admin/tracking clears the scope of anyone it
  * makes an owner.
  *
  * Rows are never deleted: removal sets removed_at, as dashboard_members does,
@@ -127,9 +132,11 @@ export async function dropScope(db: SupabaseClient, p: { memberId: string; clien
 }
 
 /**
- * Every live scope row of a member removed: a live member then sees every
- * client, and a removed one carries no scope into a later invite. With the
- * table not there yet there is nothing to clear.
+ * Every live scope row of a member removed, so a live member then sees every
+ * client. Called while the member is not live (an invite's first write, so a
+ * removed member carries no old scope back), or to widen a live one on
+ * purpose (an invite to every client, an owner made in /admin/tracking).
+ * With the table not there yet there is nothing to clear.
  */
 export async function clearScope(db: SupabaseClient, p: { memberId: string; by: string }): Promise<string | null> {
   const { error } = await db

@@ -27,9 +27,10 @@ const KEYS: Record<string, string[]> = { dashboard_members: ["account_id", "emai
  * A Supabase stand-in for the calls team.ts and scope.ts make. `missing`
  * tables answer every call as PostgREST does before a migration; a `fail`
  * entry "table verb" refuses that write. `log` records each write as
- * "verb table", in order.
+ * "verb table", in order. `before` runs ahead of each write and holds it
+ * until it settles, so a test can land another request's writes in between.
  */
-function fakeDb(tables: Tables, opts: { missing?: Set<string>; fail?: Set<string> } = {}) {
+function fakeDb(tables: Tables, opts: { missing?: Set<string>; fail?: Set<string>; before?: (write: string) => Promise<void> | void } = {}) {
   let n = 0;
   const log: string[] = [];
   const query = (table: string) => {
@@ -52,8 +53,10 @@ function fakeDb(tables: Tables, opts: { missing?: Set<string>; fail?: Set<string
       order: () => b,
       single: () => ((q.one = true), b),
       maybeSingle: () => ((q.one = true), b),
-      then(resolve: (v: unknown) => void) {
-        resolve(run());
+      then(resolve: (v: unknown) => void, reject: (e: unknown) => void) {
+        const hold = q.op === "select" ? undefined : opts.before?.(`${q.op} ${table}`);
+        if (hold) hold.then(() => resolve(run()), reject);
+        else resolve(run());
       },
     };
     const pick = (r: Row) => (q.cols ? Object.fromEntries(q.cols.split(",").map((c) => [c.trim(), r[c.trim()] ?? null])) : r);
@@ -168,6 +171,7 @@ test("readTeam: every live member of the account with their scope; before the mi
 
 const inviteTo = (db: SupabaseClient, over: Partial<Parameters<typeof invite>[1]> = {}) =>
   invite(db, { accountId: "a1", clientId: "A", email: "lead@client.example", role: "viewer", by: "owner@agency.example", scope: "client", elsewhere: null, ...over });
+const rm = (db: SupabaseClient, row: TeamRow) => removeMember(db, { accountId: "a1", email: row.email, by: "owner@agency.example", clientId: "A", row });
 
 test("an invite to A only: the viewer sees A and not B; the member row goes live last", async () => {
   const t = account();
@@ -221,16 +225,62 @@ test("someone on the account for B only, invited on A: A joins their list, or fo
   const lead: Row = { id: "lead", account_id: "a1", email: "lead@client.example", role: "viewer", removed_at: null };
   const elsewhere: TeamRow = { id: "lead", email: "lead@client.example", role: "viewer", removed_at: null, clients: ["B"] };
   const t = account({ members: [lead], scopes: [{ member_id: "lead", client_domain_id: "B", removed_at: null }] });
-  const { db } = fakeDb(t);
+  const { db, log } = fakeDb(t);
   assert.deepEqual(await inviteTo(db, { elsewhere }), { ok: true });
   assert.deepEqual(scopeOf(t, "lead"), ["A", "B"]);
+  // AG-1 review (9 Oct 2026): the row is never revived here - the role is set only while it is live.
+  assert.deepEqual(log, ["upsert dashboard_member_clients", "update dashboard_members", "insert dashboard_events"]);
   const u = account({ members: [{ ...lead }], scopes: [{ member_id: "lead", client_domain_id: "B", removed_at: null }] });
   const fu = fakeDb(u);
   assert.deepEqual(await inviteTo(fu.db, { elsewhere, scope: "account" }), { ok: true });
   assert.deepEqual(await seenBy(fu.db, u, "lead@client.example"), ["A", "B"]);
 });
 
-const rm = (db: SupabaseClient, row: TeamRow) => removeMember(db, { accountId: "a1", email: row.email, by: "owner@agency.example", clientId: "A", row });
+/**
+ * AG-1 review (9 Oct 2026). lead@ is limited to A. At the same moment the
+ * owner on B invites them - B's team read found them on the account for A
+ * only, so the invite keeps their row - and the owner on A removes them, A
+ * being their last client. The review's interleaving: the invite's revive
+ * landed after the Remove's member write, and the Remove's scope clear after
+ * that, so lead@ was live with no client - every client on the account.
+ * Here the Remove lands before each of the invite's writes in turn, and after
+ * the last. The Remove now writes once, the member row, so that is every
+ * order the two can run in.
+ */
+test("a Remove of their last client landing anywhere inside an invite on another client never leaves them seeing every client, or the one removed", async () => {
+  const leadRow = { id: "lead", account_id: "a1", email: "lead@client.example", role: "viewer", removed_at: null };
+  const onA: TeamRow = { id: "lead", email: "lead@client.example", role: "viewer", removed_at: null, clients: ["A"] };
+  const outcomes = new Set<string>();
+  for (let at = 0; ; at++) {
+    const t = account({ members: [{ ...leadRow }], scopes: [{ member_id: "lead", client_domain_id: "A", removed_at: null }] });
+    const plain = fakeDb(t);
+    let n = 0;
+    let landed = false;
+    const gated = fakeDb(t, {
+      before: async () => {
+        if (n++ !== at) return;
+        landed = true;
+        assert.deepEqual(await rm(plain.db, onA), { ok: true });
+      },
+    });
+    assert.deepEqual(await inviteTo(gated.db, { clientId: "B", elsewhere: onA }), { ok: true }, `Remove before write ${at}`);
+    if (!landed) assert.deepEqual(await rm(plain.db, onA), { ok: true }, "and after every write");
+    const seen = await seenBy(plain.db, t, "lead@client.example");
+    const gone = live(t, "lead@client.example").removed_at !== null;
+    assert.deepEqual(seen, gone ? [] : ["B"], `Remove before write ${at}: removed ${gone}, sees ${seen.join(", ") || "nothing"}`);
+    outcomes.add(gone ? "removed" : "B only");
+    if (!landed) break;
+  }
+  assert.deepEqual([...outcomes].sort(), ["B only", "removed"], "both orders were reached: the later write wins, and neither widens");
+});
+
+test("removed from A, then invited back to A by an owner who read the team after: A only", async () => {
+  const t = account({ members: [{ id: "lead", account_id: "a1", email: "lead@client.example", role: "viewer", removed_at: null }], scopes: [{ member_id: "lead", client_domain_id: "A", removed_at: null }] });
+  const { db } = fakeDb(t);
+  assert.deepEqual(await rm(db, { id: "lead", email: "lead@client.example", role: "viewer", removed_at: null, clients: ["A"] }), { ok: true });
+  assert.deepEqual(await inviteTo(db), { ok: true });
+  assert.deepEqual(await seenBy(db, t, "lead@client.example"), ["A"]);
+});
 
 test("Remove on A: off A only for someone who also sees B; off the account when A was their last, or when they saw every client", async () => {
   const both: TeamRow = { id: "lead", email: "lead@client.example", role: "viewer", removed_at: null, clients: ["A", "B"] };
@@ -249,9 +299,10 @@ test("Remove on A: off A only for someone who also sees B; off the account when 
   const only = account({ members: [{ id: "lead", account_id: "a1", email: "lead@client.example", role: "viewer", removed_at: null }], scopes: [{ member_id: "lead", client_domain_id: "A", removed_at: null }] });
   const fo = fakeDb(only);
   assert.deepEqual(await rm(fo.db, { ...both, clients: ["A"] }), { ok: true });
-  assert.deepEqual(fo.log, ["update dashboard_members", "update dashboard_member_clients"], "the member goes before their scope");
+  // AG-1 review (9 Oct 2026): their scope is left - a clear here raced an invite on another client. The next invite clears it before they are live.
+  assert.deepEqual(fo.log, ["update dashboard_members"], "the member goes, and only the member row is written");
   assert.notEqual(live(only, "lead@client.example").removed_at, null);
-  assert.deepEqual(scopeOf(only, "lead"), []);
+  assert.deepEqual(scopeOf(only, "lead"), ["A"]);
   assert.deepEqual(await seenBy(fo.db, only, "lead@client.example"), []);
 
   const wide = account({ members: [{ id: "staff", account_id: "a1", email: "staff@agency.example", role: "editor", removed_at: null }] });

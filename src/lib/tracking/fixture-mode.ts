@@ -47,6 +47,13 @@ export type Fixture = {
   order?: OrderPick | null;
   /** AG-1 (9 Oct 2026): the account's other clients, beside `client`; only the two-clients state has one. They have no readings. */
   others?: Fixture["client"][];
+  /**
+   * AG-1 review (9 Oct 2026): false is production between the deploy and
+   * 20261009010000 being applied (TRACKING_FIXTURE_SCOPING=0) - the scope
+   * table is not there, so nobody is limited and no invite can be to one
+   * client. Absent is the table being there.
+   */
+  scoping?: false;
 };
 
 /** `clients` (AG-1, 9 Oct 2026): the client ids a member is limited to, as dashboard_member_clients lists them; absent is every client. */
@@ -119,6 +126,22 @@ function twoClients(f: Fixture): Fixture {
   return { ...f, others: [second], members: [...f.members, ...scoped] };
 }
 
+/**
+ * AG-1 review (9 Oct 2026): `TRACKING_FIXTURE_SCOPING=0` is the deploy landing
+ * before its migration. With no scope table nobody is limited - readScopes
+ * answers no rows - so every member's list goes, and Settings offers an
+ * invite to every client only. Applied after the role, so `scoped` still
+ * signs in as lead@, who then sees both clients, as they would.
+ */
+function beforeScoping(f: Fixture): Fixture {
+  const unlimited = (m: FixtureMember): FixtureMember => {
+    const out = { ...m };
+    delete out.clients;
+    return out;
+  };
+  return { ...f, scoping: false, members: f.members.map(unlimited) };
+}
+
 /** Every client on the fixture's account, the main one first, as clientsFor orders them (oldest first). */
 export function fixtureAccount(f: Fixture): Fixture["client"][] {
   return [f.client, ...(f.others ?? [])];
@@ -131,10 +154,11 @@ export function fixtureAccount(f: Fixture): Fixture["client"][] {
  */
 export function fixtureSettings(f: Fixture, clientId: string): SettingsData {
   const account = fixtureAccount(f);
-  if (!account.some((c) => c.id === clientId)) return { aliases: [], members: [], accountClients: 1, scoping: true };
+  const scoping = f.scoping !== false;
+  if (!account.some((c) => c.id === clientId)) return { aliases: [], members: [], accountClients: 1, scoping };
   return {
     accountClients: account.length,
-    scoping: true,
+    scoping,
     aliases: clientId === f.client.id ? f.aliases : [],
     members: f.members
       .filter((m) => !m.removed_at && sees(m.clients, clientId))
@@ -208,7 +232,8 @@ export const FIXTURE_ORDER_KEYWORD = "invoicing app for freelancers";
 
 export function fixtureState(f: Fixture, env: Record<string, string | undefined> = process.env): Fixture {
   // two-clients first: its limited members are who TRACKING_FIXTURE_ROLE=scoped signs in as.
-  const as = fixtureAs(env.TRACKING_FIXTURE_STATE === "two-clients" ? twoClients(f) : f, env);
+  const who = fixtureAs(env.TRACKING_FIXTURE_STATE === "two-clients" ? twoClients(f) : f, env);
+  const as = env.TRACKING_FIXTURE_SCOPING === "0" ? beforeScoping(who) : who;
   if (env.TRACKING_FIXTURE_STATE === "pilot-mixed") return pilotMixed(as);
   if (env.TRACKING_FIXTURE_STATE === "new") return dayZero(as);
   if (env.TRACKING_FIXTURE_STATE === "young") return young(as);
