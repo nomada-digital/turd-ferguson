@@ -12,6 +12,7 @@ import { TRACKED_PRICE } from "@/config/pricing";
 import { trialCharge, trialMoment } from "@/config/trial";
 import { dayAfter, slugFor, trackingDay } from "@/lib/tracking/decide";
 import { angleFor, CLUSTER_BASE, clusterLimitFor, insertCluster, insertKeyword, insertPrompts, namesBrandIn, PROMPTS_PER_CLUSTER } from "@/lib/tracking/limits";
+import { promptKey } from "@/lib/tracking/prompt-text";
 import { billingUrl, planEnded, trialTerms, welcome } from "@/lib/email/lifecycle";
 import { lifecycleOn, sendLifecycle } from "@/lib/email/lifecycle-mail";
 import { lifecycleIo } from "@/lib/email/lifecycle-cron";
@@ -187,6 +188,9 @@ async function clientFromOrder(db: SupabaseClient, o: CompletedOrder, trialEndsA
       .map((q) => ({ text: String(q.question).trim(), angle: angleFor(q.kind) }))
       // A scan prompt naming the brand is left behind: this copies the scan, which measures unprompted naming (R133, limits.ts).
       .filter((q) => q.text.length >= 8 && q.text.length <= 300 && !namesBrandIn(q.text, { brand: scan.brand_name, domain: scan.domain }))
+      // One of each (9 Oct 2026): tracked_questions_cluster_live_text_uniq refuses two live prompts with the same text in a
+      // cluster, and as one insert it would refuse all five - a paid signup left with no prompts over a repeated scan question.
+      .filter((q, i, all) => all.findIndex((o) => promptKey(o.text) === promptKey(q.text)) === i)
       .slice(0, PROMPTS_PER_CLUSTER)
       .map((q) => ({ text: q.text, angle: q.angle, source: "scan", added_on: startedOn, added_by: "nomada" }));
     const prompts = resume.prompts ? await insertPrompts(db, clientId, clusterId, rows) : ({ ok: true } as const);

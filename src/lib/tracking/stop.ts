@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { readClusterRefusal, readPromptRoom, refusePrompts } from "./limits.ts";
 import { appPath } from "../app-host.ts";
+import { PROMPT_TRACKED } from "./prompt-text.ts";
 
 /**
  * Stop and Undo on the Clusters page - BRIEF-3 T6 part 2a (30 Sep 2026;
@@ -179,6 +180,9 @@ export async function undoStop(db: SupabaseClient, p: { kind: StopKind; clientId
   const clear = { stopped_on: null, stopped_by: null };
   if (p.kind === "prompt") {
     const { error } = await db.from("tracked_questions").update(clear).eq("id", p.id).eq("client_domain_id", p.clientId).eq("stopped_on", day);
+    // 9 Oct 2026: a prompt with the same words went live in this cluster after the stop, and
+    // tracked_questions_cluster_live_text_uniq (20261009040000) keeps one - the slot rule's own refusal.
+    if (error?.code === "23505") return { ok: false, message: PROMPT_TRACKED };
     return error ? { ok: false, message: `Could not undo it: ${error.message}` } : { ok: true, stoppedOn: null };
   }
   // The cluster first: its keyword's one-live index would refuse a keyword coming back beside a live twin.
