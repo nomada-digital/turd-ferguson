@@ -2,8 +2,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { selectAll } from "../supabase/page.ts";
 import { liveOn, shouldTrack, trackingDay } from "./decide.ts";
-import { TRACKING_STUCK_MS, runIsStalled } from "./dispatch.ts";
-import { rerunMarker } from "./rerun.ts";
+import { runIsStalled, runIsStuck } from "./dispatch.ts";
+import { RERUN_BUTTON } from "./rerun.ts";
 
 /**
  * Run health - whether each client that should have been read today was
@@ -63,8 +63,6 @@ export type HealthRun = {
   started_at: string | null;
   finished_at?: string | null;
   dfs_cost?: number | string | null;
-  /** Read for a reopened run's marker (rerun.ts): it is queued again from the reopen, not from the row's creation. */
-  step_ms?: unknown;
 };
 
 export type TrackableClient = {
@@ -101,12 +99,9 @@ export function runState(run: HealthRun | undefined, now: number): RunState {
     case "partial":
     case "failed":
       return run.status;
-    case "queued": {
+    case "queued":
       if (run.error) return "undispatched";
-      // dispatch.ts runIsStuck, from the reopen for a re-run: its created_at is the morning's.
-      const since = Date.parse(rerunMarker(run.step_ms)?.at || run.created_at || "");
-      return Number.isFinite(since) && now - since > TRACKING_STUCK_MS ? "stuck" : "queued";
-    }
+      return runIsStuck(run, now) ? "stuck" : "queued";
     case "running":
       return runIsStalled(run, now) ? "stalled" : "running";
     default:
@@ -156,14 +151,20 @@ export function healthDeadline(day: string): number {
  * What /api/health/runs answers: 503 once the deadline has passed with any
  * client not read, so a monitor that knows only status codes alerts on it;
  * 200 otherwise, before the deadline whatever the state. A partial run is
- * read - it is in the summary mail, not a page. No domain, id, cost or count
- * of clients: only how many are unread and in which state, which says
- * nothing about who the clients are or how many there are.
+ * read - it is in the summary mail, not a page. A run asked to re-run keeps
+ * its status until the re-run closes (rerun.ts), so Danny's own re-run of a
+ * partial client never turns this 503.
+ *
+ * No domain, id, cost and no count of anything (review of 50013ab, 9 Oct
+ * 2026): only the names of the states unread clients are in. Counts by
+ * state added up to how many clients there are - before 05:00 UTC, or on a
+ * day the cron does not fire, every client is "missing" - and anyone can
+ * read this. The counts are on /admin/tracking, behind its Basic auth.
  */
 export function healthAnswer(h: RunHealth, now: number): { status: 200 | 503; body: Record<string, unknown> } {
   const deadline = healthDeadline(h.day);
   const late = !h.ok && now >= deadline;
-  const unread = Object.fromEntries(RUN_STATES.filter((s) => !READ.has(s) && h.counts[s] > 0).map((s) => [s, h.counts[s]]));
+  const unread = RUN_STATES.filter((s) => !READ.has(s) && h.counts[s] > 0);
   return {
     status: late ? 503 : 200,
     body: {
@@ -202,7 +203,7 @@ export function healthMail(h: RunHealth, p: { today: string; adminUrl: string; n
     .join(", ");
   const act =
     h.day === p.today
-      ? `Run now on /admin/tracking reads a failed, partial or stalled run's missing reads again, today only: ${p.adminUrl}`
+      ? `"${RERUN_BUTTON}" on /admin/tracking reads a failed, partial or stalled run's missing reads again, today only: ${p.adminUrl}`
       : `This is ${h.day}'s summary, sent the morning after because the day never settled or the mail did not go. That day can no longer be re-run: ${p.adminUrl}`;
   return {
     subject: `alwaystracked run health ${h.day}: ${looking.length} of ${total} client${total === 1 ? "" : "s"} to look at`,
@@ -272,7 +273,7 @@ export async function readDayRuns(db: SupabaseClient, day: string): Promise<Heal
     return await selectAll<HealthRun>((from, to) =>
       db
         .from("tracking_runs")
-        .select("client_domain_id, status, error, created_at, started_at, finished_at, dfs_cost, step_ms")
+        .select("client_domain_id, status, error, created_at, started_at, finished_at, dfs_cost")
         .eq("run_date", day)
         .order("id", { ascending: true })
         .range(from, to),
@@ -293,6 +294,21 @@ export const RUN_HEALTH_EVENT = "run_health_mail";
 
 /** A claim whose mail reached nobody, renamed so the next reading of the day may send it. */
 export const RUN_HEALTH_UNSENT = "run_health_unsent";
+
+/**
+ * A claim still unsent this long after it was made was made by a function
+ * the platform stopped before the send. A function lives at most 300s
+ * (/api/track/run's maxDuration), so ten minutes is never one still sending.
+ */
+export const RUN_HEALTH_CLAIM_STALE_MS = 10 * 60 * 1000;
+
+/** Whether a claim read back was left by a function that died between the claim and the send. */
+export function claimAbandoned(props: unknown, now: number): boolean {
+  const p = props as { sent?: unknown; at?: unknown } | null;
+  if (p?.sent !== false) return false;
+  const at = typeof p.at === "string" ? Date.parse(p.at) : NaN;
+  return !Number.isFinite(at) || now - at > RUN_HEALTH_CLAIM_STALE_MS;
+}
 
 export type HealthIo = {
   send: (mail: { subject: string; text: string }) => Promise<boolean>;
@@ -317,6 +333,15 @@ export type ReportOutcome = "sent" | "unsent" | "taken" | "healthy" | "pending";
  * reading no claim). Without the index two such runs can both send. A send
  * that reaches nobody renames its claim, so the next reading may try again.
  *
+ * A claim is made sent=false and marked sent=true after the send (review of
+ * 50013ab, 9 Oct 2026). The last run of a slow day closes near the end of its
+ * 300s, and a function stopped between the claim and the send held the claim
+ * for good: the day's summary never went. A claim still unsent after
+ * RUN_HEALTH_CLAIM_STALE_MS is released by a compare-and-swap and claimed
+ * again, by the next run to close or by the next morning's catch-up. A
+ * function stopped after the send and before the mark sends it twice; a
+ * second copy of an internal mail is the better failure than none.
+ *
  * `note` is what the dispatcher knows and the rows cannot say: why nothing
  * was dispatched.
  */
@@ -327,19 +352,36 @@ export async function reportRunHealth(db: SupabaseClient, io: HealthIo, p: { day
   if (!h.settled) return "pending";
   if (h.clients.every((c) => c.state === "complete")) return "healthy";
 
-  const { data: sent, error: sErr } = await db.from("dashboard_events").select("id").eq("event", RUN_HEALTH_EVENT).eq("props->>day", p.day).limit(1);
+  const { data: held, error: sErr } = await db.from("dashboard_events").select("id, props").eq("event", RUN_HEALTH_EVENT).eq("props->>day", p.day).limit(1);
   if (sErr) throw new Error(`could not read the run-health claim: ${sErr.message}`);
-  if ((sent ?? []).length) return "taken";
+  const prior = (held ?? [])[0] as { id: number; props: unknown } | undefined;
+  if (prior) {
+    if (!claimAbandoned(prior.props, p.now)) return "taken";
+    const { data: freed, error: fErr } = await db
+      .from("dashboard_events")
+      .update({ event: RUN_HEALTH_UNSENT })
+      .eq("id", prior.id)
+      .eq("event", RUN_HEALTH_EVENT)
+      .eq("props->>sent", "false")
+      .select("id");
+    if (fErr) throw new Error(`could not release an abandoned run-health claim: ${fErr.message}`);
+    if (!(freed ?? []).length) return "taken";
+  }
+  const at = new Date(p.now).toISOString();
   const { data: claim, error: cErr } = await db
     .from("dashboard_events")
-    .insert({ client_domain_id: null, member_email: null, event: RUN_HEALTH_EVENT, path: null, props: { day: p.day } })
+    .insert({ client_domain_id: null, member_email: null, event: RUN_HEALTH_EVENT, path: null, props: { day: p.day, sent: false, at } })
     .select("id")
     .single();
   if (cErr) {
     if (cErr.code === "23505") return "taken";
     throw new Error(`could not claim the run-health mail: ${cErr.message}`);
   }
-  if (await io.send(healthMail(h, { today: trackingDay(new Date(p.now)), adminUrl: io.adminUrl, note: p.note }))) return "sent";
+  if (await io.send(healthMail(h, { today: trackingDay(new Date(p.now)), adminUrl: io.adminUrl, note: p.note }))) {
+    const { error: mErr } = await db.from("dashboard_events").update({ props: { day: p.day, sent: true, at } }).eq("id", claim.id as number);
+    if (mErr) console.warn(`[track] run-health mail for ${p.day} sent, and its claim not marked sent, so it may go again: ${mErr.message}`);
+    return "sent";
+  }
   const { error: uErr } = await db.from("dashboard_events").update({ event: RUN_HEALTH_UNSENT }).eq("id", claim.id as number);
   if (uErr) console.warn(`[track] run-health mail for ${p.day} not sent, and its claim not released: ${uErr.message}`);
   return "unsent";

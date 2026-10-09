@@ -21,8 +21,10 @@ export const dynamic = "force-dynamic";
  *
  * Read-only: it sends nothing and writes nothing, so a crawler or a stranger
  * polling it costs a few database reads and no vendor call (spend-gates,
- * paid-get). No secret and no client in the answer: the day, the deadline,
- * whether it was met, and how many clients are unread in which state.
+ * paid-get). No secret, no client and no count in the answer: the day, the
+ * deadline, whether it was met, and the names of the states unread clients
+ * are in (run-health.ts healthAnswer; counts said how many clients there
+ * are, so they are on /admin/tracking only).
  */
 export async function GET() {
   const headers = new Headers();

@@ -4,11 +4,14 @@ import { test } from "node:test";
 
 import { failureSummary } from "./decide.ts";
 import { type Row, fakeDb } from "./fake-db.mts";
+import { RERUN_BUTTON } from "./rerun.ts";
 import {
   type HealthRun,
   type TrackableClient,
+  RUN_HEALTH_CLAIM_STALE_MS,
   RUN_HEALTH_EVENT,
   RUN_HEALTH_UNSENT,
+  claimAbandoned,
   healthAnswer,
   healthMail,
   readRunHealth,
@@ -55,10 +58,8 @@ test("a run's state: closed runs as they closed; in flight until stuck or stalle
   assert.equal(runState(run("a", "running"), now), "running");
   assert.equal(runState(run("a", "running"), Date.parse(`${DAY}T05:15:04Z`)), "stalled", "running past 15 minutes: the platform killed it");
   assert.equal(runState(run("a", "something new"), now), "failed", "a status this does not know is not read as fine");
-  // A run "Run now" reopened at 09:00 is queued from the reopen, not from its 05:00 row.
-  const reopened = run("a", "queued", { started_at: `${DAY}T05:00:03Z`, step_ms: { rerun: { of: "partial", error: null, at: `${DAY}T09:00:00Z`, n: 1, landed: true } } });
-  assert.equal(runState(reopened, Date.parse(`${DAY}T09:01:00Z`)), "queued");
-  assert.equal(runState(reopened, Date.parse(`${DAY}T09:31:00Z`)), "stuck");
+  // A run asked to re-run keeps its status until the re-run closes (rerun.ts; review of b2e0019): the state is the row's.
+  assert.equal(runState(run("a", "partial", { started_at: `${DAY}T09:00:00Z` }), Date.parse(`${DAY}T09:01:00Z`)), "partial");
 });
 
 test("the day's health: who should have run against what ran, problems first", () => {
@@ -101,15 +102,23 @@ test("the health JSON: 503 from 07:00 UTC for a day with a stalled run; 200 befo
   assert.equal(healthAnswer(stalled(before), before).status, 200, "before the deadline whatever the runs are doing");
   const late = healthAnswer(stalled(after), after);
   assert.equal(late.status, 503);
-  assert.deepEqual(late.body, { day: DAY, checked_at: `${DAY}T07:00:00.000Z`, deadline: `${DAY}T07:00:00.000Z`, ok: false, late: true, unread: { stalled: 1 } });
+  assert.deepEqual(late.body, { day: DAY, checked_at: `${DAY}T07:00:00.000Z`, deadline: `${DAY}T07:00:00.000Z`, ok: false, late: true, unread: ["stalled"] });
   const partial = runHealth({ day: DAY, now: after, clients, runs: [run("a", "complete"), run("b", "partial")] });
   assert.equal(healthAnswer(partial, after).status, 200, "partial is read; the mail says so, the monitor does not page");
   const missing = runHealth({ day: DAY, now: after, clients, runs: [] });
   assert.equal(healthAnswer(missing, after).status, 503, "the cron never fired: every client missing at 07:00");
-  assert.deepEqual(healthAnswer(missing, after).body.unread, { missing: 2 });
-  // No client, id, cost or count of clients in what anyone can read.
-  const body = JSON.stringify(healthAnswer(runHealth({ day: DAY, now: after, clients, runs: [run("a", "failed", { error: "secret-ish detail", dfs_cost: 1.23 })] }), after).body);
-  for (const leak of ["tallyroo.com", "ledgerline.com", '"a"', "secret-ish", "1.23", "expected", "complete"]) assert.ok(!body.includes(leak), `${leak} is in the public health JSON: ${body}`);
+  assert.deepEqual(healthAnswer(missing, after).body.unread, ["missing"]);
+  // No client, id, cost and no count of anything in what anyone can read (review of 50013ab, 9 Oct 2026):
+  // a count of missing clients before 05:00 UTC was the number of clients.
+  const many = Array.from({ length: 17 }, (_, i) => client(`c${i}`, `client${i}.example`));
+  const early = Date.parse(`${DAY}T04:00:00Z`);
+  const night = healthAnswer(runHealth({ day: DAY, now: early, clients: many, runs: [] }), early);
+  assert.deepEqual(night, { status: 200, body: { day: DAY, checked_at: `${DAY}T04:00:00.000Z`, deadline: `${DAY}T07:00:00.000Z`, ok: false, late: false, unread: ["missing"] } });
+  for (const answer of [night, late, healthAnswer(runHealth({ day: DAY, now: after, clients, runs: [run("a", "failed", { error: "secret-ish detail", dfs_cost: 1.23 })] }), after)]) {
+    const body = JSON.stringify(answer.body);
+    for (const leak of ["tallyroo.com", "ledgerline.com", "client0", '"a"', "secret-ish", "1.23", "expected", "complete", "17"]) assert.ok(!body.includes(leak), `${leak} is in the public health JSON: ${body}`);
+    assert.ok(!Object.values(answer.body).some((v) => typeof v === "number"), `a number in the public health JSON: ${body}`);
+  }
 });
 
 test("the summary: one line per client not complete, with its error line, and where to act", () => {
@@ -126,7 +135,9 @@ test("the summary: one line per client not complete, with its error line, and wh
   assert.match(mail.text, /- ledgerline\.com: partial - 4 of 21 reads failed - google_aio: 4 x HTTP 429/);
   assert.doesNotMatch(mail.text, /tallyroo\.com/, "a complete client is counted, not listed");
   assert.match(mail.text, /complete 1, partial 1, failed 1/);
-  assert.match(mail.text, /Run now on \/admin\/tracking .*today only: https:\/\/alwayscited\.example\/admin\/tracking/);
+  // The button as /admin/tracking renders it for a failed, partial or stalled run (review of 50013ab, 9 Oct 2026).
+  assert.ok(mail.text.includes(`"${RERUN_BUTTON}" on /admin/tracking`), "the mail names the button the page shows");
+  assert.match(mail.text, /today only: https:\/\/alwayscited\.example\/admin\/tracking/);
   assert.doesNotMatch(mail.text + mail.subject, /AlwaysCited|Alwayscited|Alwaystracked|AlwaysTracked|\u2014/, "lowercase brand, hyphens");
   const late = healthMail(h, { today: "2026-10-10", adminUrl: "https://alwayscited.example/admin/tracking", note: "The daily dispatch was refused: x." });
   assert.match(late.text, /can no longer be re-run/, "the morning-after summary does not offer a re-run of a past day");
@@ -162,9 +173,9 @@ test("a forced failed run produces one internal email with its failure line, onc
   assert.equal(box.sent.length, 1);
   assert.match(box.sent[0]!.text, /- ledgerline\.com: failed - could not store the answers: forced/);
   assert.deepEqual(
-    tables.dashboard_events!.map((e) => [e.event, (e.props as Row).day, e.client_domain_id]),
-    [[RUN_HEALTH_EVENT, DAY, null]],
-    "claimed before the send, keyed on the day, no client",
+    tables.dashboard_events!.map((e) => [e.event, e.props, e.client_domain_id]),
+    [[RUN_HEALTH_EVENT, { day: DAY, sent: true, at: `${DAY}T05:06:00.000Z` }, null]],
+    "claimed before the send, keyed on the day, no client; marked sent after it",
   );
   // The next run to close, the cron, a re-run: the day's summary has gone.
   assert.equal(await reportRunHealth(db, box.health, { day: DAY, now: AFTER_RUNS + MIN }), "taken");
@@ -209,6 +220,29 @@ test("a mail that reaches nobody releases its claim, and the next reading sends"
   box.state.fail = false;
   assert.equal(await reportRunHealth(db, box.health, { day: DAY, now: AFTER_RUNS }), "sent");
   assert.equal(box.sent.length, 1);
+});
+
+test("a function stopped between the claim and the send: the summary still goes, once, after ten minutes", async () => {
+  // Review of 50013ab (9 Oct 2026): the last run of a slow day closes near 290s of its 300s, and a
+  // claim held by a function the platform stopped before the send kept the day's summary from ever going.
+  const claim = { id: 7, event: RUN_HEALTH_EVENT, client_domain_id: null, member_email: null, path: null, props: { day: DAY, sent: false, at: iso(AFTER_RUNS) } };
+  const { db, tables } = fakeDb(day({ runs: [{ client_domain_id: "a", status: "failed", error: "x" }, { client_domain_id: "b", status: "complete" }], events: [claim] }));
+  const box = outbox();
+  assert.equal(await reportRunHealth(db, box.health, { day: DAY, now: AFTER_RUNS + 2 * MIN }), "taken", "two minutes on: it may still be sending");
+  assert.equal(await reportRunHealth(db, box.health, { day: DAY, now: AFTER_RUNS + RUN_HEALTH_CLAIM_STALE_MS + MIN }), "sent", "past ten minutes: no function is still sending it");
+  assert.equal(box.sent.length, 1);
+  assert.deepEqual(
+    tables.dashboard_events!.map((e) => [e.event, (e.props as Row).sent]),
+    [[RUN_HEALTH_UNSENT, false], [RUN_HEALTH_EVENT, true]],
+    "the stopped claim released by a compare-and-swap, a new one made and marked sent",
+  );
+  assert.equal(await reportRunHealth(db, box.health, { day: DAY, now: AFTER_RUNS + 3 * RUN_HEALTH_CLAIM_STALE_MS }), "taken", "and never again");
+  // The next morning's catch-up finds a claim stopped the evening before just the same.
+  const stopped = fakeDb(day({ runs: [{ client_domain_id: "a", status: "failed", error: "x" }], events: [{ ...claim }] }));
+  assert.equal(await reportRunHealth(stopped.db, box.health, { day: DAY, now: Date.parse("2026-10-10T05:00:30Z") }), "sent");
+  assert.equal(box.sent.length, 2);
+  assert.equal(claimAbandoned({ day: DAY }, AFTER_RUNS + 3 * RUN_HEALTH_CLAIM_STALE_MS), false, "a claim with no sent flag reads as sent");
+  assert.equal(claimAbandoned({ day: DAY, sent: true, at: iso(AFTER_RUNS) }, AFTER_RUNS + 3 * RUN_HEALTH_CLAIM_STALE_MS), false);
 });
 
 test("two runs closing together: the unique index lets one claim through", async () => {
