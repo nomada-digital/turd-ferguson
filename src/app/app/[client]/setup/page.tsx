@@ -4,21 +4,25 @@ import { notFound, redirect } from "next/navigation";
 import BrandMark from "@/components/BrandMark";
 import TierName, { type TierKey } from "@/components/TierName";
 import { ungroupedShown } from "@/components/app/Clusters";
+import DraftPrompts from "@/components/app/DraftPrompts";
 import SubmitButton from "@/components/app/SubmitButton";
 import { CONTACT_EMAIL } from "@/config/contact";
-import { NEXT_STEPS } from "@/config/onboarding";
+import { nextSteps } from "@/config/onboarding";
 import { contactUrlFor } from "@/config/pricing";
 import { CARD, MICRO, T } from "@/config/tokens";
 import { keywordForm } from "@/lib/scan/dataforseo-request";
 import { MARKETS, isMarket } from "@/lib/scan/domain";
 import { ADMIN_LIMITS } from "@/lib/tracking/decide";
 import { verdictFromQuery } from "@/lib/tracking/add-cluster";
+import { checkTime } from "@/lib/tracking/check-time";
+import { addDays } from "@/lib/tracking/figures";
 import { prefillCard } from "@/lib/tracking/order-keyword";
 import { loginHref } from "@/lib/tracking/next-path";
 import { placedTier } from "@/lib/tracking/placement-figures";
 import { writeRole } from "@/lib/tracking/member";
 import { trackingRepo } from "@/lib/tracking/repo";
-import { confirmLabel, setupCards, setupChecks } from "@/lib/tracking/setup-landing";
+import { confirmLabel, firstAsked, setupCards, setupChecks } from "@/lib/tracking/setup-landing";
+import { draftAt, draftsFor, draftsLine } from "@/lib/tracking/setup-drafts";
 import { refuseRole } from "@/lib/tracking/stop";
 import { appPath, siteHref } from "@/lib/app-host";
 
@@ -55,6 +59,13 @@ const STEP ={ ...MICRO, display: "block", marginBottom: "8px" } as const;
  * check (a POST to /check carrying the card's id), which 303s back here at
  * that card with the verdict. A pass rides into Confirm as hidden fields
  * and is named in our setup mail; nothing changes on the cluster itself.
+ *
+ * ON-1 (9 Oct 2026, launch blocker LB8): a card with a keyword and no
+ * prompt - a signup with no scan, once "Use this keyword" has set one - shows
+ * the five prompts drafted from that keyword in editable fields (DraftPrompts),
+ * and Save writes them through the free slot's route as the Clusters page
+ * writes prompts. Nothing waits on a person: the cluster is read from the next
+ * daily check. Owners and editors only; viewers and an ended client read.
  */
 export default async function ClientSetup({
   params,
@@ -73,12 +84,14 @@ export default async function ClientSetup({
   if (!client) notFound();
   const tier = (client.tier as TierKey) ?? "tracked";
   const today = repo.today();
+  // ON-1 review (9 Oct 2026): first checks are said from now in the client's zone, not from London's tracking day.
+  const now = repo.now();
   // perf-4 (8 Oct 2026): setup draws the clusters, prompts and keywords only, so no answer is read.
   const [structure, confirmed, typed] = await Promise.all([repo.structure(client.id), repo.setupConfirmed(client.id), repo.orderKeyword(client.id)]);
   const cards = setupCards(structure);
   const ungrouped = ungroupedShown(structure.questions, today).length;
   // 9 Oct 2026 (review of 3eaa592): no live prompt, no check promised - the runner skips that client, as the Overview says.
-  const checks = setupChecks({ startedOn: client.started_on, today, market: client.market, livePrompts: structure.questions.filter((q) => q.stopped_on === null).length });
+  const checks = setupChecks({ startedOn: client.started_on, today, market: client.market, livePrompts: structure.questions.filter((q) => q.stopped_on === null).length, now });
   // R180: the keyword typed at checkout, with no scan behind the order, prefills the first keywordless card's field.
   const prefill = prefillCard(cards, typed);
   const canWrite = refuseRole(writeRole(client)) === null;
@@ -94,6 +107,15 @@ export default async function ClientSetup({
   const rekey = at ? one("rekey") : null;
   const rekeyLine = rekey === "rekeyed" ? "Keyword set on this cluster. Its prompts are kept." : rekey === "refused" ? "That change did not go through. Check the keyword again, or tell us before you confirm." : null;
   const brand = client.brand ?? client.domain;
+  // ON-3 (9 Oct 2026): the strip's check time in the client's zone, for tomorrow - the first a prompt saved today is asked.
+  const daily = checkTime(addDays(today, 1), client.market);
+  // ON-1: prompts saved now are first asked at the next tracking day's check, or the client's start if later -
+  // said from now in its zone (review, 9 Oct 2026: at 21:30 ET "tomorrow" was a day early).
+  const asked = firstAsked({ today, startedOn: client.started_on, market: client.market, now });
+  // ON-1 review: a refused Save names its field (0-4), never its text.
+  const refusedAt = one("drafts") === "refused" ? draftAt(one("at")) : null;
+  // ON-1 review: a started client's prompts are being read, so a cluster that has some keeps no keyword it never had (rekey.ts keywordless).
+  const reading = client.started_on !== null && client.started_on <= today;
 
   return (
     <section style={{ maxWidth: "720px", margin: "0 auto", padding: "56px 24px 96px", color: T.ink }}>
@@ -108,7 +130,7 @@ export default async function ClientSetup({
         You are on <TierName tier={tier} />. A cluster is one Google keyword and the prompts we ask the AI engines about it. Check them below, then confirm.
       </p>
       <ol style={{ margin: "0 0 40px", paddingLeft: "20px", listStyle: "decimal", fontSize: "15px", lineHeight: 1.7, color: T.soft }}>
-        {NEXT_STEPS.map((s) => (
+        {nextSteps(daily).map((s) => (
           <li key={s}>{s}</li>
         ))}
       </ol>
@@ -119,13 +141,38 @@ export default async function ClientSetup({
       </h2>
       {cards.length ? (
         <div style={{ display: "flex", flexDirection: "column", gap: "14px", marginBottom: "40px" }}>
-          {cards.map((c, i) => (
-            <div key={c.id} id={`card-${c.id}`} style={{ ...CARD, borderRadius: "14px", padding: "20px 22px" }}>
+          {cards.map((c, i) => {
+            const drafts = draftsFor(c);
+            // The card's Save comes back here with what happened, in fixed words; a "full" refusal in its real count.
+            const saved = at?.id === c.id ? draftsLine(one("drafts"), one("why"), asked, c.prompts.length) : null;
+            // A keyword can be given here only to a cluster none of whose prompts has been read.
+            const keyable = c.keyword === null && (!c.prompts.length || !reading);
+            return (
+            <div key={c.id} id={`card-${c.id}`} style={{ ...CARD, borderRadius: "14px", padding: "20px 22px", scrollMarginTop: "24px" }}>
               <div style={MICRO}>Cluster {i + 1}</div>
               <div style={{ marginTop: "6px", fontSize: "17px", fontWeight: 700 }}>{c.keyword ?? "Needs a keyword"}</div>
               <p style={{ margin: "4px 0 14px", fontSize: "14px", color: T.soft }}>
-                {c.keyword === null ? "We add its Google keyword for you." : "The keyword we check on Google every morning."}
+                {/* ON-1 (9 Oct 2026): "We add its Google keyword for you" promised a person; the member sets it here, at any time (rekey.ts keywordless). */}
+                {c.keyword !== null
+                  ? `The keyword we check on Google every day at ${daily}.`
+                  : !keyable
+                    ? "No keyword yet. Its prompts are already being read, so none is added to it now: for a keyword, add a cluster with it on Clusters."
+                    : canWrite
+                      ? c.prompts.length
+                        ? "Check a keyword below to give it one."
+                        : "Check a keyword below. Once it is set, five prompts are drafted from it for you to edit."
+                      : `An owner or editor gives it a keyword${c.prompts.length ? "" : ", and five prompts are then drafted from it"}.`}
               </p>
+              {saved?.ok ? (
+                <p role="status" style={{ margin: "0 0 12px", fontSize: "13px", lineHeight: 1.5, color: T.goodFg }}>
+                  {saved.text}
+                </p>
+              ) : saved && !(drafts && canWrite) ? (
+                // Refused, and no drafts to show it under: the cluster has prompts now (another tab, or a second click).
+                <p role="alert" style={{ margin: "0 0 12px", fontSize: "13px", lineHeight: 1.5, color: T.badFg }}>
+                  {saved.text}
+                </p>
+              ) : null}
               {c.prompts.length ? (
                 <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: "8px" }}>
                   {c.prompts.map((p) => (
@@ -135,10 +182,21 @@ export default async function ClientSetup({
                     </li>
                   ))}
                 </ul>
-              ) : (
-                <p style={{ margin: 0, fontSize: "14px", color: T.soft }}>No prompts yet. We write five for you before the first check.</p>
-              )}
-              {canWrite && !confirmed ? (
+              ) : drafts && canWrite ? (
+                <DraftPrompts
+                  id={`setup-draft-${i}`}
+                  action={`/api/app/${encodeURIComponent(slug)}/prompt?${new URLSearchParams({ kind: "cluster", id: c.id, to: "setup" })}`}
+                  keyword={c.keyword!}
+                  drafts={drafts}
+                  note={saved && !saved.ok ? saved.text : `Nothing is checked until they are saved. Saved now, they are first asked ${asked}.`}
+                  noteTone={saved && !saved.ok ? "bad" : "soft"}
+                  invalidAt={saved && !saved.ok ? refusedAt : null}
+                />
+              ) : drafts ? (
+                <p style={{ margin: 0, fontSize: "14px", color: T.soft }}>No prompts yet. An owner or editor saves the five drafted from its keyword.</p>
+              ) : null /* No keyword: the line under its name already says the prompts come from it. */}
+              {/* ON-1 (9 Oct 2026): a card with no keyword and nothing read keeps its check after confirm - it is where that cluster is given its first one (rekey.ts keywordless). */}
+              {canWrite && (c.keyword === null ? keyable : !confirmed) ? (
                 <form method="post" action={`/api/app/${encodeURIComponent(slug)}/check`} style={{ marginTop: "16px", paddingTop: "16px", borderTop: `1px solid ${T.line}`, display: "flex", flexDirection: "column", gap: "8px" }}>
                   <input id={`setup-card-${i}`} type="hidden" name="card" value={c.id} />
                   <input id={`setup-own-${i}`} type="hidden" name="own" value={c.keyword ?? ""} />
@@ -155,17 +213,19 @@ export default async function ClientSetup({
                   <p id={`setup-kw-${i}-note`} role={at?.id === c.id && (check || rekeyLine) ? (check ? check.ok : rekey === "rekeyed") ? "status" : "alert" : undefined} style={{ margin: 0, fontSize: "13px", lineHeight: 1.5, color: at?.id === c.id && check ? (check.ok ? T.goodFg : T.badFg) : T.soft }}>
                     {at?.id === c.id && check
                       ? check.ok
-                        ? `${check.message} Use it to set it on this cluster now; its prompts are kept.`
+                        ? `${check.message} Use it to set it on this cluster now; ${c.prompts.length ? "its prompts are kept" : "five prompts are then drafted from it"}.`
                         : check.message
                       : at?.id === c.id && rekeyLine
-                        ? rekeyLine
+                        ? rekey === "rekeyed" && !c.prompts.length
+                          ? "Keyword set on this cluster. Edit the five prompts drafted from it above, then save them."
+                          : rekeyLine
                         : prefill === c.id
                         ? "This is the keyword you gave at checkout. Check it, or type another; we check it has Google search volume and a buying intent."
                         : "We check it has Google search volume and a buying intent."}
                   </p>
                 </form>
               ) : null}
-              {canWrite && !confirmed && at?.id === c.id && check?.ok && sig ? (
+              {canWrite && (c.keyword === null ? keyable : !confirmed) && at?.id === c.id && check?.ok && sig ? (
                 <form method="post" action={`/api/app/${encodeURIComponent(slug)}/keyword?${new URLSearchParams({ kind: "cluster", id: c.id, to: "setup" })}`} style={{ marginTop: "10px" }}>
                   <input id={`setup-use-kw-${i}`} type="hidden" name="keyword" value={check.keyword} />
                   <input id={`setup-use-vol-${i}`} type="hidden" name="vol" value={String(check.volume)} />
@@ -177,7 +237,8 @@ export default async function ClientSetup({
                 </form>
               ) : null}
             </div>
-          ))}
+            );
+          })}
         </div>
       ) : (
         // DS67 (2 Oct 2026, R173 pass 7): a client tracking prompts in no cluster read "We set them up for you" with no word of its prompts; Clusters' DS54 says how to group them.
@@ -190,7 +251,13 @@ export default async function ClientSetup({
               </a>
             </>
           ) : (
-            "No clusters yet. We set them up for you; email us if you want to pick them."
+            // ON-1 (9 Oct 2026): "We set them up for you" promised a person; a cluster is added on Clusters, its prompts drafted from its keyword.
+            <>
+              {canWrite ? "No clusters yet. Add one on Clusters: check a keyword, then edit the five prompts drafted from it. " : "No clusters yet. An owner or editor adds them on Clusters. "}
+              <a href={appPath(`/${encodeURIComponent(slug)}/clusters`)} style={{ color: T.accent, fontWeight: 600 }}>
+                Go to Clusters
+              </a>
+            </>
           )}
         </p>
       )}

@@ -16,7 +16,7 @@ import { urlKey } from "./placements.ts";
 import { loadPlacements } from "./placements-data.ts";
 import { type SettingsData, loadSettings } from "./settings-data.ts";
 import { orderKeyword } from "./order-keyword.ts";
-import { loadOrderKeyword, loadSetupConfirmed } from "./setup-data.ts";
+import { loadOrderKeyword, loadReportOpened, loadSetupConfirmed } from "./setup-data.ts";
 import { type UpgradeContext, loadUpgradeContext } from "./upgrade-context.ts";
 import { type ClusterNote, type Compare, type OverviewData, loadAnswerDay, loadClusterNotes, loadOverview, loadStructure } from "./overview-data.ts";
 import { type DayPlan, type ReadOpts, type StoredAnswer, type Structure, shapeAnswerDay, shapeRead } from "./read-shape.ts";
@@ -49,15 +49,22 @@ export interface TrackingRepo {
   settings(clientId: string): Promise<SettingsData>;
   /** The tracking day the dashboard treats as today. */
   today(): Day;
+  /**
+   * The moment the dashboard treats as now, epoch ms (ON-1 review, 9 Oct 2026): the clock in production; on the
+   * fixture, noon UTC on its own frozen today, so a check time said from now is the same on every run.
+   */
+  now(): number;
   /** A login link's state, read without spending it (R163); null when the read failed. */
   linkState(token: string): Promise<LinkState | null>;
   /** Whether the client's setup is confirmed (R166); null when the read failed. */
   setupConfirmed(clientId: string): Promise<boolean | null>;
   /** The keyword typed at checkout on an order with no scan behind it (R180); null otherwise or on a failed read. */
   orderKeyword(clientId: string): Promise<string | null>;
+  /** ON-3: whether a CSV was downloaded or Reports opened on this client (usage events); null on a failed read. */
+  reportOpened(clientId: string): Promise<boolean | null>;
 }
 
-const supabaseRepo: TrackingRepo = { sessionEmail, clientsFor, linkState: loadLinkState, setupConfirmed: loadSetupConfirmed, orderKeyword: loadOrderKeyword, loadOverview, structure: loadStructure, answerDay: loadAnswerDay, clusterNotes: loadClusterNotes, upgradeContext: loadUpgradeContext, placements: loadPlacements, settings: loadSettings, today: () => trackingDay() };
+const supabaseRepo: TrackingRepo = { sessionEmail, clientsFor, linkState: loadLinkState, setupConfirmed: loadSetupConfirmed, orderKeyword: loadOrderKeyword, reportOpened: loadReportOpened, loadOverview, structure: loadStructure, answerDay: loadAnswerDay, clusterNotes: loadClusterNotes, upgradeContext: loadUpgradeContext, placements: loadPlacements, settings: loadSettings, today: () => trackingDay(), now: () => Date.now() };
 
 /**
  * The fixture as served, and as R168's writes leave it. On globalThis, because
@@ -154,6 +161,9 @@ const fixtureRepo: TrackingRepo = {
   today() {
     return fixture().today;
   },
+  now() {
+    return Date.parse(`${fixture().today}T12:00:00Z`);
+  },
   async linkState(token) {
     return fixtureLinkState(token, fixture().member.email);
   },
@@ -163,6 +173,10 @@ const fixtureRepo: TrackingRepo = {
   async orderKeyword(clientId) {
     const f = fixture();
     return clientId === f.client.id ? orderKeyword(f.order) : null;
+  },
+  async reportOpened() {
+    // The fixture records no usage events (the event and report routes write nothing on it), so none was ever opened.
+    return false;
   },
 };
 

@@ -7,7 +7,7 @@ import { ENGINE_SPECS, type Engine } from "@/lib/scan/engines";
 import { clusterCards } from "@/lib/tracking/cluster-figures";
 import { APP_LIMITS } from "@/config/contact";
 import { rangeLabel } from "@/lib/tracking/date-range";
-import { type Day, type Range, citedPageRows, firstCheckDay, formatDay, resolveComparison } from "@/lib/tracking/figures";
+import { type Day, type Range, citedPageRows, firstCheckDay, formatDay, firstReadComplete, resolveComparison } from "@/lib/tracking/figures";
 import { NAMED_TOP } from "@/lib/tracking/named-figures";
 import type { Compare, OverviewData } from "@/lib/tracking/overview-data";
 import type { PlacementRow } from "@/lib/tracking/placement-figures";
@@ -79,7 +79,9 @@ export default function Cited({
   // 8 Oct 2026 (audit data-10): the comparison the Overview reads - the first week for a young client.
   // The first week's first day, from started_on and the prompts - the date picker is handed the same day.
   const firstCheck = firstCheckDay(startedOn, data.questions);
-  const before = resolveComparison(range, compareMode, startedOn, firstCheck).range;
+  // ON-3 review (9 Oct 2026): a first reading only when its check was complete.
+  const firstComplete = firstReadComplete(data.runs, firstCheck);
+  const before = resolveComparison(range, compareMode, startedOn, firstCheck, firstComplete).range;
   // Audit data-3 (8 Oct 2026): every partial or failed check in the range, not only the last.
   const partial = runNote(data, range, today);
   const cards = clusterCards({ clusters: data.clusters ?? [], questions: data.questions, keywords: data.keywords, answers: data.answers, serp: data.serp, range, before, today, engines });
@@ -123,7 +125,7 @@ export default function Cited({
           <p style={{ margin: 0, fontSize: "14px", lineHeight: 1.5, color: T.soft, maxWidth: "680px" }}>Every page the engines cite in answers to your prompts, and how often.</p>
           {partial ? <p style={{ margin: 0, fontSize: "14px", lineHeight: 1.5, color: T.soft, maxWidth: "680px" }}>{partial}</p> : null}
         </div>
-        <DatePicker range={range} compare={compareMode} today={today} startedOn={startedOn} firstCheck={firstCheck} grow={false}>
+        <DatePicker range={range} compare={compareMode} today={today} startedOn={startedOn} firstCheck={firstCheck} firstComplete={firstComplete} grow={false}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={T.ink} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <rect x="3" y="5" width="18" height="16" rx="2" />
             <path d="M3 10h18M8 3v4M16 3v4" />

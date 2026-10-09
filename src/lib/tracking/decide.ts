@@ -4,6 +4,8 @@ import { constantTimeEqual } from "../constant-time.ts";
 import { isPlausibleEmail } from "../email-address.ts";
 import { TASK_SE_ERROR } from "../scan/dataforseo-request.ts";
 
+import { PROMPT_MAX } from "./prompt-text.ts";
+
 /**
  * The decisions the daily tracking runner makes, with nothing in here that
  * needs a credential or a socket - so `decide.test.mts` can run every one.
@@ -285,7 +287,8 @@ export function slugFor(domain: string): string {
  * actions. Question and keyword match the migration's check constraints
  * (8-300, 2-120); an email is at most 254 characters (RFC 5321).
  */
-export const ADMIN_LIMITS = { scan: 200, email: 254, question: 300, keyword: 120, id: 36 } as const;
+// question is prompt-text.ts's PROMPT_MAX, so the page's own check and every route hold one length (ON-1 review, 9 Oct 2026).
+export const ADMIN_LIMITS = { scan: 200, email: 254, question: PROMPT_MAX, keyword: 120, id: 36 } as const;
 
 /** Server-side limit:a new question or keyword is allowed only while the live count is under the limit. */
 export function underLimit(liveCount: number, limit: number): boolean {

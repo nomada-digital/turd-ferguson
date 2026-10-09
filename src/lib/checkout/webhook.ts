@@ -302,7 +302,10 @@ export function orderEmailText(o: CompletedOrder, outcome: string, siteOrigin: s
     "",
     `Set up: ${outcome}`,
     "",
-    "Book the onboarding call, where the prompts are agreed.",
+    // ON-1 review (9 Oct 2026): setup is self-serve - the client checks each keyword and edits the five prompts drafted from it.
+    o.tier === "tracked"
+      ? "Setup is self-serve: the client checks each cluster's keyword on the setup page and saves the five prompts drafted from it. Nothing to book."
+      : "Book the onboarding call. The client sets each cluster's keyword and prompts on the setup page; the call goes through them.",
   ].join("\n");
   return { subject: `Order: ${o.tier || "unknown tier"}, ${o.quantity} cluster(s), ${o.email ?? "no email"}`, text };
 }

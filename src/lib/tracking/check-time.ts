@@ -61,6 +61,23 @@ export function checkTime(day: string, market: string): string {
  */
 export const NO_PROMPT_NO_CHECK = "Nothing is checked until a cluster has prompts.";
 
+/**
+ * The calendar day a moment falls on in the client's zone, YYYY-MM-DD (ON-1
+ * review, 9 Oct 2026). The dashboard's tracking day is London's (decide.ts
+ * trackingDay), so at 21:30 ET on 9 Oct it is already 10 Oct there, and a
+ * prompt saved then is first asked at 1:00am ET on 11 Oct - which a US reader
+ * calls "on 11 Oct", not "tomorrow". Labels say a day from this.
+ */
+export function zoneDay(at: number, market: string): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: marketZone(market), year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(at));
+}
+
+/** The daily check on `day`, a tracking day, as an instant: its CHECK_HOUR_UTC. */
+export function checkAt(day: string): number {
+  const [y, m, d] = day.split("-").map(Number);
+  return Date.UTC(y!, m! - 1, d!, CHECK_HOUR_UTC);
+}
+
 /** The next daily run after `now`, epoch ms: today's 05:00 UTC if it is still to come, else tomorrow's. */
 export function nextCheckAt(now: number): number {
   const d = new Date(now);

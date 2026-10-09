@@ -11,7 +11,7 @@ import { SERP_DEPTH } from "@/lib/scan/dataforseo-request";
 import { ENGINE_SPECS } from "@/lib/scan/engines";
 import { TIER_PLAIN } from "@/lib/tier-text";
 import { ASKS_PER_MEMBER_PER_DAY } from "@/lib/tracking/ask";
-import { COMPARE_OPTIONS, presets } from "@/lib/tracking/date-range";
+import { COMPARE_OPTIONS, YOUNG_RANGE_DAYS, presets } from "@/lib/tracking/date-range";
 import { clockIn } from "@/lib/tracking/check-time";
 import { UNRANKED_AS } from "@/lib/tracking/figures";
 import { ANGLES, BRANDED_CHIP, PROMPTS_PER_CLUSTER } from "@/lib/tracking/limits";
@@ -96,7 +96,7 @@ const verb = (names: string[]) => (names.length === 1 ? "is" : "are");
 const READ_DIRECT = engineNames("scraper");
 const ASKED_DIRECT = engineNames("model");
 
-/** The date picker's labels, read off its own presets; the default range is the "l28" one (overview-data.ts rangeFrom). */
+/** The date picker's labels, read off its own presets; the default range is the "l28" one, or "all" for a young client (date-range.ts defaultRange). */
 const PRESET = Object.fromEntries(presets("2026-10-09", null).map((p) => [p.id, p.label]));
 const COMPARE = COMPARE_OPTIONS.map((o) => ui(o.label));
 
@@ -154,7 +154,8 @@ export function helpContent(trialOn: boolean = TRIAL.enabled): HelpContent {
           heading: "Setting up your clusters",
           blocks: [
             `Your first sign-in opens a page that asks you to set up your clusters. It lists your cluster with its Google keyword and its prompts, then asks you to ${ui("Review and confirm")}.`,
-            `A cluster marked ${ui("Needs a keyword")} has a field to try a keyword of your own with ${ui("Check keyword")}, which checks it has Google searches and a buying intent. Leave it, and we add one for you. A cluster with no prompts yet gets them from us before its first check.`,
+            `A cluster marked ${ui("Needs a keyword")} has a field to try a keyword of your own with ${ui("Check keyword")}, which checks it has Google searches and a buying intent. When it passes, you can set it on the cluster, whenever the cluster has no keyword yet.`,
+            `A cluster with a keyword and no prompts yet shows ${PROMPTS_PER_CLUSTER} prompts drafted from the keyword, one per angle. Edit any of them and choose ${ui("Save these prompts")}; they are asked from the next daily check. Nothing in a cluster is checked until it has prompts.`,
             "Want something changed? Tell us before you confirm, and we make the change. Until setup is confirmed, signing in brings you back to this page. An owner or an editor confirms it.",
           ],
         },
@@ -322,8 +323,8 @@ export function helpContent(trialOn: boolean = TRIAL.enabled): HelpContent {
           id: "range",
           heading: "Dates and comparisons",
           blocks: [
-            `Every page with dates opens on ${ui(PRESET.l28!)}, compared with the period before. The date button changes both: pick a preset such as ${ui(PRESET.l7!)} or ${ui(PRESET.all!)}, or any days since tracking began, then what to compare with: ${COMPARE.slice(0, -1).join(", ")} or ${COMPARE[COMPARE.length - 1]}.`,
-            "When the comparison would reach back before your first check, the figures are compared with your first week instead, and the page says so. A range that ends inside your first week has nothing to compare yet.",
+            `Every page with dates opens on ${ui(PRESET.l28!)}, compared with the period before - or, while your tracking is under ${YOUNG_RANGE_DAYS} days old, on ${ui(PRESET.all!)}. The date button changes both: pick a preset such as ${ui(PRESET.l7!)} or ${ui(PRESET.all!)}, or any days since tracking began, then what to compare with: ${COMPARE.slice(0, -1).join(", ")} or ${COMPARE[COMPARE.length - 1]}.`,
+            "When the comparison would reach back before your first check, the figures are compared with your first week instead, and the page says so. Until your first week is over, they are compared with your first reading, and a range that ends on your first reading has nothing to compare yet. Every change says what it is compared with, and from which date.",
             "The range is in the page's address, so a link you share or bookmark opens on the same dates, and it stays with you as you move between pages.",
             `On the ${ui("Overview")}, every change is like-for-like: it counts only the clusters tracked for the whole of both periods, so a cluster added part way through does not move it.`,
           ],

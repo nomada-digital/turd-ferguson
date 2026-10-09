@@ -1,11 +1,12 @@
 import { COMPANY_LINE, CONTACT_EMAIL } from "../../config/contact.ts";
-import { NEXT_STEPS } from "../../config/onboarding.ts";
+import { NEXT_STEPS, nextSteps } from "../../config/onboarding.ts";
 import { T } from "../../config/tokens.ts";
 import { TRIAL, trialCharge, trialMoment } from "../../config/trial.ts";
 import { appUrl } from "../app-host.ts";
 import { count } from "../plural.ts";
 import { escapeHtml, shell, type Palette } from "../scan/email-render.ts";
 import { TIER_PLAIN, type TierKey } from "../tier-text.ts";
+import { checkTime } from "../tracking/check-time.ts";
 import { PROMPTS_PER_CLUSTER } from "../tracking/limits.ts";
 import { setupChecks } from "../tracking/setup-landing.ts";
 
@@ -150,10 +151,16 @@ const cancelLine = (t: TrialTerms, text: string, after: string): Line => ({ text
  * - a paid alwaystracked order states the plan's room, `clusterLimit` (10),
  *   not the one cluster signup makes - "with 1 cluster" read as the whole plan;
  * - a placements order keeps the clusters it bought.
+ *
+ * The strip it lists says the daily check's time in the client's zone when
+ * signup passes the market and start (ON-3, 9 Oct 2026): checkTime on the
+ * start day, the first a check can run, as signup.ts sets it. Without them,
+ * the public pages' time-free words.
  */
-export function welcome(d: { tier: TierKey; clusters: number; clusterLimit: number; domain: string; link: string; trial?: TrialTerms | null }): Rendered {
+export function welcome(d: { tier: TierKey; clusters: number; clusterLimit: number; domain: string; link: string; trial?: TrialTerms | null; market?: string | null; startedOn?: string | null }): Rendered {
   const plan = TIER_PLAIN[d.tier];
   const room = `The plan tracks up to ${count(d.clusterLimit, "cluster")}.`;
+  const steps = d.market && d.startedOn ? nextSteps(checkTime(d.startedOn, d.market)) : NEXT_STEPS;
   if (d.trial) {
     return render({
       tier: d.tier,
@@ -166,7 +173,7 @@ export function welcome(d: { tier: TierKey; clusters: number; clusterLimit: numb
         cancelLine(d.trial, "To stop, cancel any time before then in ", " and nothing is charged."),
         "Here is what happens next:",
       ],
-      list: [...NEXT_STEPS],
+      list: [...steps],
       cta: { href: d.link, label: "Set up your clusters" },
       footnote: SIGN_IN_ONCE,
     });
@@ -178,7 +185,7 @@ export function welcome(d: { tier: TierKey; clusters: number; clusterLimit: numb
     preheader: `Your ${plan} dashboard for ${d.domain} is ready to set up.`,
     heading: "You're in - set up your clusters",
     body: [`${bought} Here is what happens next:`],
-    list: [...NEXT_STEPS],
+    list: [...steps],
     cta: { href: d.link, label: "Set up your clusters" },
     footnote: SIGN_IN_ONCE,
   });
@@ -407,13 +414,14 @@ export function previewSets(price: { us: number; uk: number }): Record<Lifecycle
   const unread: TrialRecap = { named: 0, answers: 0, since: null, topOther: null, clustersInUse: 1, clusterLimit: 10, livePrompts: 0 };
   const setupClusters = ["invoicing software", "expense tracking", "payroll for small business"];
   return {
+    // ON-3 (9 Oct 2026): signup passes the market and start, so the strip says the check's time in the client's zone.
     welcome: [
-      { label: "alwaysmentioned, 3 clusters bought", mail: welcome({ tier: "mentioned", clusters: 3, clusterLimit: 10, domain, link }) },
-      { label: "alwaystracked, paid with no trial", mail: welcome({ tier: "tracked", clusters: 1, clusterLimit: 10, domain, link }) },
+      { label: "alwaysmentioned, 3 clusters bought, US", mail: welcome({ tier: "mentioned", clusters: 3, clusterLimit: 10, domain, link, market: "US", startedOn: "2026-10-10" }) },
+      { label: "alwaystracked, paid with no trial, UK", mail: welcome({ tier: "tracked", clusters: 1, clusterLimit: 10, domain, link, market: "UK", startedOn: "2026-10-10" }) },
     ],
     trial_started: [
-      { label: "alwaystracked free trial, US", mail: welcome({ tier: "tracked", clusters: 1, clusterLimit: 10, domain, link, trial: us }) },
-      { label: "alwaystracked free trial, UK", mail: welcome({ tier: "tracked", clusters: 1, clusterLimit: 10, domain, link, trial: uk }) },
+      { label: "alwaystracked free trial, US", mail: welcome({ tier: "tracked", clusters: 1, clusterLimit: 10, domain, link, trial: us, market: "US", startedOn: "2026-10-10" }) },
+      { label: "alwaystracked free trial, UK", mail: welcome({ tier: "tracked", clusters: 1, clusterLimit: 10, domain, link, trial: uk, market: "UK", startedOn: "2026-10-10" }) },
     ],
     setup_reminder: [
       { label: "a scan buyer: 1 cluster with prompts", mail: setupReminder({ tier: "tracked", domain, link: setupUrl(slug, ORIGIN), withPrompts: 1, clusterLimit: 10 }) },

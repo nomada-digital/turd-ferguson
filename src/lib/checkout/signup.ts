@@ -223,7 +223,7 @@ async function clientFromOrder(db: SupabaseClient, o: CompletedOrder, trialEndsA
   const sent =
     !tErr &&
     (welcomeOn
-      ? await sendLifecycle({ memberEmail: o.email, mail: welcome({ tier: tier as TierKey, clusters, clusterLimit, domain, link, trial }) })
+      ? await sendLifecycle({ memberEmail: o.email, mail: welcome({ tier: tier as TierKey, clusters, clusterLimit, domain, link, trial, market, startedOn }) })
       : await sendLoginLink({ memberEmail: o.email, link }));
 
   return {

@@ -3,7 +3,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { keywordForm } from "../scan/dataforseo-request.ts";
 
 import { refuseDrafts } from "./add-cluster.ts";
-import { ANGLES, insertCluster, insertKeyword, insertPrompts, readClusterRefusal } from "./limits.ts";
+import { ANGLES, PROMPTS_PER_CLUSTER, insertCluster, insertKeyword, insertPrompts, readClusterRefusal } from "./limits.ts";
+import { refuseDraftsAt } from "./prompt-text.ts";
+import { type FilledAll, fillSlots } from "./slot.ts";
 import { refuseRole, stopDay } from "./stop.ts";
 
 /**
@@ -51,4 +53,24 @@ export async function addCluster(
 async function stopRow(db: SupabaseClient, table: "tracked_clusters" | "tracked_keywords", id: string, clientId: string, day: string): Promise<string> {
   const { error } = await db.from(table).update({ stopped_on: day }).eq("id", id).eq("client_domain_id", clientId);
   return error ? ` Could not stop ${table} ${id} either: ${error.message}` : "";
+}
+
+/**
+ * ON-1 (9 Oct 2026, launch blocker LB8): a cluster that has its keyword but
+ * no prompt - a signup with no scan, once its keyword is set - gets the five
+ * prompts `draftPrompts` drafts from that keyword, as edited on the setup
+ * card or the Clusters row. The drafts' rule (refuseDrafts: five, each 8 to
+ * ADMIN_LIMITS.question characters, no two the same) is read before anything,
+ * then they go through the free slot's write (slot.ts fillSlots), one per
+ * angle in ANGLES order, as "Start tracking this cluster" writes them. Each
+ * is first read at the next daily check. A cluster that already has live
+ * prompts has no room for five more, which insertPrompts' rule refuses.
+ */
+export async function fillDrafts(db: SupabaseClient, p: { clientId: string; clusterId: string; prompts: string[]; today: string; by: string; role: string }): Promise<FilledAll> {
+  const role = refuseRole(p.role);
+  if (role) return { ok: false, message: role };
+  // ON-1 review (9 Oct 2026): which field a text refusal is about rides back, so the card marks that one.
+  const r = refuseDraftsAt(p.prompts, PROMPTS_PER_CLUSTER);
+  if (r) return { ok: false, message: r.message, ...(r.at === null ? {} : { at: r.at }) };
+  return fillSlots(db, { clientId: p.clientId, clusterId: p.clusterId, slots: p.prompts.map((text, i) => ({ text, angle: ANGLES[i]! })), today: p.today, by: p.by, role: p.role });
 }

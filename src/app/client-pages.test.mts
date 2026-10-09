@@ -145,6 +145,12 @@ const KEYS: Record<string, Record<string, string>> = {
     sig: '(one("sig") ?? "").slice(0, 64)',
     // 2 Oct 2026, R179: the keyword route's 303 after Use this keyword - one of two words, on the card `card` names.
     rekey: 'rekey === "rekeyed" ? "Keyword set on this cluster.',
+    // 9 Oct 2026, ON-1 (LB8): the prompt route's 303 after a card's five drafted prompts are saved. draftsLine draws
+    // fixed words for "saved" or "refused" only, on the card `card` names; `why` only through slotRefusal's own keys.
+    drafts: 'draftsLine(one("drafts"), one("why"),',
+    why: 'draftsLine(one("drafts"), one("why"),',
+    // 9 Oct 2026, ON-1 review: which of the five fields a refused Save is about - draftAt takes one digit under five, else none.
+    at: 'draftAt(one("at"))',
   },
   // 2 Oct 2026, R173 pass 3, DS36: the catch-all reads no key; its query rides only into loginHref's next.
   "/[...rest]": {},
@@ -154,7 +160,9 @@ const KEYS: Record<string, Record<string, string>> = {
 const ROLE_READS: Record<string, string[]> = {
   // DS10 (2 Oct 2026): the setup-outstanding line tells a viewer an owner or editor confirms.
   // 8 Oct 2026 (review of 2379757): writes are judged by writeRole(client), which makes an ended client read-only.
-  "": ["const canWrite = refuseRole(writeRole(client)) === null;"],
+  // 9 Oct 2026 (ON-3, LB8): the activation checklist's wording only - an owner is sent to invite, anyone else told
+  // who can, an editor to finish setup. It writes nothing, and is never drawn for an ended client (activationShown).
+  "": ["const canWrite = refuseRole(writeRole(client)) === null;", "role: client.role,"],
   "/clusters": ["canWrite={refuseRole(writeRole(client)) === null}"],
   "/clusters/[cluster]": ['canWrite={writeRole(client) === "owner" || writeRole(client) === "editor"}'],
   "/settings": ['owner={client.role === "owner"}'],
@@ -171,9 +179,12 @@ const ROLE_READS: Record<string, string[]> = {
  * Raised 2 Oct 2026 (R173 pass 3, DS36): 10 pages - the [...rest] catch-all.
  * Raised 8 Oct 2026: 38 keys - Settings' trial, the Cancel trial route's way back.
  * Raised 9 Oct 2026 (DB-2): 39 keys - the one-cluster page's day.
+ * Raised 9 Oct 2026 (ON-1, LB8): 40 keys - /setup's drafts and why, the prompt route's way back after a card's drafts.
+ * Raised 9 Oct 2026 (ON-1 review): 41 keys - /setup's at, the refused field.
+ * 9 Oct 2026, wave 2b merged: 42 keys - DB-2's day and ON-1's three, counted together.
  */
 const PAGE_FLOOR = 10;
-const KEY_FLOOR = 39;
+const KEY_FLOOR = 42;
 
 /** The query keys a page reads by name, as written. */
 export function keysRead(src: string): string[] {

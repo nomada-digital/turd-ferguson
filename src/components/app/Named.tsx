@@ -6,7 +6,7 @@ import { T } from "@/config/tokens";
 import { ENGINE_SPECS, type Engine } from "@/lib/scan/engines";
 import { clusterCards } from "@/lib/tracking/cluster-figures";
 import { rangeLabel } from "@/lib/tracking/date-range";
-import { type CitedPageRow, type Day, type Range, type Rate, basis as basisLine, brandGaps, comparisonLabel, firstCheckDay, formatDay, resolveComparison, ungroupedRead } from "@/lib/tracking/figures";
+import { type CitedPageRow, type Day, type Range, type Rate, basis as basisLine, brandGaps, comparisonLabel, firstCheckDay, formatDay, firstReadComplete, resolveComparison, ungroupedRead } from "@/lib/tracking/figures";
 import { NAMED_TOP, citedWithBrand, namedPage } from "@/lib/tracking/named-figures";
 import { answerHref, namedEvidence } from "@/lib/tracking/evidence";
 import type { Compare, OverviewData } from "@/lib/tracking/overview-data";
@@ -74,7 +74,9 @@ export default function Named({
   // 8 Oct 2026 (audit data-10): the comparison the Overview reads - the first week for a young client.
   // The first week's first day, from started_on and the prompts - the date picker is handed the same day.
   const firstCheck = firstCheckDay(startedOn, data.questions);
-  const cmp = resolveComparison(range, compareMode, startedOn, firstCheck);
+  // ON-3 review (9 Oct 2026): a first reading only when its check was complete.
+  const firstComplete = firstReadComplete(data.runs, firstCheck);
+  const cmp = resolveComparison(range, compareMode, startedOn, firstCheck, firstComplete);
   const before = cmp.range;
   // Audit data-3 (8 Oct 2026): every partial or failed check in the range, not only the last.
   const partial = runNote(data, range, today);
@@ -126,7 +128,7 @@ export default function Named({
           {partial ? <p style={{ margin: 0, fontSize: "14px", lineHeight: 1.5, color: T.soft, maxWidth: "680px" }}>{partial}</p> : null}
           {gapNote ? <p style={{ margin: 0, fontSize: "14px", lineHeight: 1.5, color: T.soft, maxWidth: "680px" }}>{gapNote}</p> : null}
         </div>
-        <DatePicker range={range} compare={compareMode} today={today} startedOn={startedOn} firstCheck={firstCheck} grow={false}>
+        <DatePicker range={range} compare={compareMode} today={today} startedOn={startedOn} firstCheck={firstCheck} firstComplete={firstComplete} grow={false}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={T.ink} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <rect x="3" y="5" width="18" height="16" rx="2" />
             <path d="M3 10h18M8 3v4M16 3v4" />
@@ -197,7 +199,7 @@ export default function Named({
               <span style={HEAD}>Brand</span>
               <span style={{ ...HEAD, textAlign: "right" }}>Answers</span>
               <span style={{ ...HEAD, textAlign: "right" }}>Share</span>
-              <span style={{ ...HEAD, textAlign: "right" }}>{before ? (cmp.kind === "start" ? "Vs first week" : "Vs last period") : "Change"}</span>
+              <span style={{ ...HEAD, textAlign: "right" }}>{before ? (cmp.kind === "start" ? "Vs first week" : cmp.kind === "first" ? "Vs first reading" : "Vs last period") : "Change"}</span>
               <span style={HEAD}>Engines</span>
               <span style={{ ...HEAD, textAlign: "right" }}>Prompts</span>
             </div>
@@ -224,7 +226,7 @@ export default function Named({
                         {pct(r.share)}
                       </span>
                       <span className="app-nm-change" style={{ display: "flex", justifyContent: "flex-end" }}>
-                        {r.isNew ? <span style={{ fontSize: "12px", fontWeight: 600, color: T.soft }}>New</span> : before && r.answers ? <Chip value={r.delta} unit=" pts" none="-" /> : null}
+                        {r.isNew ? <span style={{ fontSize: "12px", fontWeight: 600, color: T.soft }}>New</span> : before && r.answers ? <Chip value={r.delta} unit=" pts" none="-" vs={before ? comparisonLabel(before, cmp.kind) : null} /> : null}
                       </span>
                       {/* Two grid cells on a desktop; one line on a phone, so the counts never overlap the engines. */}
                       <span className="app-nm-sub" style={{ display: "contents" }}>

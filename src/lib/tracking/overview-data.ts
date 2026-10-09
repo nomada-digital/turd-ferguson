@@ -15,15 +15,17 @@ import { type AnswerRow, type CitationRow, type Day, type Range, type SerpRow, a
  * four engines over two 28-day periods is 4,480 answers.
  */
 
-import type { Compare } from "./date-range.ts";
+import { type Compare, defaultRange } from "./date-range.ts";
 export type { Compare };
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
  * The range a URL states (BRIEF decision 3): `?from=&to=&compare=`, defaulting
- * to the last 28 days to today against the previous period. A malformed or
- * reversed range falls back to the default rather than erroring.
+ * to the last 28 days to today against the previous period - or, for a client
+ * whose tracking began under 55 days ago, "Since tracking began" (ON-3,
+ * 9 Oct 2026, date-range.ts defaultRange). A malformed or reversed range
+ * falls back to the default rather than erroring. A stated range always wins.
  */
 export function rangeFrom(params: Record<string, string | string[] | undefined>, today: Day = trackingDay(), startedOn: Day | null = null): { range: Range; compare: Compare } {
   const one = (k: string) => (typeof params[k] === "string" ? (params[k] as string) : undefined);
@@ -33,7 +35,7 @@ export function rangeFrom(params: Record<string, string | string[] | undefined>,
   // perf-8 (8 Oct 2026): a stated from before rangeFloor starts on it; a range wholly before it is the default.
   const bounded = from && to && DAY.test(from) && DAY.test(to) && from <= to && to <= today && !Number.isNaN(Date.parse(from)) && !Number.isNaN(Date.parse(to)) ? boundStated({ from, to }, today, startedOn) : null;
   if (bounded) return { range: bounded, compare };
-  return { range: { from: addDays(today, -27), to: today }, compare };
+  return { range: defaultRange(today, startedOn), compare };
 }
 
 /**

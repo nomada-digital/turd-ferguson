@@ -4,7 +4,8 @@ import { constantTimeEqual } from "../constant-time.ts";
 import { keywordForm } from "../scan/dataforseo-request.ts";
 import type { ClusterKeywordPick } from "../scan/target-keyword.ts";
 
-import { refuseSlotText } from "./slot.ts";
+import { PROMPTS_PER_CLUSTER } from "./limits.ts";
+import { refuseDraftsAt } from "./prompt-text.ts";
 
 /**
  * "Add a cluster" on the Clusters page - BRIEF-3 T6 part 3a (30 Sep 2026;
@@ -138,14 +139,14 @@ export function draftPrompts(keyword: string): string[] {
     : [`What’s the best ${k}?`, `Which ${k} is easiest to set up and use?`, `Which ${k} do small businesses recommend?`, `Which ${k} saves the most time each month?`, `What’s a good alternative to the best-known ${k}?`];
 }
 
-/** The five typed prompts: each 8 to ADMIN_LIMITS.question characters, no two the same. */
+/**
+ * The five typed prompts: each 8 to ADMIN_LIMITS.question characters, no two
+ * the same. Since the ON-1 review (9 Oct 2026) two the same in the batch is
+ * its own refusal (prompt-text.ts PROMPT_TWIN, code "twin"), not "already
+ * tracked", which nothing is yet; refuseDraftsAt also says which field.
+ */
 export function refuseDrafts(texts: readonly string[]): string | null {
-  if (texts.length !== 5) return "A cluster has 5 prompts.";
-  for (let i = 0; i < texts.length; i++) {
-    const r = refuseSlotText(texts[i], texts.slice(0, i));
-    if (r) return r;
-  }
-  return null;
+  return refuseDraftsAt(texts, PROMPTS_PER_CLUSTER)?.message ?? null;
 }
 
 /**

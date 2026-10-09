@@ -21,6 +21,7 @@ import {
   comparisonRange,
   daysIn,
   firstCheckDay,
+  firstReadComplete,
   firstWeek,
   formatDay,
   keywordRows,
@@ -117,10 +118,64 @@ test("a comparison reaching before tracking began is the first week; one inside 
   assert.deepEqual(o.compare, { from: "2026-09-10", to: "2026-09-16" });
   assert.equal(o.compareKind, "start");
   assert.equal(o.compareHidden, null);
-  const early = overview({ range: { from: "2026-09-02", to: "2026-09-15" }, compare: "prev", startedOn: "2026-09-10", engines: [], questions: [], answers: [], serp: [], keywordCount: 10 });
-  assert.equal(early.compare, null);
-  assert.equal(early.lfl, null);
-  assert.match(early.compareHidden ?? "", /^Tracking began 10 Sep, so there is no earlier period to compare with yet\. From 17 Sep the changes are against your first week\.$/);
+  // ON-3 (9 Oct 2026): a range ending inside the first week that holds a complete first reading and a day after
+  // it is compared with that first reading, where it used to show nothing for half the trial.
+  const complete = [{ run_date: "2026-09-10", status: "complete" }];
+  const at = (range: { from: string; to: string }, runs: { run_date: string; status: string }[] = complete) =>
+    overview({ range, compare: "prev", startedOn: "2026-09-10", engines: [], questions: [], answers: [], serp: [], keywordCount: 10, runs });
+  const early = at({ from: "2026-09-02", to: "2026-09-15" });
+  assert.deepEqual(early.compare, { from: "2026-09-10", to: "2026-09-10" });
+  assert.equal(early.compareKind, "first");
+  assert.equal(early.compareHidden, null);
+  // A range ending on the first reading has nothing to compare yet, and says from when it will.
+  const day1 = at({ from: "2026-09-02", to: "2026-09-10" });
+  assert.equal(day1.compare, null);
+  assert.equal(day1.lfl, null);
+  assert.match(day1.compareHidden ?? "", /^Tracking began 10 Sep, so there is no earlier reading to compare with yet\. From 11 Sep the changes are against your first reading, 10 Sep\.$/);
+  // One that starts after the first reading and ends inside the first week waits for the first week, as before.
+  const inside = at({ from: "2026-09-12", to: "2026-09-15" });
+  assert.equal(inside.compare, null);
+  assert.match(inside.compareHidden ?? "", /^Tracking began 10 Sep, so there is no earlier period to compare with yet\. From 17 Sep the changes are against your first week\.$/);
+  // Review of ON-3 (9 Oct 2026): a first check that was not complete - partial, failed, unread - is never the
+  // comparison. The range waits for the first week, as before ON-3, and no caption names a first reading.
+  for (const runs of [[{ run_date: "2026-09-10", status: "partial" }], [{ run_date: "2026-09-10", status: "failed" }], [{ run_date: "2026-09-10", status: "running" }], []]) {
+    const o = at({ from: "2026-09-02", to: "2026-09-15" }, runs);
+    assert.equal(o.compare, null, runs[0]?.status ?? "no run");
+    assert.equal(o.compareKind, null);
+    assert.match(o.compareHidden ?? "", /^Tracking began 10 Sep, so there is no earlier period to compare with yet\. From 17 Sep the changes are against your first week\.$/);
+    assert.doesNotMatch(o.compareHidden ?? "", /first reading/);
+  }
+});
+
+/**
+ * Review of ON-3 (9 Oct 2026): a partial first check - only one engine answered on day 1, all four on days 2
+ * and 3, each naming the client the same way every day - read "+67 pts vs your first reading": the engine
+ * mix, not the client, moved. Partial or failed, the first check is not compared with; complete, it is.
+ */
+test("a partial or failed first check is never the first reading the chips compare with", () => {
+  const start = "2026-10-01";
+  const engines = ["chatgpt", "gemini", "perplexity", "claude"];
+  // Claude names the client and the other three do not, every day; on day 1 only Claude answered.
+  const answers: AnswerRow[] = [];
+  const days: [string, string[]][] = [[start, ["claude"]], [addDays(start, 1), engines], [addDays(start, 2), engines]];
+  for (const [day, read] of days) {
+    for (const e of engines) answers.push(a(day, "q1", e, e === "claude", [], read.includes(e)));
+  }
+  const questions = [{ id: "q1", added_on: start, stopped_on: null }];
+  const range = { from: start, to: addDays(start, 2) };
+  const run = (status: string) => [{ run_date: start, status }, { run_date: addDays(start, 1), status: "complete" }, { run_date: addDays(start, 2), status: "complete" }];
+  const read = (status: string) => overview({ range, compare: "prev", startedOn: start, engines, questions, answers, serp: [], keywordCount: 0, runs: run(status) });
+  const partial = read("partial");
+  assert.equal(partial.compare, null, "not compared with a first check that read one engine");
+  assert.equal(partial.change, null, "so no +67 pts");
+  const failed = read("failed");
+  assert.equal(failed.compare, null);
+  assert.doesNotMatch(failed.compareHidden ?? "", /first reading/, "no caption naming a reading that does not exist");
+  // Had day 1 been complete - every engine read - the like-for-like change is the engine mix's own: none.
+  const whole = answers.map((x) => (x.run_date === start ? { ...x, answered: true } : x));
+  const complete = overview({ range, compare: "prev", startedOn: start, engines, questions, answers: whole, serp: [], keywordCount: 0, runs: run("complete") });
+  assert.equal(complete.compareKind, "first");
+  assert.equal(complete.change?.named, 0);
 });
 
 test("questions named, share of voice with rank, keywords on page 1", () => {
@@ -169,7 +224,8 @@ test("keyword rows: latest position, places gained over the range, one point per
     ],
     { from: "2026-09-01", to: "2026-09-03" },
   ).get("k")!;
-  assert.deepEqual(k, { position: 7, change: 4, series: [11, null, 7] });
+  // ON-3 (9 Oct 2026): the row also names the first reading its change is against, so the chip can say so.
+  assert.deepEqual(k, { position: 7, change: 4, series: [11, null, 7], since: "2026-09-01" });
 });
 
 test("cited pages: counted per page, engines listed, the client's own site marked", () => {
@@ -297,10 +353,20 @@ test("8 Oct 2026 (audit data-10): a young client compares with its first week - 
   // The previous period, where it exists, is untouched: an older client still compares with the 28 days before.
   assert.deepEqual(resolveComparison(fxRange, "prev", fx.client.started_on), { range: { from: "2026-08-05", to: "2026-09-01" }, kind: "prev", hidden: null });
   assert.deepEqual(resolveComparison(fxRange, "none", start), { range: null, kind: null, hidden: null });
-  // Before its first week is over there is nothing to compare yet, and it says when there will be.
-  const day3 = resolveComparison({ from: addDays(start, -25), to: addDays(start, 2) }, "prev", start);
-  assert.equal(day3.range, null);
-  assert.match(day3.hidden ?? "", /From 27 Sep the changes are against your first week\.$/);
+  // ON-3 (9 Oct 2026): before its first week is over it is compared with its first reading - its run complete,
+  // as the fixture's are (firstReadComplete) - and says which.
+  assert.equal(firstReadComplete(y.data.runs, start), true);
+  const day3 = resolveComparison({ from: addDays(start, -25), to: addDays(start, 2) }, "prev", start, start, firstReadComplete(y.data.runs, start));
+  assert.deepEqual(day3, { range: { from: start, to: start }, kind: "first", hidden: null });
+  assert.equal(comparisonLabel(day3.range!, day3.kind), "vs your first reading, 20 Sep");
+  // Its first check not complete (review, same day): nothing to compare until the first week is over, as before ON-3.
+  const unread = resolveComparison({ from: addDays(start, -25), to: addDays(start, 2) }, "prev", start, start, false);
+  assert.equal(unread.range, null);
+  assert.match(unread.hidden ?? "", /From 27 Sep the changes are against your first week\.$/);
+  // On its first day there is nothing to compare yet, and it says when there will be.
+  const day1 = resolveComparison({ from: addDays(start, -27), to: start }, "prev", start, start, true);
+  assert.equal(day1.range, null);
+  assert.match(day1.hidden ?? "", /From 21 Sep the changes are against your first reading, 20 Sep\.$/);
 });
 
 test("8 Oct 2026 (review of data-10): the date picker names the first week every page reads, whatever the first check read", () => {

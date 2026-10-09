@@ -146,7 +146,7 @@ export default function Reports({
                       </dd>
                       <dd style={{ margin: 0, fontSize: "13px", color: T.soft }}>
                         {`${f.named.num.toLocaleString("en-GB")} of ${f.named.den.toLocaleString("en-GB")} answers`}
-                        {f.lfl ? `. Like-for-like ${pct(f.lfl.now)}, ${f.lfl.delta === 0 ? "level with" : f.lfl.delta > 0 ? "up from" : "down from"} ${pct(f.lfl.before)}${f.lfl.firstWeek ? " in the first week" : ""}` : ""}
+                        {f.lfl ? `. Like-for-like ${pct(f.lfl.now)}, ${f.lfl.delta === 0 ? "level with" : f.lfl.delta > 0 ? "up from" : "down from"} ${pct(f.lfl.before)}${f.lfl.firstWeek ? " in the first week" : f.lfl.firstReading ? " on the first reading" : ""}` : ""}
                       </dd>
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", gap: "4px", minWidth: 0 }}>

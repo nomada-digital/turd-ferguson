@@ -19,6 +19,7 @@ import {
   dailySeries,
   daysIn,
   firstCheckDay,
+  firstReadComplete,
   formatDay,
   keywordRows,
   movers,
@@ -91,9 +92,26 @@ function enginesSentence(engines: readonly Engine[]): string {
 const span = (r: Range, year = false) => `${formatDay(r.from)} - ${formatDay(r.to, year)}`;
 const pct = (r: Rate) => (r.pct === null ? "-" : `${r.pct}%`);
 
-function Delta({ value, unit = " pts", dark = false }: { value: number | null; unit?: string; dark?: boolean }) {
+/**
+ * What a change is against, on the chip itself (ON-3, 9 Oct 2026): "vs your
+ * first reading, 3 Oct", "vs 5 Aug - 1 Sep" (figures.ts comparisonLabel). It
+ * is read out after the figure; the page says it once where the eye lands -
+ * the date face, the column heads and the captions. Not a hover title too
+ * (review, same day): a title saying the same words was read twice.
+ */
+export function VsText({ vs }: { vs?: string | null }) {
+  return vs ? <span className="sr-only" data-vs="">{` ${vs}`}</span> : null;
+}
+
+function Delta({ value, unit = " pts", dark = false, vs = null }: { value: number | null; unit?: string; dark?: boolean; vs?: string | null }) {
   if (value === null) return null;
-  if (value === 0) return <span style={{ fontSize: "13px", color: dark ? D.cardHead : T.soft, whiteSpace: "nowrap" }}>No change</span>;
+  if (value === 0)
+    return (
+      <span style={{ fontSize: "13px", color: dark ? D.cardHead : T.soft, whiteSpace: "nowrap" }}>
+        No change
+        <VsText vs={vs} />
+      </span>
+    );
   const up = value > 0;
   const fg = dark ? D.accent : up ? T.goodFg : T.badFg;
   const bg = dark ? D.field : up ? T.goodBg : T.badBg;
@@ -105,6 +123,7 @@ function Delta({ value, unit = " pts", dark = false }: { value: number | null; u
       {up ? "+" : "−"}
       {Math.abs(value)}
       {unit}
+      <VsText vs={vs} />
     </span>
   );
 }
@@ -137,9 +156,12 @@ export default function Overview({
   placements,
   canWrite = true,
   ended = false,
+  lead = null,
 }: {
   /** client_domains.status is ended: no next check is promised (8 Oct 2026, audit activation-5). */
   ended?: boolean;
+  /** ON-3 (9 Oct 2026): the activation checklist, drawn under the page's heading and date. */
+  lead?: React.ReactNode;
   /** DS75 (2 Oct 2026): owner or editor. A viewer cannot group prompts, so the ungrouped card sends them to Clusters to see them, not to group them. */
   canWrite?: boolean;
   /** R97 part 5: the client's placements, on mentioned and above; the cluster chart's "Show placements" draws the live ones. Undefined draws no switch. */
@@ -166,10 +188,13 @@ export default function Overview({
   // 9 Oct 2026 (audit copy-2, ia-9): every check time here is the client's zone's, labelled, from the
   // cron's hour on the day meant (check-time.ts). A bare London time was an hour wrong from 25 Oct.
   const next = checkTime(addDays(today, 1), market);
-  const o = overview({ range, compare: compareMode, startedOn, engines, questions: data.questions, answers: data.answers, serp: data.serp, keywordCount: keywordsIn(data.keywords, range), keywords: data.keywords });
+  const o = overview({ range, compare: compareMode, startedOn, engines, questions: data.questions, answers: data.answers, serp: data.serp, keywordCount: keywordsIn(data.keywords, range), keywords: data.keywords, runs: data.runs });
   // 8 Oct 2026 (audit data-10): a young client's comparison is its first week, and the charts draw no dashed
   // "same day last period" line for it - a week laid over the range's first seven days would read as a period it is not.
-  const chartBefore = o.compareKind === "start" ? null : o.compare;
+  // ON-3 (9 Oct 2026): nor against a first reading - one day is not a period to lay over the range.
+  const chartBefore = o.compareKind === "start" || o.compareKind === "first" ? null : o.compare;
+  // ON-3: every chip says what its change is against, from which date (Chip's `vs`).
+  const vs = o.compare ? comparisonLabel(o.compare, o.compareKind) : null;
   // BRIEF-3 T4b part 3 (30 Sep 2026): the headline, heat map and four figures
   // read by cluster (boards-3/Main.dc.html). A client with no cluster rows yet
   // keeps the flat T4 reading rather than print 0 of 0. `?.` because
@@ -240,7 +265,7 @@ export default function Overview({
         </a>
       ) : null}
       {/* T5 (30 Sep 2026): the face is drawn here, on the server, so JS off still shows the range; DatePicker opens boards/DatePicker.dc.html on it. */}
-      <DatePicker range={range} compare={compareMode} today={today} startedOn={startedOn} firstCheck={firstCheckDay(startedOn, data.questions)}>
+      <DatePicker range={range} compare={compareMode} today={today} startedOn={startedOn} firstCheck={firstCheckDay(startedOn, data.questions)} firstComplete={firstReadComplete(data.runs, firstCheckDay(startedOn, data.questions))}>
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={T.ink} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <rect x="3" y="5" width="18" height="16" rx="2" />
           <path d="M3 10h18M8 3v4M16 3v4" />
@@ -307,6 +332,7 @@ export default function Overview({
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: "24px", minWidth: 0 }}>
         {header}
+        {lead}
         <section aria-label="Headline" className="on-dark" style={{ padding: "36px 40px", borderRadius: "18px", background: `${CLOSE_WASH}, ${D.ground}`, color: T.surface }}>
           <h2 style={{ margin: 0, fontSize: "28px", lineHeight: 1.2, fontWeight: 700, letterSpacing: "-0.03em" }}>{line}</h2>
           <p style={{ margin: "12px 0 0", fontSize: "16px", lineHeight: 1.55, color: D.cardHead, maxWidth: "520px" }}>
@@ -351,7 +377,9 @@ export default function Overview({
   const changeCaption = o.compare
     ? o.compareKind === "start"
       ? `Every change is like-for-like, against your first week (${span(o.compare)}): it counts only the ${lflWhat} tracked since then.`
-      : `Every change is like-for-like: it counts only the ${lflWhat} tracked all of this period and ${span(o.compare)}.`
+      : o.compareKind === "first"
+        ? `Every change is like-for-like, against your first reading (${formatDay(o.compare.from)}): it counts only the ${lflWhat} tracked since then.`
+        : `Every change is like-for-like: it counts only the ${lflWhat} tracked all of this period and ${span(o.compare)}.`
     : null;
   // An average position counts a keyword outside the top 20 as #21 (audit data-7), and says so.
   const avgLine = (k: { avg: number | null; ranked: number; unranked: number }) =>
@@ -380,8 +408,8 @@ export default function Overview({
     ? `${fig.now.num.toLocaleString("en-GB")} of ${fig.now.den.toLocaleString("en-GB")} answers across ${across}${loose && !cs.clusters ? "" : `, ${byCluster ? byCluster.prompts : questionsAnswered} prompts`} and ${WORDS[engines.length] ?? engines.length} engines.`
     : `${o.named.num.toLocaleString("en-GB")} of ${o.named.den.toLocaleString("en-GB")} answers across ${questionsAnswered} prompts and ${WORDS[engines.length] ?? engines.length} engines.`;
   // Audit data-10 (8 Oct 2026): against the first week, "all period" is since tracking began.
-  const allPeriod = o.compareKind === "start" ? "since your first week" : "all period";
-  const inBefore = o.compareKind === "start" ? " in your first week" : "";
+  const allPeriod = o.compareKind === "start" ? "since your first week" : o.compareKind === "first" ? "since your first reading" : "all period";
+  const inBefore = o.compareKind === "start" ? " in your first week" : o.compareKind === "first" ? " on your first reading" : "";
   const lflLine = byCluster
     ? byCluster.lflBefore && lflDelta !== null
       ? ` On the ${byCluster.clustersLfl} cluster${byCluster.clustersLfl === 1 ? "" : "s"} tracked ${allPeriod} that's ${pct(byCluster.lfl)}, ${direction(lflDelta)} ${pct(byCluster.lflBefore)}${inBefore}.`
@@ -477,7 +505,7 @@ export default function Overview({
             <Fig style={{ fontSize: "20px", fontWeight: 700, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" }} def={basisLine(rateNow, "answers")}>
               {pct(rateNow)}
             </Fig>
-            <Chip value={change} unit=" pts" none={o.compare ? "New" : ""} />
+            <Chip value={change} unit=" pts" none={o.compare ? "New" : ""} vs={vs} />
           </div>
         </div>
         <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: "4px" }}>
@@ -546,7 +574,7 @@ export default function Overview({
                   {pct(b.reach)}
                 </Fig>
                 <span style={{ display: "flex", justifyContent: "flex-end" }}>
-                  <Delta value={whoLfl?.get(b.key) ?? null} />
+                  <Delta value={whoLfl?.get(b.key) ?? null} vs={vs} />
                 </span>
               </li>
             ))}
@@ -565,7 +593,8 @@ export default function Overview({
         </section>
   );
   const keywordsCard = (
-    <section aria-labelledby="kw-h" tabIndex={0} style={{ ...CARD, paddingTop: "22px", minWidth: 0, overflowX: "auto" }}>
+    // ON-3 (9 Oct 2026): positioned, so the Places chips' absolute .sr-only words are held by this scroller, not the page (as .pkg-scroll, 28 Sep).
+    <section aria-labelledby="kw-h" tabIndex={0} style={{ ...CARD, paddingTop: "22px", minWidth: 0, overflowX: "auto", position: "relative" }}>
           <div style={{ padding: "0 24px 14px" }}>
             <h2 id="kw-h" style={H2}>
               Google keywords
@@ -595,7 +624,7 @@ export default function Overview({
                             so it wraps on the phone (.app-kw-note); wrapping everywhere broke it into four lines at 1440. */}
                         {k.added_on > today ? <span className="app-kw-note" style={{ display: "inline-block", fontWeight: 400, fontSize: "13px", lineHeight: 1.35, color: T.soft }}>{`First check tomorrow at ${next}`}</span> : row?.position ? `#${row.position}` : <span style={{ fontWeight: 400, fontSize: "13px", color: T.soft }}>Not in top 20</span>}
                       </td>
-                      <td style={{ ...TD, paddingLeft: "8px", textAlign: "right" }}>{row?.change === null || row?.change === undefined ? null : <Delta value={row.change} unit="" />}</td>
+                      <td style={{ ...TD, paddingLeft: "8px", textAlign: "right" }}>{row?.change === null || row?.change === undefined ? null : <Delta value={row.change} unit="" vs={row.since ? `since ${formatDay(row.since)}` : null} />}</td>
                     </tr>
                   );
                 })}
@@ -647,6 +676,7 @@ export default function Overview({
   return (
     <div className={cs ? "app-col" : undefined} style={{ display: "flex", flexDirection: "column", gap: "24px", minWidth: 0 }}>
       {header}
+      {lead}
 
       <section aria-label="Headline" className="on-dark app-headline" style={{ position: "relative", display: "flex", flexWrap: "wrap", gap: cs ? "40px" : "48px", padding: cs ? "34px 36px" : "36px 40px", borderRadius: "18px", background: `${CLOSE_WASH}, ${D.ground}`, color: T.surface, overflow: "hidden" }}>
         <div style={{ display: "flex", flexDirection: "column", gap: "16px", flex: "1 1 320px", minWidth: 0 }}>
@@ -844,7 +874,7 @@ export default function Overview({
                 figure: "named",
                 label: "Answers naming you",
                 value: pct(fig.now),
-                delta: <Delta value={chg.named} />,
+                delta: <Delta value={chg.named} vs={vs} />,
                 foot: <span style={{ fontSize: "13px", color: T.soft }}>{`${fig.now.num.toLocaleString("en-GB")} of ${fig.now.den.toLocaleString("en-GB")} answers${loose ? ` across ${across}` : ""}`}</span>,
               },
               {
@@ -858,7 +888,7 @@ export default function Overview({
                 figure: "sov",
                 label: "Share of voice",
                 value: pct(o.sov),
-                delta: <Delta value={chg.sov} />,
+                delta: <Delta value={chg.sov} vs={vs} />,
                 foot: <span style={{ fontSize: "13px", color: T.soft }}>{o.sov.rank ? `${ordinal(o.sov.rank)} of ${o.sov.brands} brands named` : `Not named; ${o.sov.brands} other brands were`}</span>,
               },
               {
@@ -866,7 +896,7 @@ export default function Overview({
                 label: "Cluster keywords on page 1",
                 // DS57 (2 Oct 2026, R173 pass 6): no cluster keyword read in the range is "-", not "0 of 0", as OneCluster's count.
                 value: cs.page1.den ? `${cs.page1.num} of ${cs.page1.den}` : "-",
-                delta: chg.page1 !== null ? <Delta value={chg.page1} unit="" /> : null,
+                delta: chg.page1 !== null ? <Delta value={chg.page1} unit="" vs={vs} /> : null,
                 foot: (
                   <span style={{ fontSize: "13px", color: T.soft }}>
                     {cs.page1.den
@@ -883,7 +913,7 @@ export default function Overview({
             figure: "named",
             label: "Answers naming you",
             value: pct(o.named),
-            delta: <Delta value={chg.named} />,
+            delta: <Delta value={chg.named} vs={vs} />,
             foot: <span style={{ fontSize: "13px", color: T.soft }}>{`${o.named.num.toLocaleString("en-GB")} of ${o.named.den.toLocaleString("en-GB")} answers`}</span>,
           },
           {
@@ -897,14 +927,14 @@ export default function Overview({
             figure: "sov",
             label: "Share of voice",
             value: pct(o.sov),
-            delta: <Delta value={chg.sov} />,
+            delta: <Delta value={chg.sov} vs={vs} />,
             foot: <span style={{ fontSize: "13px", color: T.soft }}>{o.sov.rank ? `${ordinal(o.sov.rank)} of ${o.sov.brands} brands named` : `Not named; ${o.sov.brands} other brands were`}</span>,
           },
           {
             figure: "keywords",
             label: "Google keywords on page 1",
             value: `${o.keywords.num} of ${o.keywords.den}`,
-            delta: chg.page1 !== null ? <Delta value={chg.page1} unit="" /> : null,
+            delta: chg.page1 !== null ? <Delta value={chg.page1} unit="" vs={vs} /> : null,
             foot: <span style={{ fontSize: "13px", color: T.soft }}>{avgLine(o.keywords)}</span>,
           },
         ]).map((f, i) => (
@@ -926,8 +956,8 @@ export default function Overview({
           <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "10px" }}>
             {[
               { label: "Prompts named in", value: `${fig.promptsNamed.num} of ${fig.promptsNamed.den}`, foot: promptsChange ? <span style={{ fontSize: "12px", color: T.soft }}>{promptsChange}</span> : loose ? <span style={{ fontSize: "12px", color: T.soft }}>{`With ${looseWords}`}</span> : null },
-              { label: "Share of voice", value: pct(o.sov), foot: <Delta value={chg.sov} /> },
-              { label: "Keywords on page 1", value: cs.page1.den ? `${cs.page1.num} of ${cs.page1.den}` : "-", foot: chg.page1 !== null ? <Delta value={chg.page1} unit="" /> : !cs.page1.den && pendingKeywords ? <span style={{ fontSize: "12px", color: T.soft }}>From tomorrow</span> : null },
+              { label: "Share of voice", value: pct(o.sov), foot: <Delta value={chg.sov} vs={vs} /> },
+              { label: "Keywords on page 1", value: cs.page1.den ? `${cs.page1.num} of ${cs.page1.den}` : "-", foot: chg.page1 !== null ? <Delta value={chg.page1} unit="" vs={vs} /> : !cs.page1.den && pendingKeywords ? <span style={{ fontSize: "12px", color: T.soft }}>From tomorrow</span> : null },
               {
                 label: "Rank among brands",
                 value: o.sov.rank ? `${ordinal(o.sov.rank)} of ${o.sov.brands}` : "-",
@@ -945,8 +975,8 @@ export default function Overview({
         </section>
       ) : null}
 
-      {cards ? <ClusterCards cards={cards} engines={engines} picked={picked?.id ?? null} href={clusterHref} detail={detailHref} manage={manage} next={next} /> : ungroupedCard}
-      {cards ? <ClusterRows cards={cards} picked={detailHref ? null : (picked?.id ?? null)} href={detailHref ?? clusterHref} opens={!!detailHref} manage={manage} next={next} /> : null}
+      {cards ? <ClusterCards cards={cards} engines={engines} picked={picked?.id ?? null} href={clusterHref} detail={detailHref} manage={manage} next={next} vs={vs} /> : ungroupedCard}
+      {cards ? <ClusterRows cards={cards} picked={detailHref ? null : (picked?.id ?? null)} href={detailHref ?? clusterHref} opens={!!detailHref} manage={manage} next={next} vs={vs} /> : null}
       {/* R151 (3 Oct 2026): the headline counts read ungrouped prompts beside clusters ("1 cluster and 5 ungrouped prompts"), so they get their card too. */}
       {cards && loose ? ungroupedCard : null}
 
@@ -971,7 +1001,9 @@ export default function Overview({
               picked.status !== "pending" && !pickedHasPrev
                 ? o.compareKind === "start" && o.compare
                   ? `Tracked from ${formatDay(picked.started_on)}. Its changes are against your first week, ${span(o.compare)}.`
-                  : `Tracked from ${formatDay(picked.started_on)}. No earlier period to compare yet.`
+                  : o.compareKind === "first" && o.compare
+                    ? `Tracked from ${formatDay(picked.started_on)}. Its changes are against your first reading, ${formatDay(o.compare.from)}.`
+                    : `Tracked from ${formatDay(picked.started_on)}. No earlier period to compare yet.`
                 : null,
             phoneLine,
             placements: placements ? chartMarkers(pickedChart.days, placements, picked.id) : null,
@@ -1017,13 +1049,21 @@ export default function Overview({
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 /** A change chip in the cards' 12px size, or the grey word when there is no change to show. */
-export function Chip({ value, unit, none, size = 12 }: { value: number | null; unit: string; none: string; size?: number }) {
-  if (value === null || value === 0) return <span style={{ fontSize: `${size}px`, fontWeight: 600, color: T.soft, whiteSpace: "nowrap" }}>{value === 0 ? "No change" : none}</span>;
+/** `vs` (ON-3, 9 Oct 2026): what the change is against, read out after it (VsText); a grey word with no change has nothing to say it of. */
+export function Chip({ value, unit, none, size = 12, vs = null }: { value: number | null; unit: string; none: string; size?: number; vs?: string | null }) {
+  if (value === null || value === 0)
+    return (
+      <span style={{ fontSize: `${size}px`, fontWeight: 600, color: T.soft, whiteSpace: "nowrap" }}>
+        {value === 0 ? "No change" : none}
+        {value === 0 ? <VsText vs={vs} /> : null}
+      </span>
+    );
   return (
     <Pill up={value > 0} size={size}>
       {value > 0 ? "+" : "−"}
       {Math.abs(value)}
       {unit}
+      <VsText vs={vs} />
     </Pill>
   );
 }
@@ -1053,21 +1093,23 @@ export const noChange = (c: Pick<ClusterCard, "status">) => (c.status === "pendi
  * gained, or leaving or entering the top 20. A keyword gone from #13 to
  * outside the top 20 read "New", as a keyword never read does.
  */
-export function PositionChip({ c, size = 12 }: { c: Pick<ClusterCard, "status" | "keyword" | "positionChange" | "positionEvent">; size?: number }) {
+export function PositionChip({ c, size = 12, vs = null }: { c: Pick<ClusterCard, "status" | "keyword" | "positionChange" | "positionEvent">; size?: number; vs?: string | null }) {
   // One word each, so the pill fits the cards' 108px Google box (82px inside); the title says it in full.
   if (c.positionEvent === "dropped")
     return (
       <Pill up={false} size={size} title="Dropped out of the top 20">
         Dropped
+        <VsText vs={vs} />
       </Pill>
     );
   if (c.positionEvent === "entered")
     return (
       <Pill up size={size} title="Entered the top 20">
         Entered
+        <VsText vs={vs} />
       </Pill>
     );
-  return <Chip value={c.positionEvent === "unranked" ? 0 : c.positionChange} unit="" none={c.keyword === null ? "No keyword" : noChange(c)} size={size} />;
+  return <Chip value={c.positionEvent === "unranked" ? 0 : c.positionChange} unit="" none={c.keyword === null ? "No keyword" : noChange(c)} size={size} vs={vs} />;
 }
 
 /**
@@ -1089,6 +1131,7 @@ function ClusterCards({
   detail,
   manage,
   next,
+  vs = null,
 }: {
   cards: ClusterCard[];
   engines: readonly Engine[];
@@ -1099,6 +1142,8 @@ function ClusterCards({
   manage: Manage;
   /** Tomorrow's check time in the client's zone (check-time.ts). */
   next: string;
+  /** ON-3: what every change is against (Chip's `vs`). */
+  vs?: string | null;
 }) {
   return (
     <section aria-labelledby="cl-h" className="app-hide-sm" style={{ ...CARD, padding: "22px 24px 24px", display: "flex", flexDirection: "column", gap: "18px" }}>
@@ -1154,7 +1199,7 @@ function ClusterCards({
                   <span style={{ fontSize: "20px", fontWeight: 700, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" }} title={pending ? (basis ?? undefined) : basisLine(c.now, "answers")}>
                     {pct(c.now)}
                   </span>
-                  <Chip value={c.delta} unit=" pts" none={noChange(c)} />
+                  <Chip value={c.delta} unit=" pts" none={noChange(c)} vs={vs} />
                 </div>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
@@ -1216,7 +1261,7 @@ function ClusterCards({
                 <div style={{ width: "108px", flexShrink: 0, boxSizing: "border-box", padding: "10px 12px", borderRadius: "12px", border: `1px solid ${on ? T.washLine : T.line}`, background: T.bg, display: "flex", flexDirection: "column", gap: "4px", alignItems: "flex-start" }}>
                   <span style={{ fontSize: "11px", fontWeight: 600, color: T.soft }}>Google</span>
                   <span style={{ fontSize: "24px", fontWeight: 700, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" }}>{c.position === null ? "-" : `#${c.position}`}</span>
-                  <PositionChip c={c} />
+                  <PositionChip c={c} vs={vs} />
                 </div>
               </div>
               {detail ? (
@@ -1260,7 +1305,7 @@ function ClusterCards({
  * picks the chart below, as the cards do. "Manage" goes to the Clusters
  * page (T6).
  */
-function ClusterRows({ cards, picked, href, opens, manage, next }: { cards: ClusterCard[]; picked: string | null; href: (id: string) => string; opens: boolean; manage: Manage; next: string }) {
+function ClusterRows({ cards, picked, href, opens, manage, next, vs = null }: { cards: ClusterCard[]; picked: string | null; href: (id: string) => string; opens: boolean; manage: Manage; next: string; vs?: string | null }) {
   return (
     <section aria-labelledby="cl-h-sm" className="app-show-sm" style={{ background: T.surface, border: `1px solid ${T.line}`, borderRadius: "16px", paddingTop: "14px" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "0 16px 10px" }}>
@@ -1314,7 +1359,7 @@ function ClusterRows({ cards, picked, href, opens, manage, next }: { cards: Clus
                 <span style={{ fontSize: "16px", fontWeight: 700, fontVariantNumeric: "tabular-nums" }} title={basisLine(c.now, "answers")}>
                   {pct(c.now)}
                 </span>
-                <Chip value={c.delta} unit=" pts" none={noChange(c)} size={11} />
+                <Chip value={c.delta} unit=" pts" none={noChange(c)} size={11} vs={vs} />
               </span>
             )}
           </Link>

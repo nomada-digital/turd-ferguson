@@ -102,6 +102,7 @@ export default async function ClientClusters({
           range={range}
           compareMode={compare}
           startedOn={client.started_on}
+          now={repo.now()}
           data={data}
           clusterLimit={client.cluster_limit ?? CLUSTER_BASE}
           open={one("open")}

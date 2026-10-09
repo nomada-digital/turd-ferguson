@@ -31,7 +31,8 @@ test("R151 (3 Oct 2026): every rule's refusal of a free slot has a code, and onl
   assert.equal(slotWhyOf(refuseGrouping({ ids: ["a"], ungrouped: new Set(), clusterLive: 1 }) ?? ""), null, "a stale form keeps the Reload line");
   assert.equal(slotWhyOf("You already track this keyword."), "tracked");
   assert.equal(slotWhyOf("The keyword check did not verify."), "recheck");
-  assert.equal(slotWhyOf(refuseDrafts(["Which tool is best for this?", "which tool is best for this?", "a", "b", "c"]) ?? ""), "duplicate");
+  // ON-1 review (9 Oct 2026): two the same in one batch is its own code - nothing is tracked yet, so not "duplicate".
+  assert.equal(slotWhyOf(refuseDrafts(["Which tool is best for this?", "which tool is best for this?", "Which tool suits a studio?", "Which tool do agencies use?", "Which tool saves the most time?"]) ?? ""), "twin");
   assert.equal(slotRefusal("duplicate"), SLOT_WHY.duplicate);
   assert.equal(slotRefusal("toString"), null, "own keys only");
   assert.equal(slotRefusal(SLOT_WHY.duplicate), null, "words are not a code");
