@@ -1,4 +1,5 @@
 import type { TierKey } from "../lib/tier-text.ts";
+import { clockIn, marketZone } from "../lib/tracking/check-time.ts";
 
 /**
  * The alwaystracked free trial (Danny, 8 Oct 2026): 14 days, card required,
@@ -61,13 +62,10 @@ const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "
  * is the next day in London.
  */
 export function trialMoment(iso: string, market: string): string {
-  const uk = market.toLowerCase() === "uk";
-  const zone = uk ? "Europe/London" : "America/New_York";
   const t = new Date(iso);
-  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-GB", { timeZone: zone, day: "numeric", month: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", hour12: !uk }).formatToParts(t).map((p) => [p.type, p.value]));
-  const day = `${Number(parts.day)} ${MONTHS[Number(parts.month) - 1]} ${parts.year}`;
-  if (uk) return `${day}, ${parts.hour!.padStart(2, "0")}:${parts.minute} UK time`;
-  return `${day}, ${Number(parts.hour)}:${parts.minute}${(parts.dayPeriod ?? "").toLowerCase().replace(/\s|\./g, "")} ET`;
+  // The zone and the time's wording are check-time.ts's, which the dashboard's check times use too (9 Oct 2026).
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-GB", { timeZone: marketZone(market), day: "numeric", month: "numeric", year: "numeric" }).formatToParts(t).map((p) => [p.type, p.value]));
+  return `${Number(parts.day)} ${MONTHS[Number(parts.month) - 1]} ${parts.year}, ${clockIn(t, market)}`;
 }
 
 /** What the first charge will be, in the client's currency: "$129 a month", UK "£99 + VAT a month". */
