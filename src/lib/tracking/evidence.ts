@@ -84,11 +84,11 @@ export function citedEvidence(input: { answers: readonly (AnswerRow & CitationRo
   );
 }
 
-/** Answered rows by prompt and day (`${question_id} ${run_date}`), for dayAnswerIn. */
-export function answersByPromptDay<A extends AnswerRow>(rows: readonly A[]): Map<string, A[]> {
+/** Answered rows by prompt and day (`${question_id} ${run_date}`), for dayAnswerIn - only the days `range` holds, when given. */
+export function answersByPromptDay<A extends AnswerRow>(rows: readonly A[], range?: Range): Map<string, A[]> {
   const out = new Map<string, A[]>();
   for (const a of rows) {
-    if (!a.answered) continue;
+    if (!a.answered || (range && (a.run_date < range.from || a.run_date > range.to))) continue;
     const k = `${a.question_id} ${a.run_date}`;
     const list = out.get(k);
     if (list) list.push(a);

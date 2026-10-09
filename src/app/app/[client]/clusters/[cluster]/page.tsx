@@ -63,7 +63,7 @@ export default async function ClientCluster({
   const picked = detail.card.prompts[prompt];
   // DB-2 (9 Oct 2026): `?day=` shows that check's answers instead of the latest. Only the date comes from the
   // URL: the client is the session's member client above, the prompt one of this cluster's own (read-shape.ts dayPlan).
-  const day = pickedDay(sp.day, today, client.started_on);
+  const day = pickedDay(sp.day, today);
   const [latest, notes, upgrade] = await Promise.all([
     picked && detail.card.status !== "pending" ? repo.answerDay(client.id, dayPlan(picked.id, range.to, day)) : null,
     repo.clusterNotes(client.id, detail.card.prompts.map((p) => p.id)),

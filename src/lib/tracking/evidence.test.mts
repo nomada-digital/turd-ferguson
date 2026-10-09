@@ -7,6 +7,7 @@ import { clusterCards } from "./cluster-figures.ts";
 import { answerAnchor, answerHref, answersByPromptDay, citedEvidence, dayAnswerIn, latestByPrompt, namedEvidence } from "./evidence.ts";
 import { type AnswerRow, type CitationRow, type Range, addDays, brandsRead, citedPage, citedPageRows, resolveComparison, firstCheckDay } from "./figures.ts";
 import { expandFixture, fixtureState } from "./fixture-mode.ts";
+import { answerTabs } from "./latest-answers.ts";
 import { namedPage } from "./named-figures.ts";
 
 /**
@@ -93,6 +94,9 @@ test("Cited pages: each prompt under an open row opens the latest answer in rang
           assert.ok(at, `${state} ${p.page} ${q.id}: no answer to open`);
           const a = answerAt(f.data.answers, q.id, at.day, at.engine)!;
           assert.ok(a.answered && a.citations.some((c) => citedPage(c)?.page === p.page), `${state} ${p.page} ${q.id}: the answer opened does not cite it`);
+          // Review of 95a8747 (9 Oct 2026): and the panel it lands on lists the page under the row's own name.
+          const [tab] = answerTabs([{ ...a, text: null, at: null }], [at.engine], f.client.brand, f.client.market);
+          assert.ok(tab!.pages.includes(p.page), `${state} ${p.page} ${q.id}: the panel names it ${JSON.stringify(tab!.pages)}`);
           assert.ok(!engine || at.engine === engine);
           assert.equal(at.day, f.data.answers.filter((x) => x.question_id === q.id && x.answered && (!engine || x.engine === engine) && x.run_date >= range.from && x.run_date <= range.to && x.citations.some((c) => citedPage(c)?.page === p.page)).map((x) => x.run_date).sort().at(-1));
           checked++;
@@ -113,7 +117,10 @@ test("the Overview's heat cell opens one of the answers it counts, and a name wh
     const f = fixtureState(base, { TRACKING_FIXTURE_STATE: state });
     const range = r28(f.today);
     const cards = clusterCards({ clusters: f.data.clusters, questions: f.data.questions, keywords: f.data.keywords, answers: f.data.answers, serp: f.data.serp, range, before: null, today: f.today, engines: ENGINES });
-    const index = answersByPromptDay(f.data.answers);
+    // Review of 95a8747 (9 Oct 2026): only the days the grid draws are indexed.
+    const index = answersByPromptDay(f.data.answers, range);
+    assert.ok([...index.values()].flat().every((a) => a.run_date >= range.from && a.run_date <= range.to), "a day outside the grid was indexed");
+    assert.ok(index.size < answersByPromptDay(f.data.answers).size || state === "young", `${state}: the whole read was indexed`);
     for (const c of cards.filter((x) => x.status !== "pending")) {
       const ids = c.prompts.map((p) => p.id);
       c.heat.forEach((cell, i) => {
@@ -153,9 +160,16 @@ test("census: every figure that opens answers builds its link with evidence.ts",
   assert.match(overview, /dayAnswerIn\(byPromptDay, c\.prompts\.map\(\(p\) => p\.id\), d, engines\)/);
   assert.match(overview, /answerHref\(`\$\{clustersPath\}\/\$\{encodeURIComponent\(c\.id\)\}`, \{ \.\.\.rangeQuery, prompt: String\(at\.prompt\) \}, at\)/);
   assert.match(overview, /role=\{detailHref \? "group" : "img"\}/, "a heat map with links in it is not an image, whose children go unread");
+  // Review of 95a8747 (9 Oct 2026): a heat link has one name, its <title> - an aria-label beside it read it twice - and the
+  // index holds the grid's own days only.
+  const link = overview.slice(overview.indexOf('<a key={`${c.id}-${d}`}'), overview.indexOf("</a>", overview.indexOf('<a key={`${c.id}-${d}`}')));
+  assert.ok(link.length > 100 && link.includes("<title>"), "the heat link not found");
+  assert.ok(!link.includes("aria-label"), "the heat link is named twice again");
+  assert.match(overview, /answersByPromptDay\(data\.answers, \{ from: gridDays\[0\]!, to: gridDays\[gridDays\.length - 1\]! \}\)/);
   const one = src("OneCluster.tsx");
   assert.match(one, /<section id=\{answerAnchor\(tab\.engine\)\} tabIndex=\{-1\}/, "the anchor the links end on");
   assert.match(one, /const dayHref = \(d: Day, e: string\) => answerHref\("", \{ \.\.\.rangeQuery, prompt: String\(prompt\) \}, \{ day: d, engine: e \}\);/);
   assert.match(one, /href=\{dayHref\(d, r\.engine\)\}/, "the day grid's squares are links");
   assert.match(one, /aria-label=\{`\$\{said\}\. Open this answer\.`\}/, "each says its day, engine and outcome in words");
+  assert.match(one, /pickedDayLine\(\{ day, today, market, stored: !noCheck, run: todayRun\(data\.runs, today\)/, "the picked day's line is latest-answers.ts's");
 });

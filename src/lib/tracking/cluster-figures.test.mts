@@ -250,6 +250,12 @@ test("promptIndex: ?prompt= picks 0-4 of the cluster's prompts, anything else is
   assert.equal(promptIndex("4", 5), 4);
   assert.equal(promptIndex("4", 4), 0);
   for (const bad of [undefined, "", "-1", "1.5", "12", "x", ["1", "2"]]) assert.equal(promptIndex(bad, 5), 0);
+  // Review of 95a8747 (9 Oct 2026): five live prompts and five or more stopped in the range pass ten.
+  assert.equal(promptIndex("10", 11), 10);
+  assert.equal(promptIndex("12", 13), 12);
+  assert.equal(promptIndex("10", 10), 0, "past the last is the first");
+  assert.equal(promptIndex("100", 120), 0, "three digits is not an index");
+  assert.equal(promptIndex("07", 10), 7);
 });
 
 test("T7 brands: answers naming each brand for one prompt, the client always listed (part 3a)", () => {

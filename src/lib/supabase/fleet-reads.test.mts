@@ -41,9 +41,12 @@ import { blankComments, sourceFiles } from "../source-read.mts";
  * What this cannot see: a table named by a variable (limits.ts `liveCount`
  * takes it as an argument, and counts with head: true), and a builder handed
  * on before its select (overview-data.ts passes `db.from("tracking_answers")`
- * to read-shape.ts, which pages it). Neither is a select on the chain it is
- * found on, so neither is counted, and the floor below is what notices this
- * walk going blind.
+ * to read-shape.ts: to readAnswers, which pages it, and since DB-2 on 9 Oct
+ * 2026 to readAnswerDay, the one-cluster answers panel's read, which is held
+ * to one client, one prompt and one day rather than paged, and which
+ * read-shape.test.mts runs on a fake PostgREST holding two clients' rows).
+ * Neither is a select on the chain it is found on, so neither is counted, and
+ * the floor below is what notices this walk going blind.
  */
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..", "..", "..");

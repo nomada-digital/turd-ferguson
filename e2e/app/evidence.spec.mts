@@ -11,8 +11,8 @@
  * - a Who is named prompt lands on an answer that names the open brand, a
  *   Cited pages prompt on one that cites the open page, an Overview heat cell
  *   on one of the answers it counts;
- * - a bad, future or pre-tracking day and an unknown engine are ignored, and
- *   a day with no check says so;
+ * - a bad or future day and an unknown engine are ignored, and a day with no
+ *   check - one before tracking began included - says so;
  * - `?day=` opens nothing of a client the member may not see.
  *
  * Same harness as scope.spec.mts: `next start` on the build, in-process.
@@ -120,9 +120,9 @@ for (const width of [1280, 390]) {
     const href = (await sq.getAttribute("href"))!;
     assert.match(href, /prompt=1&day=2026-09-15&engine=gemini#answer-gemini$/);
     assert.match(href, /from=\d{4}-\d{2}-\d{2}&to=\d{4}-\d{2}-\d{2}/, "the range rides along");
-    // A tap target on the phone: the square keeps its 22px width, and its ::before takes the tap 44px tall (.app-tap).
+    // A target at every width (review of 95a8747, 9 Oct 2026): 24px wide; on the phone its ::before takes the tap 44px tall (.app-tap).
     const box = (await sq.boundingBox())!;
-    assert.ok(box.width >= (width < 600 ? 21.5 : 8) && box.height >= 28, `the square is ${box.width} by ${box.height}`);
+    assert.ok(box.width >= 23.5 && box.height >= 28, `the square is ${box.width} by ${box.height}`);
     if (width < 600) assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector("a.app-strip-a")!, "::before").height), "44px");
     await sq.scrollIntoViewIfNeeded();
     await sq.click();
@@ -131,7 +131,8 @@ for (const width of [1280, 390]) {
     const p = await panel(page);
     assert.equal(p.id, "answer-gemini");
     assert.equal(p.tab, "Gemini", "the Gemini tab is the one shown");
-    assert.match(p.text, /Showing Gemini's answer from the check on 15 Sep 2026\. See the latest answers/);
+    // Review of 95a8747 (9 Oct 2026): no possessive, and a blank tab is not "Showing" an answer.
+    assert.match(p.text, said.includes("no answer") ? /No answer from Gemini at the check on 15 Sep 2026\. See the latest answers/ : /Showing the answer from Gemini at the check on 15 Sep 2026\. See the latest answers/);
     assert.match(p.text, /What Gemini said\. 15 Sep 2026/);
     const outcome = said.includes("didn't name you") ? /Doesn’t name Tallyroo/ : said.includes("named you") ? /Names Tallyroo/ : /No answer/;
     assert.match(p.text, outcome, "the verdict is the square's");
@@ -154,6 +155,23 @@ for (const width of [1280, 390]) {
     await page.waitForFunction(() => document.querySelector("#ans-h")?.textContent === "Latest answers", null, { timeout: 10_000 });
     assert.doesNotMatch(page.url(), /day=/);
     assert.match(page.url(), /prompt=1/);
+    await ctx.close();
+  });
+}
+
+// Review of 95a8747 (9 Oct 2026): the linked squares narrowed to 8.7px at 1024 and 11.3px at 800. Every one is 24px wide now,
+// the grid scrolls instead, and the page itself never does.
+for (const width of [1024, 800, 390, 320]) {
+  test(`at ${width}: every day square is at least 24px wide, and the page does not scroll sideways`, async () => {
+    as("default");
+    const { ctx, page } = await open(`${HOME}/clusters/c1?prompt=1`, width);
+    const m = await page.evaluate(() => {
+      const w = [...document.querySelectorAll<HTMLElement>("#strip-scroll .app-strip-cell")].map((c) => c.getBoundingClientRect().width);
+      return { cells: w.length, narrowest: Math.min(...w), sideways: document.documentElement.scrollWidth - innerWidth };
+    });
+    assert.ok(m.cells >= 140, `only ${m.cells} squares`);
+    assert.ok(m.narrowest >= 23.5, `a square is ${m.narrowest}px wide`);
+    assert.ok(m.sideways <= 0, `the page scrolls ${m.sideways}px sideways`);
     await ctx.close();
   });
 }
@@ -211,7 +229,11 @@ test("an Overview heat cell is a keyboard-reachable link to one of the answers i
   as("default");
   const { ctx, page } = await open(HOME);
   const cell = page.locator("#ov-heat-scroll a.app-heat-a").last();
-  const said = (await cell.getAttribute("aria-label"))!;
+  // One name, its <title> (review of 95a8747, 9 Oct 2026): no aria-label repeating it.
+  const said = await page.evaluate(() => {
+    const a = [...document.querySelectorAll("#ov-heat-scroll a.app-heat-a")].at(-1)!;
+    return a.hasAttribute("aria-label") ? "named twice" : (a.querySelector("title")?.textContent ?? "");
+  });
   assert.match(said, /, 29 Sep 2026: named you in (\d+) of (\d+) answers \(\d+%\)\. Open that day's answers\.$/);
   await cell.focus();
   assert.equal(await page.evaluate(() => document.activeElement?.classList.contains("app-heat-a")), true, "the cell takes focus");
@@ -248,15 +270,28 @@ test("with script each grid of day links is one tab stop, and the arrow keys mov
   // The Overview's heat map: one stop for 280 days, entered on the latest day of the first row.
   const o = await open(HOME);
   await o.page.waitForFunction(() => document.querySelectorAll('#ov-heat-scroll a.app-heat-a[tabindex="-1"]').length > 200, null, { timeout: 5_000 });
-  const heat = await o.page.evaluate(() => [...document.querySelectorAll("#ov-heat-scroll a.app-heat-a")].filter((a) => a.getAttribute("tabindex") !== "-1").map((a) => a.getAttribute("aria-label") ?? ""));
+  const heat = await o.page.evaluate(() => [...document.querySelectorAll("#ov-heat-scroll a.app-heat-a")].filter((a) => a.getAttribute("tabindex") !== "-1").map((a) => a.querySelector("title")?.textContent ?? ""));
   assert.equal(heat.length, 1, `${heat.length} tab stops in the heat map`);
   assert.match(heat[0]!, /, 29 Sep 2026: /);
+  // Review of 95a8747 (9 Oct 2026): that stop is a corner cell - top row, Today - and its ring sits inside the grid, where the SVG cannot cut it.
+  await o.page.locator('#ov-heat-scroll a.app-heat-a[tabindex="0"]').focus();
+  await o.page.keyboard.press("ArrowLeft");
+  await o.page.keyboard.press("ArrowRight");
+  const ring = await o.page.evaluate(() => {
+    const a = document.activeElement as Element;
+    const r = a.getBoundingClientRect();
+    const s = a.closest("svg")!.getBoundingClientRect();
+    const cs = getComputedStyle(a);
+    return { style: cs.outlineStyle, width: parseFloat(cs.outlineWidth), offset: parseFloat(cs.outlineOffset), inside: r.left >= s.left - 0.01 && r.top >= s.top - 0.01 && r.right <= s.right + 0.01 && r.bottom <= s.bottom + 0.01 };
+  });
+  assert.equal(ring.style, "solid");
+  assert.ok(ring.inside && ring.offset <= -ring.width, `the ring reaches past the grid's edge: ${JSON.stringify(ring)}`);
   await o.ctx.close();
 });
 
-test("a bad, future or pre-tracking day and an unknown engine are ignored; a day with no check says so", async () => {
+test("a bad or future day and an unknown engine are ignored; a day with no check, before tracking began too, says so", async () => {
   as("default");
-  for (const q of ["day=2026-02-31&engine=claude", "day=2026-10-01", "day=2026-06-09", "day=yesterday", "day=2026-09-22&day=2026-09-23"]) {
+  for (const q of ["day=2026-02-31&engine=claude", "day=2026-10-01", "day=yesterday", "day=2026-09-22&day=2026-09-23"]) {
     const { ctx, page, status } = await open(`${HOME}/clusters/c1?${q}`);
     assert.equal(status, 200, q);
     assert.equal((await panel(page)).heading, "Latest answers", q);
@@ -268,6 +303,13 @@ test("a bad, future or pre-tracking day and an unknown engine are ignored; a day
   assert.equal(p.heading, "Answers on 1 Jul 2026");
   assert.match(p.text, /No check of this prompt is stored for 1 Jul 2026, so there is no answer from that day\. See the latest answers/);
   await ctx.close();
+  // Review of 95a8747 (9 Oct 2026): no floor at started_on (10 Jun here), which a repeat checkout can move past real answers.
+  const early = await open(`${HOME}/clusters/c1?day=2026-06-09&engine=gemini`);
+  assert.equal(early.status, 200);
+  const e = await panel(early.page);
+  assert.equal(e.heading, "Answers on 9 Jun 2026");
+  assert.match(e.text, /No check of this prompt is stored for 9 Jun 2026/);
+  await early.ctx.close();
 });
 
 test("?day= opens nothing of a client the member may not see", async () => {

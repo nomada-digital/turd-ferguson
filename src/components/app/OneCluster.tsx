@@ -12,10 +12,10 @@ import { ENGINE_SPECS, type Engine } from "@/lib/scan/engines";
 import { type ClusterDetail, type ClusterInput, clusterChart, daysOfLine, positionMove, promptBrands, promptStrip } from "@/lib/tracking/cluster-figures";
 import { checkTime } from "@/lib/tracking/check-time";
 import { type Day, type Range, type Rate, addDays, basis as basisLine, brandGaps, comparisonLabel, daysIn, firstCheckDay, formatDay, periodPair, pointsDelta, resolveComparison } from "@/lib/tracking/figures";
-import { type AnswerTab, type LatestAnswers, answerTabs, brandRuns } from "@/lib/tracking/latest-answers";
+import { type AnswerTab, type LatestAnswers, answerTabs, brandRuns, pickedDayLine } from "@/lib/tracking/latest-answers";
 import { NOTE_SAID, type NoteState } from "@/lib/tracking/note";
 import type { ClusterNote, Compare, OverviewData } from "@/lib/tracking/overview-data";
-import { askedOnFor, latestAnswersNote, lostReads, runNote } from "@/lib/tracking/run-note";
+import { askedOnFor, latestAnswersNote, lostReads, runNote, todayRun } from "@/lib/tracking/run-note";
 import { answerAnchor, answerHref } from "@/lib/tracking/evidence";
 
 import AnswerFocus from "./AnswerFocus";
@@ -401,10 +401,11 @@ export default function OneCluster({
               <span style={{ display: "flex", gap: "4px" }}>
                 {r.cells.map((x, k) => {
                   const d = days[k]!;
-                  // DB-2 (9 Oct 2026): the day, the engine and the outcome in words, never the colour alone. On a phone
-                  // .app-tap keeps the square 22 by 28 and takes the tap 44px tall, where a 44px link would stretch the grid.
+                  // DB-2 (9 Oct 2026): the day, the engine and the outcome in words, never the colour alone. Each square is
+                  // 24px wide (globals.css .app-strip-cell); on a phone .app-tap keeps it 28 tall and takes the tap 44px
+                  // tall, where a 44px link would stretch the grid.
                   const said = `${formatDay(d, true)}, ${ENGINE_SPECS[r.engine as Engine].label}: ${x === null ? "no answer" : x ? "named you" : "didn't name you"}`;
-                  const look: React.CSSProperties = { flex: "1 1 0", maxWidth: "22px", height: "28px", borderRadius: "5px", boxSizing: "border-box", background: x ? T.accent : x === false ? T.hair : T.surface, border: x === null ? `1px dashed ${T.line}` : undefined };
+                  const look: React.CSSProperties = { flex: "1 1 0", maxWidth: "24px", height: "28px", borderRadius: "5px", boxSizing: "border-box", background: x ? T.accent : x === false ? T.hair : T.surface, border: x === null ? `1px dashed ${T.line}` : undefined };
                   if (!checked.has(d)) return <span key={d} title={said} className="app-strip-cell" style={look} />;
                   const on = day === d && r.engine === engine;
                   return (
@@ -430,7 +431,7 @@ export default function OneCluster({
             <span style={{ display: "flex", gap: "4px" }}>
               {days.map((d, i) => (
                 // The last label ends at its square, so "Today" runs left rather than under the count.
-                <span key={d} className="app-strip-cell" style={{ flex: "1 1 0", maxWidth: "22px", display: "flex", justifyContent: i === days.length - 1 && i > 0 ? "flex-end" : "flex-start", fontSize: "12px", color: T.soft, whiteSpace: "nowrap" }}>
+                <span key={d} className="app-strip-cell" style={{ flex: "1 1 0", maxWidth: "24px", display: "flex", justifyContent: i === days.length - 1 && i > 0 ? "flex-end" : "flex-start", fontSize: "12px", color: T.soft, whiteSpace: "nowrap" }}>
                   {i === days.length - 1 && d === today ? "Today" : i % 7 === 0 || i === days.length - 1 ? formatDay(d) : ""}
                 </span>
               ))}
@@ -478,7 +479,7 @@ export default function OneCluster({
           {day ? (
             // DB-2: which check this is, in words, and the way back to the latest.
             <p style={{ margin: 0, fontSize: "14px", lineHeight: 1.5, color: T.ink }}>
-              {noCheck ? `No check of this prompt is stored for ${formatDay(day, true)}, so there is no answer from that day. ` : `Showing ${ENGINE_SPECS[tab.engine as Engine].label}'s answer from the check on ${formatDay(day, true)}. `}
+              {`${pickedDayLine({ day, today, market, stored: !noCheck, run: todayRun(data.runs, today), label: ENGINE_SPECS[tab.engine as Engine].label, answered: tab.named !== null })} `}
               <Link href={latestHref} style={{ fontWeight: 600, color: T.accent, textDecoration: "none", whiteSpace: "nowrap" }}>
                 See the latest answers
               </Link>

@@ -3,7 +3,8 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import { expandFixture } from "./fixture-mode.ts";
-import { type LatestRow, answerTabs, brandRuns, engineTab, pageLabel, pickedDay, withoutLinks } from "./latest-answers.ts";
+import { citedPage } from "./figures.ts";
+import { type LatestRow, answerTabs, brandRuns, engineTab, pickedDay, pickedDayLine, withoutLinks } from "./latest-answers.ts";
 
 /**
  * T7 part 3b (30 Sep 2026; boards-3/QuestionDetail.dc.html "Latest answers"):
@@ -40,9 +41,10 @@ test("brands: the client first when named, then the others once each in the engi
 });
 
 test("pages cited: host and path, no scheme, www, query, fragment or trailing slash, each once", () => {
-  assert.equal(pageLabel("https://www.Example.com/a/b/?utm=1#x"), "example.com/a/b");
-  assert.equal(pageLabel("example.com"), "example.com");
-  assert.equal(pageLabel("not a url"), null);
+  // Review of 95a8747 (9 Oct 2026): the tab names a page by citedPage, Cited pages' key, not a pageLabel of its own.
+  assert.equal(citedPage({ source_domain: "www.example.com", url: "https://www.Example.com/a/b/?utm=1#x" })?.page, "example.com/a/b");
+  assert.equal(citedPage({ source_domain: "example.com", url: null })?.page, "example.com");
+  assert.equal(citedPage({ source_domain: "", url: null }), null);
   const [t] = answerTabs(
     [row({ citations: [{ source_domain: "example.com", url: "https://example.com/x/" }, { source_domain: "example.com", url: "http://www.example.com/x?y=1" }, { source_domain: "tallyroo.com", url: null }] })],
     ["chatgpt"],
@@ -86,21 +88,39 @@ test("?engine= picks an engine of the tier, anything else the first", () => {
   assert.equal(engineTab(undefined, ENGINES), "google_aio");
 });
 
-test("DB-2 (9 Oct 2026): ?day= is a real day from tracking's start to today; anything else is none, never an error", () => {
+test("DB-2 (9 Oct 2026): ?day= is a real day up to today; anything else is none, never an error", () => {
   const today = "2026-09-29";
-  const started = "2026-06-10";
-  assert.equal(pickedDay("2026-09-22", today, started), "2026-09-22");
-  assert.equal(pickedDay(today, today, started), today, "today");
-  assert.equal(pickedDay(started, today, started), started, "the day tracking began");
-  assert.equal(pickedDay("2026-09-30", today, started), null, "tomorrow");
-  assert.equal(pickedDay("2026-06-09", today, started), null, "the day before tracking began");
-  assert.equal(pickedDay("2026-09-22", today, null), null, "a client not started");
-  for (const bad of ["2026-09-31", "2026-02-29", "2026-9-22", "22 Sep 2026", "2026-09-22T00:00", " 2026-09-22", "", "1900-01-01"]) {
-    assert.equal(pickedDay(bad, today, started), null, bad);
+  assert.equal(pickedDay("2026-09-22", today), "2026-09-22");
+  assert.equal(pickedDay(today, today), today, "today");
+  assert.equal(pickedDay("2026-09-30", today), null, "tomorrow");
+  // Review of 95a8747 (9 Oct 2026): no floor at started_on, which a repeat checkout or an admin re-run moves to
+  // tomorrow on a client with answers. An early day is read, held to the page's client and prompt, and says
+  // when it has no check.
+  assert.equal(pickedDay("2026-06-09", today), "2026-06-09", "a day before started_on");
+  assert.equal(pickedDay("1900-01-01", today), "1900-01-01", "a day long before any check: read, and found empty");
+  for (const bad of ["2026-09-31", "2026-02-29", "2026-9-22", "22 Sep 2026", "2026-09-22T00:00", " 2026-09-22", "", "yesterday"]) {
+    assert.equal(pickedDay(bad, today), null, bad);
   }
-  assert.equal(pickedDay(["2026-09-22"], today, started), null, "the key given twice");
-  assert.equal(pickedDay(undefined, today, started), null);
-  assert.equal(pickedDay("2028-02-29", "2028-03-01", started), "2028-02-29", "a leap day is a day");
+  assert.equal(pickedDay(["2026-09-22"], today), null, "the key given twice");
+  assert.equal(pickedDay(undefined, today), null);
+  assert.equal(pickedDay("2028-02-29", "2028-03-01"), "2028-02-29", "a leap day is a day");
+});
+
+test("review of 95a8747 (9 Oct 2026): a picked day's line says which check, or why there is none, and never claims a blank answer", () => {
+  const base = { day: "2026-09-20", today: "2026-09-29", market: "US", stored: true, run: { status: "complete" }, label: "Google AI Overviews", answered: true };
+  assert.equal(pickedDayLine(base), "Showing the answer from Google AI Overviews at the check on 20 Sep 2026.");
+  assert.equal(pickedDayLine({ ...base, answered: false }), "No answer from Google AI Overviews at the check on 20 Sep 2026.", "a blank tab is not shown as an answer");
+  assert.equal(pickedDayLine({ ...base, stored: false }), "No check of this prompt is stored for 20 Sep 2026, so there is no answer from that day.");
+  // Today, before its check: waiting, not missing - the time is check-time.ts's, in the client's zone.
+  const today = { ...base, day: "2026-09-29", stored: false };
+  assert.equal(pickedDayLine({ ...today, run: null }), "Today's check, at 1:00am ET, has not run yet. Its answers show here once it has.");
+  assert.equal(pickedDayLine({ ...today, run: null, market: "UK" }), "Today's check, at 06:00 UK time, has not run yet. Its answers show here once it has.");
+  assert.equal(pickedDayLine({ ...today, run: { status: "running" } }), "Today's check is still running. Its answers show here once it has finished.");
+  assert.match(pickedDayLine({ ...today, run: { status: "failed" } }), /^No check of this prompt is stored for 29 Sep 2026/, "a check that ran and stored nothing for it");
+  assert.match(pickedDayLine({ ...base, stored: false, run: null }), /^No check of this prompt is stored for 20 Sep 2026/, "an earlier day is never waiting");
+  for (const label of ["Google AI Overviews", "ChatGPT", "Perplexity"]) {
+    for (const answered of [true, false]) assert.doesNotMatch(pickedDayLine({ ...base, label, answered }), /'s\b|’s\b/, "no engine's name takes a possessive");
+  }
 });
 
 test("fixture: the cluster notes (T7 part 4a) survive expansion and sit on c1's prompts", () => {

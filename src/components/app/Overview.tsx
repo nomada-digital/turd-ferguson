@@ -364,7 +364,10 @@ export default function Overview({
   const heatGap = heatRows.some((c) => gridDays.some((d, col) => !c.heat[gridFrom + col] && d >= c.started_on));
   // DB-2 (9 Oct 2026): a cell with a reading opens one of the answers it counts, on the one-cluster page at that
   // day and engine (evidence.ts dayAnswerIn) - a name when the cell counted one. None on /app/parity (no detailHref).
-  const byPromptDay = detailHref && heatRows.length ? answersByPromptDay(data.answers) : null;
+  // Review of 95a8747 (same day): only the days the grid draws are indexed, not the range's comparison period too.
+  const byPromptDay = detailHref && heatRows.length ? answersByPromptDay(data.answers, { from: gridDays[0]!, to: gridDays[gridDays.length - 1]! }) : null;
+  const heatW = gridDays.length * 14 - 3;
+  const heatH = heatRows.length * 14 - 3;
   const heatOpens = (c: ClusterCard, d: Day) => {
     const at = byPromptDay && clustersPath ? dayAnswerIn(byPromptDay, c.prompts.map((p) => p.id), d, engines) : null;
     return at ? answerHref(`${clustersPath}/${encodeURIComponent(c.id)}`, { ...rangeQuery, prompt: String(at.prompt) }, at) : null;
@@ -724,11 +727,18 @@ export default function Overview({
                       const cell = c.heat[gridFrom + col] ?? null;
                       const label = `${c.keyword ?? c.name}, ${formatDay(d)}: ${cell ? `${cell.pct}% (${cell.num} of ${cell.den})` : gapLabel(c.started_on, d)}`;
                       const to = cell ? heatOpens(c, d) : null;
-                      // DB-2: a link the size of the cell's whole pitch, so a tap between two squares still lands on one.
+                      // DB-2: a link the size of the cell's whole pitch, so a tap between two squares still lands on one -
+                      // held inside the grid at its edges (review of 95a8747, 9 Oct 2026), where the SVG cut the focus ring.
+                      // Its one name is its <title>, which is also the hover tip: an aria-label beside it read it twice.
+                      // Known gap, 9 Oct 2026 (target size): the pitch is 14px here and about 11px on a phone, under
+                      // WCAG 2.5.8's 24px. Not restructured: each cell's answers are also one tap from the one-cluster
+                      // page's day grid, whose squares are 24px wide.
+                      const hx = Math.max(0, col * 14 - 1.5);
+                      const hy = Math.max(0, row * 14 - 1.5);
                       return to && cell ? (
-                        <a key={`${c.id}-${d}`} href={to} className="app-heat-a" data-row={row} data-col={col} aria-label={`${c.keyword ?? c.name}, ${formatDay(d, true)}: named you in ${cell.num} of ${cell.den} answers (${cell.pct}%). Open that day's answers.`}>
-                          <title>{label}</title>
-                          <rect x={col * 14 - 1.5} y={row * 14 - 1.5} width={14} height={14} fill="transparent" />
+                        <a key={`${c.id}-${d}`} href={to} className="app-heat-a" data-row={row} data-col={col}>
+                          <title>{`${c.keyword ?? c.name}, ${formatDay(d, true)}: named you in ${cell.num} of ${cell.den} answers (${cell.pct}%). Open that day's answers.`}</title>
+                          <rect x={hx} y={hy} width={Math.min(heatW, col * 14 + 12.5) - hx} height={Math.min(heatH, row * 14 + 12.5) - hy} fill="transparent" />
                           <rect x={col * 14} y={row * 14} width={11} height={11} rx={3} fill={heat(cell.pct)} />
                         </a>
                       ) : cell ? (

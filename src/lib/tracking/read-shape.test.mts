@@ -363,7 +363,7 @@ test("census DB-2: the panel's read is read-shape.ts's in Supabase and on the fi
   for (const line of [
     "const client = clients.find((c) => c.slug === slug);",
     "const picked = detail.card.prompts[prompt];",
-    "const day = pickedDay(sp.day, today, client.started_on);",
+    "const day = pickedDay(sp.day, today);",
     'picked && detail.card.status !== "pending" ? repo.answerDay(client.id, dayPlan(picked.id, range.to, day)) : null,',
   ]) {
     assert.ok(page.includes(line), `the one-cluster page: "${line}" is gone`);
