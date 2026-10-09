@@ -1,3 +1,4 @@
+import { clockIn } from "./check-time.ts";
 import type { Day } from "./figures.ts";
 
 /**
@@ -32,7 +33,7 @@ export type AnswerTab = {
   /** null: no answer from this engine at that check. */
   named: boolean | null;
   text: string | null;
-  /** "06:10", the check's time in London, where the 06:00 run is set. */
+  /** The answer's time in the client's zone, "06:10 UK time" or "2:10am ET" (check-time.ts clockIn, 9 Oct 2026). */
   time: string | null;
   pages: string[];
   /** The client first if named, then the others in the order the engine gave them. */
@@ -41,7 +42,7 @@ export type AnswerTab = {
   othersRead: boolean;
 };
 
-export function answerTabs(rows: LatestRow[], engines: readonly string[], you: string): AnswerTab[] {
+export function answerTabs(rows: LatestRow[], engines: readonly string[], you: string, market: string): AnswerTab[] {
   return engines.map((engine) => {
     const r = rows.find((x) => x.engine === engine && x.answered);
     if (!r) return { engine, named: null, text: null, time: null, pages: [], brands: [], othersRead: true };
@@ -60,7 +61,7 @@ export function answerTabs(rows: LatestRow[], engines: readonly string[], you: s
       engine,
       named: r.named,
       text: r.text?.trim() ? withoutLinks(r.text) : null,
-      time: r.at ? checkTime(r.at) : null,
+      time: r.at ? clockIn(r.at, market) : null,
       pages,
       brands: [...(r.named ? [{ name: you, you: true }] : []), ...[...others.values()].map((name) => ({ name, you: false }))],
       othersRead: r.brands_ok !== false,
@@ -95,13 +96,6 @@ export function withoutLinks(text: string): string {
     .replace(/\s*[(<](?:https?:\/\/|www\.)[^\s)>]*[)>]/gi, "")
     .replace(/\s*(?:https?:\/\/|www\.)[^\s)>\]]+/gi, "")
     .replace(/[ \t]+$/gm, "");
-}
-
-/** The check's time of day in London, "06:10". */
-export function checkTime(iso: string): string | null {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return null;
-  return new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", hour: "2-digit", minute: "2-digit", hour12: false }).format(d);
 }
 
 /** The text split round every whole-word mention of the brand, for the highlight. */

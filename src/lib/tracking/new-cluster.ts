@@ -11,7 +11,7 @@ import { refuseRole, stopDay } from "./stop.ts";
  * boards-3/Questions.dc.html). The keyword has already passed Check keyword
  * (its signed verdict is verified by the route); this writes the keyword, the
  * cluster and its five prompts through limits.ts, each first read at
- * tomorrow's 06:00 check, as the pending cluster the board shows.
+ * tomorrow's daily check, as the pending cluster the board shows.
  *
  * Every refusal is read before the first write: role, the prompts' text, the
  * keyword not already tracked, and room for a cluster. The three inserts are

@@ -29,6 +29,7 @@ import {
   ungroupedRead,
 } from "@/lib/tracking/figures";
 import { type ClusterCard, clusterCards, clusterChart, clusterSummary, keyFigureChanges, pendingBasis } from "@/lib/tracking/cluster-figures";
+import { checkTime, clockIn } from "@/lib/tracking/check-time";
 import { rangeLabel } from "@/lib/tracking/date-range";
 import { whoIsNamedCard } from "@/lib/tracking/named-figures";
 import type { Compare, OverviewData } from "@/lib/tracking/overview-data";
@@ -87,11 +88,6 @@ function enginesSentence(engines: readonly Engine[]): string {
 
 const span = (r: Range, year = false) => `${formatDay(r.from)} - ${formatDay(r.to, year)}`;
 const pct = (r: Rate) => (r.pct === null ? "-" : `${r.pct}%`);
-
-/** The London wall-clock time of a timestamp, "06:10". */
-function londonTime(iso: string): string {
-  return new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(iso));
-}
 
 function Delta({ value, unit = " pts", dark = false }: { value: number | null; unit?: string; dark?: boolean }) {
   if (value === null) return null;
@@ -165,6 +161,9 @@ export default function Overview({
   clusterLimit?: number;
 }) {
   const where = market === "UK" ? "the United Kingdom" : "the United States";
+  // 9 Oct 2026 (audit copy-2, ia-9): every check time here is the client's zone's, labelled, from the
+  // cron's hour on the day meant (check-time.ts). A bare London time was an hour wrong from 25 Oct.
+  const next = checkTime(addDays(today, 1), market);
   const o = overview({ range, compare: compareMode, startedOn, engines, questions: data.questions, answers: data.answers, serp: data.serp, keywordCount: keywordsIn(data.keywords, range), keywords: data.keywords });
   // 8 Oct 2026 (audit data-10): a young client's comparison is its first week, and the charts draw no dashed
   // "same day last period" line for it - a week laid over the range's first seven days would read as a period it is not.
@@ -204,7 +203,7 @@ export default function Overview({
   const phoneLine = !picked
     ? ""
     : picked.status === "pending"
-      ? "First check tomorrow at 06:00."
+      ? `First check tomorrow at ${next}.`
       : `${pct(picked.now)} named, ${picked.position === null ? (picked.keyword ? "no Google position" : "no keyword yet") : `#${picked.position} on Google`}.` +
         (pickedHasPrev && chartBefore ? ` Dashed: ${span(chartBefore)}` : ` Tracked from ${formatDay(picked.started_on)}.`);
   const heatRows = cards ? cards.filter((c) => c.status !== "pending") : [];
@@ -213,7 +212,7 @@ export default function Overview({
   const liveQuestions = data.questions.filter((q) => q.stopped_on === null).length;
   // The runner skips a client with no live prompt (decide.ts shouldTrack), so a
   // day-zero client with none must not be promised tomorrow's check (8 Oct 2026, audit activation-4).
-  const firstCheckLine = ended ? "Tracking has ended." : liveQuestions ? "Your first check runs tomorrow at 06:00." : "Nothing is checked until a cluster has prompts.";
+  const firstCheckLine = ended ? "Tracking has ended." : liveQuestions ? `Your first check runs tomorrow at ${next}.` : "Nothing is checked until a cluster has prompts.";
   const hasData = o.named.den > 0;
   const beforeRange = !!startedOn && range.to < startedOn;
   // R151 (3 Oct 2026): with nothing read in the range, the filled "Download report" outweighed the
@@ -287,18 +286,18 @@ export default function Overview({
   // 8 Oct 2026: not for a run partial only because brand extraction failed - no read was lost;
   // the Who is named instead panel says what was (brandGapNote), and runNote leaves it out too (runLostReads).
   const missing = lostReads(data.lastRun) && !lostNote ? ` ${MISSING_READS}` : "";
-  const nextLine = ended ? "Tracking has ended, so no more checks run." : liveQuestions ? "Next check tomorrow at 06:00." : "No more checks until a cluster has prompts.";
+  const nextLine = ended ? "Tracking has ended, so no more checks run." : liveQuestions ? `Next check tomorrow at ${next}.` : "No more checks until a cluster has prompts.";
   const checked = failed?.line
     ? `${failed.line} ${nextLine}`
     : data.lastRun?.finished_at
       ? data.lastRun.run_date === today
-        ? `Checked today at ${londonTime(data.lastRun.finished_at)}.${missing} ${ended ? "Tracking has ended, so this was the last check." : liveQuestions ? "Next check tomorrow at 06:00." : "No more checks until a cluster has prompts."}`
-        : `Last checked ${formatDay(data.lastRun.run_date)} at ${londonTime(data.lastRun.finished_at)}.${missing} ${ended ? "Tracking has ended, so no more checks run." : !liveQuestions ? "No more checks until a cluster has prompts." : range.to === today ? (todays && todays.status !== "complete" && todays.status !== "partial" ? "Today's check has not finished yet, so today is blank." : "Nothing from today's check yet, so today is blank.") : failed?.aside ? `${failed.aside} Next check tomorrow at 06:00.` : "Next check at 06:00."}`
+        ? `Checked today at ${clockIn(data.lastRun.finished_at, market)}.${missing} ${ended ? "Tracking has ended, so this was the last check." : liveQuestions ? `Next check tomorrow at ${next}.` : "No more checks until a cluster has prompts."}`
+        : `Last checked ${formatDay(data.lastRun.run_date)} at ${clockIn(data.lastRun.finished_at, market)}.${missing} ${ended ? "Tracking has ended, so no more checks run." : !liveQuestions ? "No more checks until a cluster has prompts." : range.to === today ? (todays && todays.status !== "complete" && todays.status !== "partial" ? "Today's check has not finished yet, so today is blank." : "Nothing from today's check yet, so today is blank.") : failed?.aside ? `${failed.aside} Next check tomorrow at ${next}.` : `Next check at ${checkTime(today, market)}.`}`
       : firstCheckLine;
-  // Mobile.dc.html: "Checked today at 06:10", nothing after it. DS8 (2 Oct 2026, R172 pass 1): a
+  // Mobile.dc.html: "Checked today at" its time, nothing after it. DS8 (2 Oct 2026, R172 pass 1): a
   // partial run is not on the board, and "some reads missing" alone left the phone guessing what
   // it meant for the figures, so the phone says the same sentence the desktop line does.
-  const checkedShort = failed?.line ? failed.line : data.lastRun?.finished_at && data.lastRun.run_date === today ? `Checked today at ${londonTime(data.lastRun.finished_at)}${missing ? `.${missing}` : ""}` : null;
+  const checkedShort = failed?.line ? failed.line : data.lastRun?.finished_at && data.lastRun.run_date === today ? `Checked today at ${clockIn(data.lastRun.finished_at, market)}${missing ? `.${missing}` : ""}` : null;
 
   if (!hasData) {
     // R148 pass 7 (1 Oct 2026): only a start that has happened "began" - on day zero it starts tomorrow, and said "Tracking began" with tomorrow's date.
@@ -582,7 +581,7 @@ export default function Overview({
                       <td style={{ ...TD, padding: "12px 8px", textAlign: "right", fontSize: "15px", fontWeight: 700, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
                         {/* R151 (3 Oct 2026): held to one line, this pushed the Places column 89px off the 390 card,
                             so it wraps on the phone (.app-kw-note); wrapping everywhere broke it into four lines at 1440. */}
-                        {k.added_on > today ? <span className="app-kw-note" style={{ display: "inline-block", fontWeight: 400, fontSize: "13px", lineHeight: 1.35, color: T.soft }}>First check tomorrow at 06:00</span> : row?.position ? `#${row.position}` : <span style={{ fontWeight: 400, fontSize: "13px", color: T.soft }}>Not in top 20</span>}
+                        {k.added_on > today ? <span className="app-kw-note" style={{ display: "inline-block", fontWeight: 400, fontSize: "13px", lineHeight: 1.35, color: T.soft }}>{`First check tomorrow at ${next}`}</span> : row?.position ? `#${row.position}` : <span style={{ fontWeight: 400, fontSize: "13px", color: T.soft }}>Not in top 20</span>}
                       </td>
                       <td style={{ ...TD, paddingLeft: "8px", textAlign: "right" }}>{row?.change === null || row?.change === undefined ? null : <Delta value={row.change} unit="" />}</td>
                     </tr>
@@ -843,7 +842,7 @@ export default function Overview({
                     {cs.page1.den
                       ? `${avgLine(cs.page1)}${pendingKeywords ? `. ${pendingKeywords} more from tomorrow` : ""}`
                       : pendingKeywords
-                        ? "First check tomorrow at 06:00"
+                        ? `First check tomorrow at ${next}`
                         : "No cluster keyword checked in this range"}
                   </span>
                 ),
@@ -916,8 +915,8 @@ export default function Overview({
         </section>
       ) : null}
 
-      {cards ? <ClusterCards cards={cards} engines={engines} picked={picked?.id ?? null} href={clusterHref} detail={detailHref} manage={manage} /> : ungroupedCard}
-      {cards ? <ClusterRows cards={cards} picked={detailHref ? null : (picked?.id ?? null)} href={detailHref ?? clusterHref} opens={!!detailHref} manage={manage} /> : null}
+      {cards ? <ClusterCards cards={cards} engines={engines} picked={picked?.id ?? null} href={clusterHref} detail={detailHref} manage={manage} next={next} /> : ungroupedCard}
+      {cards ? <ClusterRows cards={cards} picked={detailHref ? null : (picked?.id ?? null)} href={detailHref ?? clusterHref} opens={!!detailHref} manage={manage} next={next} /> : null}
       {/* R151 (3 Oct 2026): the headline counts read ungrouped prompts beside clusters ("1 cluster and 5 ungrouped prompts"), so they get their card too. */}
       {cards && loose ? ungroupedCard : null}
 
@@ -937,6 +936,7 @@ export default function Overview({
             beforeLabel: chartBefore ? span(chartBefore) : null,
             answersPerDay: picked.prompts.length * engines.length,
             pending: picked.status === "pending",
+            firstCheckAt: next,
             note:
               picked.status !== "pending" && !pickedHasPrev
                 ? o.compareKind === "start" && o.compare
@@ -1058,6 +1058,7 @@ function ClusterCards({
   href,
   detail,
   manage,
+  next,
 }: {
   cards: ClusterCard[];
   engines: readonly Engine[];
@@ -1066,6 +1067,8 @@ function ClusterCards({
   /** R132: the one-cluster page. When set the card opens it (the keyword's link stretches over the card), each prompt row opens it on that prompt, and "Chart this" picks the chart. */
   detail: ((id: string, prompt?: number) => string) | null;
   manage: Manage;
+  /** Tomorrow's check time in the client's zone (check-time.ts). */
+  next: string;
 }) {
   return (
     <section aria-labelledby="cl-h" className="app-hide-sm" style={{ ...CARD, padding: "22px 24px 24px", display: "flex", flexDirection: "column", gap: "18px" }}>
@@ -1094,7 +1097,7 @@ function ClusterCards({
           const since = formatDay(c.started_on);
           const basis = pendingBasis(c);
           const foot = pending
-            ? basis ? `${basis}. Its first check is tomorrow at 06:00.` : "First check tomorrow at 06:00."
+            ? basis ? `${basis}. Its first check is tomorrow at ${next}.` : `First check tomorrow at ${next}.`
             : `${c.promptsNamed.num} of ${c.promptsNamed.den} prompts name you. Tracked since ${since}${c.status === "added" ? ", so no change yet" : ""}.`;
           const rowY = (i: number) => 11 + i * 26;
           const h = Math.max(1, c.prompts.length) * 26 - 4;
@@ -1133,7 +1136,7 @@ function ClusterCards({
                       <span style={{ width: "80px", flexShrink: 0, fontSize: "12px", fontWeight: 600, color: pending ? T.soft : T.ink }}>{r.angle ? cap(r.angle) : "Prompt"}</span>
                       {pending && !r.fixed ? (
                         // DS2 (2 Oct 2026): one line in the 22px row - it wrapped over the next angle at 1280. The time is in the card's foot.
-                        <span title="Asked from tomorrow's 06:00 check" style={{ fontSize: "12px", color: T.soft, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>Asked from tomorrow</span>
+                        <span title={`Asked from tomorrow's check, at ${next}`} style={{ fontSize: "12px", color: T.soft, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>Asked from tomorrow</span>
                       ) : (
                         <>
                           <span style={{ display: "flex", gap: "3px", flexShrink: 0 }}>
@@ -1227,7 +1230,7 @@ function ClusterCards({
  * picks the chart below, as the cards do. "Manage" goes to the Clusters
  * page (T6).
  */
-function ClusterRows({ cards, picked, href, opens, manage }: { cards: ClusterCard[]; picked: string | null; href: (id: string) => string; opens: boolean; manage: Manage }) {
+function ClusterRows({ cards, picked, href, opens, manage, next }: { cards: ClusterCard[]; picked: string | null; href: (id: string) => string; opens: boolean; manage: Manage; next: string }) {
   return (
     <section aria-labelledby="cl-h-sm" className="app-show-sm" style={{ background: T.surface, border: `1px solid ${T.line}`, borderRadius: "16px", paddingTop: "14px" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "0 16px 10px" }}>
@@ -1268,13 +1271,13 @@ function ClusterRows({ cards, picked, href, opens, manage }: { cards: ClusterCar
               <span style={{ fontSize: "12px", color: T.soft }}>
                 {pending ? (c.intent ? `${cap(c.intent)}, no readings yet` : "No readings yet") : `${c.promptsNamed.num} of ${c.promptsNamed.den} prompts name you`}
               </span>
-              {pending ? <span className="app-ov-first-sm" style={{ fontSize: "12px", color: T.soft }}>First check tomorrow, 06:00</span> : null}
+              {pending ? <span className="app-ov-first-sm" style={{ fontSize: "12px", color: T.soft }}>{`First check tomorrow, ${next}`}</span> : null}
             </span>
             {pending ? (
               <span className="app-ov-first" style={{ fontSize: "12px", color: T.soft, textAlign: "right", flexShrink: 0 }}>
                 First check
                 <br />
-                tomorrow, 06:00
+                {`tomorrow, ${next}`}
               </span>
             ) : (
               <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "4px", flexShrink: 0 }}>

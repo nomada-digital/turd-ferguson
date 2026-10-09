@@ -1,4 +1,5 @@
 import { T } from "@/config/tokens";
+import { checkTime } from "@/lib/tracking/check-time";
 import { rangeLabel } from "@/lib/tracking/date-range";
 import { type Day, type Range, type Rate, formatDay } from "@/lib/tracking/figures";
 import type { Compare } from "@/lib/tracking/overview-data";
@@ -31,6 +32,7 @@ function DownloadIcon({ color }: { color: string }) {
 }
 
 export default function Reports({
+  market,
   today,
   range,
   compareMode,
@@ -42,6 +44,8 @@ export default function Reports({
 }: {
   /** Audit reliability-3 (8 Oct 2026): partial or failed checks in the picked range (run-note.ts), whose reads its CSVs leave unanswered. */
   note?: string | null;
+  /** client_domains.market: the first check's time is said in its zone (check-time.ts, 9 Oct 2026). */
+  market: string;
   today: Day;
   range: Range;
   compareMode: Compare;
@@ -82,7 +86,7 @@ export default function Reports({
           {/* DS60 (2 Oct 2026, R173 pass 6): before the first check the range's CSVs were headers only - say when they fill instead. */}
           {!startedOn || startedOn > today ? (
             <p role="note" style={{ margin: 0, fontSize: "14px", lineHeight: 1.5, color: T.ink }}>
-              {startedOn ? `Nothing to download yet. The first check runs at 06:00 on ${formatDay(startedOn, true)}, and the CSVs fill in from that day.` : "Nothing to download yet. The CSVs fill in from the first daily check."}
+              {startedOn ? `Nothing to download yet. The first check runs at ${checkTime(startedOn, market)} on ${formatDay(startedOn, true)}, and the CSVs fill in from that day.` : "Nothing to download yet. The CSVs fill in from the first daily check."}
             </p>
           ) : (
           <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
@@ -131,7 +135,7 @@ export default function Reports({
                 {empty ? (
                   // DS24: say what fills the card, or where the readings are - the bare "No readings this month." was a dead end.
                   <p style={{ margin: 0, fontSize: "14px", lineHeight: 1.5, color: T.soft }}>
-                    {m.soFar ? "No readings this month yet. Checks run every day at 06:00, and this card fills in from the first one." : "No readings this month, so there is nothing to download. Later months are above."}
+                    {m.soFar ? "No readings this month yet. This card fills in from the first daily check." : "No readings this month, so there is nothing to download. Later months are above."}
                   </p>
                 ) : (
                   <dl className="app-rp-figs" style={{ margin: 0, display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: "16px" }}>

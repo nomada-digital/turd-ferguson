@@ -11,7 +11,7 @@ import { refuseRole, stopDay } from "./stop.ts";
  * stopped prompt's angle. A new row, never the old one rewritten, so two
  * prompts never share a history.
  *
- * It is first read at tomorrow's 06:00 check (`added_on` is tomorrow, as the
+ * It is first read at tomorrow's daily check (`added_on` is tomorrow, as the
  * admin adds are), which is what the board's toast says. The room is limits.ts's
  * rule: the cluster must have fewer than 5 live prompts and the client room
  * under its limit; `insertPrompts` refuses otherwise. Owners and editors only.

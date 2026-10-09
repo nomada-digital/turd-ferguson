@@ -14,7 +14,7 @@ import type { Angle } from "./limits.ts";
  * - The keyword's position is its latest reading in the range; the change is
  *   places gained since the latest reading in the comparison range.
  * - "pending" is a cluster whose first check is after today: no readings, the
- *   card says "Asked from tomorrow" (DS2, 2 Oct: one line; 06:00 is in its foot). "added" is one that began inside
+ *   card says "Asked from tomorrow" (DS2, 2 Oct: one line; the time is in its foot). "added" is one that began inside
  *   the range or its comparison, so like-for-like leaves it out. "live" was
  *   tracked throughout both.
  */

@@ -11,6 +11,7 @@ import { appUrl } from "@/lib/app-host";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { TIER_PLAIN } from "@/lib/tier-text";
 import { upsellMode } from "./ask.ts";
+import { trackingDay } from "./decide.ts";
 
 /**
  * Setup confirmed (R166 step 4, Danny, danny.md line 175): one internal
@@ -76,7 +77,7 @@ export async function mailSetupConfirmed(clientId: string, member: string): Prom
   try {
     const db = supabaseAdmin();
     if (!(await lifecycleOn(db, "setup_confirmed"))) return;
-    const { data: c, error: cErr } = await db.from("client_domains").select("account_id, tier").eq("id", clientId).single();
+    const { data: c, error: cErr } = await db.from("client_domains").select("account_id, tier, market, started_on").eq("id", clientId).single();
     if (cErr) throw new Error(cErr.message);
     const { data: account, error: aErr } = await db.from("accounts").select("upsell_mode").eq("id", c.account_id).maybeSingle();
     if (aErr || !account) throw new Error(aErr?.message ?? "no account");
@@ -84,7 +85,8 @@ export async function mailSetupConfirmed(clientId: string, member: string): Prom
     const { data: clusters, error: clErr } = await db.from("tracked_clusters").select("name").eq("client_domain_id", clientId).is("stopped_on", null).order("created_at", { ascending: true });
     if (clErr) throw new Error(clErr.message);
     const tier = ((c.tier as string) in TIER_PLAIN ? c.tier : "tracked") as TierKey;
-    const mail = setupConfirmed({ tier, clusters: (clusters ?? []).map((k) => k.name as string), link: appUrl("/", siteUrl()) });
+    // 9 Oct 2026 (audit copy-2): the check time in the client's zone, and no "first" check once checks have begun.
+    const mail = setupConfirmed({ tier, clusters: (clusters ?? []).map((k) => k.name as string), link: appUrl("/", siteUrl()), market: (c.market as string | null) ?? "US", today: trackingDay(), startedOn: (c.started_on as string | null) ?? null });
     if (!(await sendLifecycle({ memberEmail: member, mail }))) console.warn("[app] setup_confirmed not sent");
   } catch (err) {
     console.warn(`[app] setup_confirmed skipped: ${err instanceof Error ? err.message : String(err)}`);

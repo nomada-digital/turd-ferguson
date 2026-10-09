@@ -7,7 +7,7 @@ import { appPath } from "../app-host.ts";
  * Stop and Undo on the Clusters page - BRIEF-3 T6 part 2a (30 Sep 2026;
  * decisions 6 and 7 of docs/tracked-dashboard-2026-09-29/BRIEF-3-clusters.md).
  *
- * A stop never deletes. It sets `stopped_on` to tomorrow: today's 06:00 check
+ * A stop never deletes. It sets `stopped_on` to tomorrow: today's daily check
  * has already read the row, so today's readings stay in the figures, and
  * `liveOn()` drops the row from the next check. The slot frees at once,
  * because limits.ts counts only rows whose `stopped_on` is null.

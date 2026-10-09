@@ -118,7 +118,8 @@ test("8 Oct 2026 (review of audit data-3): on a range that ends before today, a 
   assert.equal(failedTodayNote(fx.data, { from: addDays(fx.today, -27), to: fx.today }, fx.today), null, "today's check did not fail");
   const src = readFileSync(new URL("../../components/app/Overview.tsx", import.meta.url), "utf8");
   assert.match(src, /const failed = failedTodayNote\(data, range, today\);/);
-  assert.match(src, /failed\?\.aside \? `\$\{failed\.aside\} Next check tomorrow at 06:00\.`/, "an earlier range keeps Last checked, then the aside");
+  // 9 Oct 2026 (audit copy-2): the time is tomorrow's in the client's zone (check-time.ts), no longer a bare "06:00".
+  assert.match(src, /failed\?\.aside \? `\$\{failed\.aside\} Next check tomorrow at \$\{next\}\.`/, "an earlier range keeps Last checked, then the aside");
   assert.match(src, /skipToday: !!failed\?\.line/);
 });
 

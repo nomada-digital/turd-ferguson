@@ -14,6 +14,8 @@
 export const SETUP_CONFIRMED_EVENT = "setup_confirmed";
 
 import { appPath } from "../app-host.ts";
+import { checkTime } from "./check-time.ts";
+import { addDays, formatDay } from "./figures.ts";
 
 export const setupPath = (slug: string) => appPath(`/${slug}/setup`);
 
@@ -110,4 +112,17 @@ export function setupState(c: { started_on: string | null }, rows: readonly { cr
   const first = [...rows].sort((a, b) => a.created_at.localeCompare(b.created_at))[0];
   if (first) return `setup confirmed ${first.created_at.slice(0, 10)}${first.member_email ? ` by ${first.member_email}` : ""}`;
   return needsSetup(c) ? "setup not confirmed yet" : "set up by hand (before the setup page)";
+}
+
+/**
+ * When a client's first check runs, said from `today` in the client's zone
+ * (9 Oct 2026, audit copy-2): "tomorrow at 06:00 UK time", "on 12 Oct at
+ * 1:00am ET". Null once started_on is today or past - the runner checks a
+ * live prompt whether or not setup was confirmed (decide.ts shouldTrack), so
+ * there is no first check left to promise - or when it is unset. The setup
+ * page and the setup_confirmed mail both say it, so it is worded once.
+ */
+export function firstCheckWhen(startedOn: string | null, today: string, market: string): string | null {
+  if (!startedOn || startedOn <= today) return null;
+  return `${startedOn === addDays(today, 1) ? "tomorrow" : `on ${formatDay(startedOn)}`} at ${checkTime(startedOn, market)}`;
 }

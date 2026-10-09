@@ -18,7 +18,9 @@ import { loginHref } from "@/lib/tracking/next-path";
 import { placedTier } from "@/lib/tracking/placement-figures";
 import { writeRole } from "@/lib/tracking/member";
 import { trackingRepo } from "@/lib/tracking/repo";
-import { confirmLabel, setupCards } from "@/lib/tracking/setup-landing";
+import { checkTime } from "@/lib/tracking/check-time";
+import { addDays } from "@/lib/tracking/figures";
+import { confirmLabel, firstCheckWhen, setupCards } from "@/lib/tracking/setup-landing";
 import { refuseRole } from "@/lib/tracking/stop";
 import { appPath, siteHref } from "@/lib/app-host";
 
@@ -77,6 +79,7 @@ export default async function ClientSetup({
   const [structure, confirmed, typed] = await Promise.all([repo.structure(client.id), repo.setupConfirmed(client.id), repo.orderKeyword(client.id)]);
   const cards = setupCards(structure);
   const ungrouped = ungroupedShown(structure.questions, today).length;
+  const first = firstCheckWhen(client.started_on, today, client.market);
   // R180: the keyword typed at checkout, with no scan behind the order, prefills the first keywordless card's field.
   const prefill = prefillCard(cards, typed);
   const canWrite = refuseRole(writeRole(client)) === null;
@@ -209,7 +212,8 @@ export default async function ClientSetup({
             <a href="#help" style={{ color: T.accent, fontWeight: 600 }}>
               Tell us
             </a>{" "}
-            before you confirm, and we make it. The first check runs the morning after.
+            {/* 9 Oct 2026 (audit copy-2): the time in the client's zone, and no "first" check once checks have begun. */}
+            {`before you confirm, and we make it. ${first ? `The first check runs ${first}.` : `Checks run every day at ${checkTime(addDays(today, 1), client.market)}.`}`}
           </p>
           {failed ? (
             <p role="alert" style={{ margin: "0 0 12px", fontSize: "14px", color: T.badFg }}>

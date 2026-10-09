@@ -47,6 +47,8 @@ export type ClusterChartData = {
   beforeLabel: string | null;
   answersPerDay: number;
   pending: boolean;
+  /** Tomorrow's check time in the client's zone, "06:00 UK time" or "1:00am ET" (check-time.ts), for the pending overlay. */
+  firstCheckAt: string;
   /** "Tracked from 22 Sep. No earlier period to compare yet." when a live cluster has no previous period. */
   note: string | null;
   /** The phone card's one line (R124, boards-3/Mobile.dc.html): "42% named, #4 on Google. Dashed: 5 Aug - 1 Sep". */
@@ -286,7 +288,7 @@ export default function ClusterChart({ data }: { data: ClusterChartData }) {
           <div style={{ position: "absolute", left: `${(X0 / W) * 100}%`, width: `${((X1 - X0) / W) * 100}%`, top: 0, height: `${(B_BOT / H) * 100}%`, display: "flex", alignItems: "center", justifyContent: "center", background: `color-mix(in srgb, ${T.surface} 86%, transparent)` }}>
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "6px", textAlign: "center", padding: "0 16px" }}>
               <span style={{ fontSize: "16px", fontWeight: 700, color: T.ink }}>No readings yet</span>
-              <span style={{ fontSize: "14px", color: T.soft }}>This cluster&apos;s first check is tomorrow at 06:00. The chart fills in from there.</span>
+              <span style={{ fontSize: "14px", color: T.soft }}>{`This cluster's first check is tomorrow at ${data.firstCheckAt}. The chart fills in from there.`}</span>
             </div>
           </div>
         ) : null}
@@ -382,7 +384,7 @@ function Compact({ data, showPrev }: { data: ClusterChartData; showPrev: boolean
       {data.pending ? (
         <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "6px", textAlign: "center", background: `color-mix(in srgb, ${T.surface} 86%, transparent)` }}>
           <span style={{ fontSize: "15px", fontWeight: 700, color: T.ink }}>No readings yet</span>
-          <span style={{ fontSize: "13px", color: T.soft }}>First check tomorrow at 06:00.</span>
+          <span style={{ fontSize: "13px", color: T.soft }}>{`First check tomorrow at ${data.firstCheckAt}.`}</span>
         </div>
       ) : null}
     </div>

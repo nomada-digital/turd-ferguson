@@ -10,7 +10,8 @@ import { T } from "@/config/tokens";
 import { type Inline, parseAnswer } from "@/components/scan/answer-markdown";
 import { ENGINE_SPECS, type Engine } from "@/lib/scan/engines";
 import { type ClusterDetail, type ClusterInput, clusterChart, daysOfLine, positionMove, promptBrands, promptStrip } from "@/lib/tracking/cluster-figures";
-import { type Day, type Range, type Rate, basis as basisLine, brandGaps, comparisonLabel, daysIn, firstCheckDay, formatDay, periodPair, pointsDelta, resolveComparison } from "@/lib/tracking/figures";
+import { checkTime } from "@/lib/tracking/check-time";
+import { type Day, type Range, type Rate, addDays, basis as basisLine, brandGaps, comparisonLabel, daysIn, firstCheckDay, formatDay, periodPair, pointsDelta, resolveComparison } from "@/lib/tracking/figures";
 import { type AnswerTab, type LatestAnswers, answerTabs, brandRuns } from "@/lib/tracking/latest-answers";
 import { NOTE_SAID, type NoteState } from "@/lib/tracking/note";
 import type { ClusterNote, Compare, OverviewData } from "@/lib/tracking/overview-data";
@@ -117,6 +118,8 @@ export default function OneCluster({
   const chartBefore = cmp.kind === "start" ? null : before;
   const hasPrev = !!chart?.namedBefore?.some((p) => p !== null);
   const pending = c.status === "pending";
+  // 9 Oct 2026 (audit copy-2): tomorrow's check time in the client's zone, from the cron (check-time.ts).
+  const next = checkTime(addDays(today, 1), market);
   const rangeQuery = { from: range.from, to: range.to, ...(compareMode === "prev" ? {} : { compare: compareMode }) };
   const promptHref = (i: number) => `?${new URLSearchParams({ ...rangeQuery, prompt: String(i), ...(engine === engines[0] ? {} : { engine }) })}`;
   const engineHref = (e: string) => `?${new URLSearchParams({ ...rangeQuery, prompt: String(prompt), ...(e === engines[0] ? {} : { engine: e }) })}`;
@@ -131,7 +134,7 @@ export default function OneCluster({
   // 8 Oct 2026 (audit data-6): promptBrands leaves out answers whose other brands were not read.
   const brandsUnread = P ? brandGaps(data.answers.filter((a) => a.question_id === P.id), range).reduce((s, g) => s + g.answers, 0) : 0;
   const top = Math.max(1, ...(brands?.rows.map((b) => b.n) ?? []));
-  const tabs = latest?.day ? answerTabs(latest.rows, engines, brand) : [];
+  const tabs = latest?.day ? answerTabs(latest.rows, engines, brand, market) : [];
   const tab = tabs.find((t) => t.engine === engine) ?? tabs[0] ?? null;
   const latestNote = latest?.day ? latestAnswersNote(data.runs, latest.day, range, today) : null;
   const kw = c.keyword ?? c.name;
@@ -179,7 +182,7 @@ export default function OneCluster({
           <h1 style={{ margin: 0, fontSize: "32px", lineHeight: 1.15, fontWeight: 700, letterSpacing: "-0.03em" }}>{kw}</h1>
           <p style={LEDE}>
             {`${c.prompts.length} prompt${c.prompts.length === 1 ? "" : "s"} asked every morning on ${WORDS[engines.length] ?? engines.length} engines${c.keyword === null ? ". We add its Google keyword for you" : ", and the keyword checked on Google"}. `}
-            {pending ? "First check tomorrow at 06:00." : `Tracked since ${formatDay(c.started_on, true)}.`}
+            {pending ? `First check tomorrow at ${next}.` : `Tracked since ${formatDay(c.started_on, true)}.`}
             {/* DS64 (2 Oct 2026, R173 pass 7): Clusters marked a stop and this page did not; the same words as Clusters. */}
             {c.stoppedOn !== null ? ` Stopped from ${formatDay(c.stoppedOn)}. Its history stays in your reports.` : null}
           </p>
@@ -237,9 +240,10 @@ export default function OneCluster({
             beforeLabel: chartBefore ? span(chartBefore) : null,
             answersPerDay: c.prompts.length * engines.length,
             pending,
+            firstCheckAt: next,
             note: !pending && !hasPrev ? (cmp.kind === "start" && before ? `Tracked from ${formatDay(c.started_on)}. Its changes are against your first week, ${span(before)}.` : `Tracked from ${formatDay(c.started_on)}. No earlier period to compare yet.`) : null,
             phoneLine: pending
-              ? "First check tomorrow at 06:00."
+              ? `First check tomorrow at ${next}.`
               : `${pct(c.now)} named, ${c.position === null ? (c.keyword ? "no Google position" : "no keyword yet") : `#${c.position} on Google`}.` + (hasPrev && chartBefore ? ` Dashed: ${span(chartBefore)}` : ` Tracked from ${formatDay(c.started_on)}.`),
             openHref: null,
           }}
@@ -354,7 +358,7 @@ export default function OneCluster({
               </h2>
               <p style={{ margin: 0, fontSize: "14px", color: T.ink }}>{`${P.angle ? `${cap(P.angle)}: ` : ""}${P.text}`}</p>
               {/* DS63 (2 Oct 2026, R173 pass 7): a pending cluster drew 28 empty squares and four "-" with nothing saying when they fill. */}
-              {strip.every((r) => !r.answered) ? <p style={{ margin: 0, fontSize: "13px", color: T.soft }}>{pending ? "First check tomorrow at 06:00. A square fills in for each engine every day from then." : "No check of this prompt in this range. Pick another range to see its days."}</p> : null}
+              {strip.every((r) => !r.answered) ? <p style={{ margin: 0, fontSize: "13px", color: T.soft }}>{pending ? `First check tomorrow at ${next}. A square fills in for each engine every day from then.` : "No check of this prompt in this range. Pick another range to see its days."}</p> : null}
             </div>
             <span style={{ display: "flex", alignItems: "center", gap: "16px", fontSize: "13px", color: T.soft, flexShrink: 0 }}>
               <span style={{ display: "flex", alignItems: "center", gap: "6px" }}>
@@ -470,7 +474,7 @@ export default function OneCluster({
                 <span style={{ minWidth: 0, overflowWrap: "anywhere" }}>{n.text}</span>
               </div>
             ))}
-            {pending ? <span style={{ color: T.soft }}>No notes yet. The first check is tomorrow at 06:00.</span> : null}
+            {pending ? <span style={{ color: T.soft }}>{`No notes yet. The first check is tomorrow at ${next}.`}</span> : null}
           </div>
           {noteState ? (
             <p id="note-said" role="status" style={{ margin: 0, fontSize: "13px", color: noteState === "saved" ? T.goodFg : T.badFg }}>

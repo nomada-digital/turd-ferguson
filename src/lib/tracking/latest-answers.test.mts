@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import { expandFixture } from "./fixture-mode.ts";
-import { type LatestRow, answerTabs, brandRuns, checkTime, engineTab, pageLabel, withoutLinks } from "./latest-answers.ts";
+import { type LatestRow, answerTabs, brandRuns, engineTab, pageLabel, withoutLinks } from "./latest-answers.ts";
 
 /**
  * T7 part 3b (30 Sep 2026; boards-3/QuestionDetail.dc.html "Latest answers"):
@@ -15,7 +15,7 @@ const ENGINES = ["google_aio", "chatgpt", "gemini", "perplexity"];
 const row = (over: Partial<LatestRow>): LatestRow => ({ engine: "chatgpt", answered: true, named: false, text: "An answer.", brands: [], citations: [], at: "2026-09-29T05:11:00Z", ...over });
 
 test("one tab per engine in the tier's order; a missing or unanswered engine is 'no answer', not 'not named'", () => {
-  const tabs = answerTabs([row({ engine: "gemini", named: true, brands: ["Tallyroo"] }), row({ engine: "chatgpt", answered: false })], ENGINES, "Tallyroo");
+  const tabs = answerTabs([row({ engine: "gemini", named: true, brands: ["Tallyroo"] }), row({ engine: "chatgpt", answered: false })], ENGINES, "Tallyroo", "US");
   assert.deepEqual(
     tabs.map((t) => [t.engine, t.named]),
     [
@@ -29,13 +29,13 @@ test("one tab per engine in the tier's order; a missing or unanswered engine is 
 });
 
 test("brands: the client first when named, then the others once each in the engine's order", () => {
-  const [t] = answerTabs([row({ engine: "google_aio", named: true, brands: ["Ledgerline", "tallyroo", "Sumly", "ledgerline"] })], ["google_aio"], "Tallyroo");
+  const [t] = answerTabs([row({ engine: "google_aio", named: true, brands: ["Ledgerline", "tallyroo", "Sumly", "ledgerline"] })], ["google_aio"], "Tallyroo", "US");
   assert.deepEqual(t!.brands, [
     { name: "Tallyroo", you: true },
     { name: "Ledgerline", you: false },
     { name: "Sumly", you: false },
   ]);
-  const [u] = answerTabs([row({ engine: "google_aio", named: false, brands: ["Ledgerline"] })], ["google_aio"], "Tallyroo");
+  const [u] = answerTabs([row({ engine: "google_aio", named: false, brands: ["Ledgerline"] })], ["google_aio"], "Tallyroo", "US");
   assert.deepEqual(u!.brands, [{ name: "Ledgerline", you: false }]);
 });
 
@@ -47,6 +47,7 @@ test("pages cited: host and path, no scheme, www, query, fragment or trailing sl
     [row({ citations: [{ source_domain: "example.com", url: "https://example.com/x/" }, { source_domain: "example.com", url: "http://www.example.com/x?y=1" }, { source_domain: "tallyroo.com", url: null }] })],
     ["chatgpt"],
     "Tallyroo",
+    "US",
   );
   assert.deepEqual(t!.pages, ["example.com/x", "tallyroo.com"]);
 });
@@ -58,10 +59,14 @@ test("link addresses come out of the text; the words round them stay", () => {
   assert.equal(withoutLinks("No links here, 3.5 stars."), "No links here, 3.5 stars.");
 });
 
-test("the check's time is London's, where the 06:00 run is set", () => {
-  assert.equal(checkTime("2026-09-29T05:10:00Z"), "06:10");
-  assert.equal(checkTime("2026-12-01T06:10:00Z"), "06:10");
-  assert.equal(checkTime("nonsense"), null);
+test("9 Oct 2026 (audit copy-2): an answer's time is the client's own, with its zone - not London's for everyone", () => {
+  // It was London wall-clock with no zone, shown to US clients too.
+  const at = (market: string, iso: string) => answerTabs([row({ at: iso })], ["chatgpt"], "Tallyroo", market)[0]!.time;
+  assert.equal(at("UK", "2026-09-29T05:10:00Z"), "06:10 UK time");
+  assert.equal(at("UK", "2026-12-01T05:10:00Z"), "05:10 UK time");
+  assert.equal(at("US", "2026-09-29T05:10:00Z"), "1:10am ET");
+  assert.equal(at("US", "2026-12-01T05:10:00Z"), "12:10am ET");
+  assert.equal(at("UK", "nonsense"), null);
 });
 
 test("the brand highlight takes whole words only, any case", () => {
@@ -107,6 +112,7 @@ test("fixture: every prompt has words for every engine at today's check, agreein
     today.filter((a) => a.question_id === "q1-2").map((a) => ({ ...a, text: fx.texts[`q1-2 ${a.engine}`]!, at: `${fx.today}T05:11:00Z` })),
     ENGINES,
     "Tallyroo",
+    "US",
   );
   assert.deepEqual(
     tabs.map((t) => t.named),
@@ -120,6 +126,7 @@ test("8 Oct 2026 (audit data-6): an answer whose other brands were not read says
     [row({ engine: "chatgpt", named: true, brands: [] }), row({ engine: "gemini", named: false, brands: [], brands_ok: false })],
     ["chatgpt", "gemini", "perplexity"],
     "Tallyroo",
+    "US",
   );
   assert.equal(read!.othersRead, true, "absent brands_ok is read");
   assert.equal(unread!.othersRead, false);

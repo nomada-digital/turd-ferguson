@@ -6,7 +6,10 @@ import { appUrl } from "../app-host.ts";
 import { count } from "../plural.ts";
 import { escapeHtml, shell, type Palette } from "../scan/email-render.ts";
 import { TIER_PLAIN, type TierKey } from "../tier-text.ts";
+import { checkTime } from "../tracking/check-time.ts";
+import { addDays } from "../tracking/figures.ts";
 import { PROMPTS_PER_CLUSTER } from "../tracking/limits.ts";
+import { firstCheckWhen } from "../tracking/setup-landing.ts";
 
 /**
  * The lifecycle emails (R159, Danny, 1 Oct 2026, danny.md lines 159-167), as
@@ -212,13 +215,23 @@ export function setupReminder(d: { tier: TierKey; domain: string; link: string; 
   });
 }
 
-export function setupConfirmed(d: { tier: TierKey; clusters: string[]; link: string }): Rendered {
+/**
+ * setup_confirmed, to the member who pressed Confirm. The check time is the
+ * client's zone's on the day (9 Oct 2026, audit copy-2): a bare time with no zone
+ * was an hour wrong from 25 Oct and a London time to a US client. A client
+ * whose checks began before the confirm - the runner reads a live prompt
+ * whether or not setup was confirmed - is promised no "first" check.
+ * `today` is the tracking day the confirm landed on.
+ */
+export function setupConfirmed(d: { tier: TierKey; clusters: string[]; link: string; market: string; today: string; startedOn: string | null }): Rendered {
+  const when = firstCheckWhen(d.startedOn, d.today, d.market);
+  const head = when ? `Your first check runs ${when}` : "Your clusters are set up";
   return render({
     tier: d.tier,
-    subject: "Your first check runs tomorrow at 06:00",
+    subject: head,
     preheader: `${d.clusters.length === 1 ? "1 cluster" : `${d.clusters.length} clusters`} set up.`,
-    heading: "Your first check runs tomorrow at 06:00",
-    body: ["You chose these clusters:"],
+    heading: head,
+    body: [...(when ? [] : [`Checks run every day at ${checkTime(addDays(d.today, 1), d.market)}.`]), "You chose these clusters:"],
     list: d.clusters,
     cta: { href: d.link, label: "See your dashboard" },
     footnote: "You can change a cluster's prompts from the dashboard at any time.",
@@ -377,6 +390,7 @@ export function previewSets(price: { us: number; uk: number }): Record<Lifecycle
   const recap: TrialRecap = { named: 7, answers: 60, since: "9 Oct", topOther: { name: "Xero", answers: 31 }, clustersInUse: 2, clusterLimit: 10, livePrompts: 10 };
   const waiting: TrialRecap = { named: 0, answers: 0, since: null, topOther: null, clustersInUse: 1, clusterLimit: 10, livePrompts: 5 };
   const unread: TrialRecap = { named: 0, answers: 0, since: null, topOther: null, clustersInUse: 1, clusterLimit: 10, livePrompts: 0 };
+  const setupClusters = ["invoicing software", "expense tracking", "payroll for small business"];
   return {
     welcome: [
       { label: "alwaysmentioned, 3 clusters bought", mail: welcome({ tier: "mentioned", clusters: 3, clusterLimit: 10, domain, link }) },
@@ -390,7 +404,12 @@ export function previewSets(price: { us: number; uk: number }): Record<Lifecycle
       { label: "a scan buyer: 1 cluster with prompts", mail: setupReminder({ tier: "tracked", domain, link: setupUrl(slug, ORIGIN), withPrompts: 1, clusterLimit: 10 }) },
       { label: "no prompts yet", mail: setupReminder({ tier: "tracked", domain, link: setupUrl(slug, ORIGIN), withPrompts: 0, clusterLimit: 10 }) },
     ],
-    setup_confirmed: [{ label: "alwaysmentioned", mail: setupConfirmed({ tier: "mentioned", clusters: ["invoicing software", "expense tracking", "payroll for small business"], link: appUrl("/", ORIGIN) }) }],
+    // 9 Oct 2026 (audit copy-2): the check time in each market's zone, a UK one after the clocks go back, and a confirm after checks began.
+    setup_confirmed: [
+      { label: "alwaysmentioned, US, confirmed the day it was bought", mail: setupConfirmed({ tier: "mentioned", clusters: setupClusters, link: appUrl("/", ORIGIN), market: "US", today: "2026-10-09", startedOn: "2026-10-10" }) },
+      { label: "alwaystracked, UK, confirmed the day it was bought", mail: setupConfirmed({ tier: "tracked", clusters: setupClusters, link: appUrl("/", ORIGIN), market: "UK", today: "2026-10-26", startedOn: "2026-10-27" }) },
+      { label: "alwaystracked, UK, confirmed after checks began", mail: setupConfirmed({ tier: "tracked", clusters: setupClusters, link: appUrl("/", ORIGIN), market: "UK", today: "2026-10-12", startedOn: "2026-10-10" }) },
+    ],
     first_reading: [{ label: "alwaystracked", mail: firstReading({ tier: "tracked", domain, named: 7, answers: 20, page1: 3, keywords: 10, link: appUrl("/", ORIGIN) }) }],
     trial_midpoint: [
       { label: "a week in, US", mail: trialMidpoint({ domain, link: dash, recap, trial: us }) },
