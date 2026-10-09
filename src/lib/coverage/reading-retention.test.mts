@@ -273,7 +273,56 @@ const RETENTION_CLAIMS: {
       "2026). Tracked answers are kept for the life of the account, per the dashboard brief",
     holds: (src) => /throw new Error\(`could not store the answers/.test(src),
   },
+  {
+    file: "src/config/help.ts",
+    needle: "What we keep of each answer is what each engine said",
+    why:
+      "the help centre's daily-check article (MK-2, 9 Oct 2026), about tracked answers, not a scan. Its bound " +
+      "is the next sentence - kept for the life of the account, the bound the runner.ts entry cites and /legal " +
+      "states - and what earns the bound is that nothing in the tree deletes or clears a tracking_answers row",
+    holds: (src) =>
+      /What we keep of each answer is what each engine said[^"]*\.\s*Both are kept for the life of the account\./.test(src) &&
+      !trackedAnswerRemovers().length,
+  },
+  {
+    file: "src/config/help.ts",
+    needle: "on a tracked account, what each engine said every day is kept for the life of the account",
+    why:
+      "the help centre's data section (MK-2, 9 Oct 2026): stopping a prompt and a plan ending delete nothing. " +
+      "The bound is inside the sentence, and what earns it is the same as the entry above: nothing in the " +
+      "tree deletes or clears a tracking_answers row",
+    holds: () => !trackedAnswerRemovers().length,
+  },
 ];
+
+/**
+ * What could take a tracked answer away: a database delete whose table is
+ * tracking_answers or not a literal at all, or an update on tracking_answers,
+ * which is how response_text would be cleared. Empty on 9 Oct 2026, when the
+ * help centre's two keeping-claims were recorded on it - the tree's one
+ * database delete is stripe_events, the webhook's replay guard. A delete with
+ * its table in a variable counts, because the walk cannot tell which table it
+ * reaches. Throws when the walk sees no delete at all, so a probe that stopped
+ * matching cannot read as a tree that deletes nothing.
+ */
+function trackedAnswerRemovers(): string[] {
+  const out: string[] = [];
+  let deletes = 0;
+  for (const rel of sourceFiles(ROOT)) {
+    const src = code(readFileSync(join(ROOT, rel), "utf8"));
+    for (const m of src.matchAll(/\.from\(([^)]*)\)/g)) {
+      const end = src.indexOf(";", m.index);
+      const chain = src.slice(m.index, end < 0 ? undefined : end);
+      const table = /^\s*["'`](\w+)["'`]\s*$/.exec(m[1]!)?.[1] ?? null;
+      const isDelete = /\.delete\(/.test(chain);
+      if (isDelete) deletes++;
+      const reaches = isDelete ? table === null || table === "tracking_answers" : table === "tracking_answers" && /\.update\(/.test(chain);
+      if (reaches) out.push(`${rel}: ${chain.replace(/\s+/g, " ").slice(0, 120)}`);
+    }
+  }
+  if (deletes < 1) throw new Error("the walk for database deletes found none - the webhook's stripe_events delete is gone, or the probe has drifted");
+  return out;
+}
 
 /** Every claim in one file, flattened so a sentence broken over lines is one match. */
 function keepingClaims(rel: string): string[] {
@@ -297,8 +346,10 @@ test("every surface promising the answer text is kept is on the list", () => {
   // sequence's "stored word for word" act with it; five again later the same
   // day, when /legal stopped promising a deletion and started promising the
   // opposite - which is a keeping-claim where it used to be the bound on
-  // everybody else's.
-  assert.ok(total >= 5, `the walk found ${total} keeping-claims, was 5 - it has narrowed`);
+  // everybody else's. Seven on 9 Oct 2026, with the help centre's two (MK-2),
+  // and the floor moved with them: at five, a walk that stopped seeing those
+  // two would still have passed.
+  assert.ok(total >= 7, `the walk found ${total} keeping-claims, was 7 - it has narrowed`);
 
   /**
    * By COUNT per file as well as by membership.

@@ -87,6 +87,14 @@ export function trialStatus(p: { trialEndsAt: string | null; cancelled: boolean;
 }
 
 /**
+ * A paid plan's terms, in the words /legal's trial clause and the help centre
+ * both use (9 Oct 2026, review of MK-2): the help had typed its own "thirty
+ * days to stop" beside this one, a second copy of the notice period that
+ * nothing held to the first. One string, so the two cannot drift.
+ */
+export const PLAN_TERMS = "monthly, no minimum term, thirty days to stop";
+
+/**
  * The trial clause for /legal, drawn only while the trial is on. A draft:
  * legal copy for Danny to read before the switch, not reviewed by a lawyer.
  * Plain sentences so llms and the test read the same words the page does.
@@ -96,5 +104,5 @@ export const TRIAL_TERMS: readonly string[] = [
   "The trial starts when you complete checkout, not at the first check, so days spent setting up count towards the 14.",
   "We take a card at checkout and charge nothing during the trial. The first charge is the monthly price - plus VAT in the UK - on day 15. The date is in your dashboard under Settings, and Stripe shows it before you pay.",
   "To cancel during the trial, an owner uses Cancel trial in the dashboard, under Settings and then Billing, or emails us. Tracking carries on until the trial ends and nothing is charged.",
-  "Once the first charge is taken, the plan's usual terms apply: monthly, no minimum term, thirty days to stop. Orders with extra tracking packs, and the other plans, have no trial.",
+  `Once the first charge is taken, the plan's usual terms apply: ${PLAN_TERMS}. Orders with extra tracking packs, and the other plans, have no trial.`,
 ];
