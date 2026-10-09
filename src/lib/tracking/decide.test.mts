@@ -250,6 +250,11 @@ test("brand extraction: the error line puts the read failures first and the gap 
 test("a missing brands_ok column is recognised in both of PostgREST's wordings, and nothing else is", () => {
   assert.equal(missingColumn({ message: "column tracking_answers.brands_ok does not exist" }, "brands_ok"), true, "a select");
   assert.equal(missingColumn({ message: "Could not find the 'brands_ok' column of 'tracking_answers' in the schema cache" }, "brands_ok"), true, "a write");
+  // Review of the integration of audit packages A, B and C (8 Oct 2026): the overview's fallback is now in
+  // read-shape.ts readAnswers, which catches the Error selectAllCounted throws, unwrapped. loadLatestAnswers'
+  // withBrandsOk still sees its read's own wrapped line ("could not read the latest answers: ...").
+  assert.equal(missingColumn(new Error("column tracking_answers.brands_ok does not exist"), "brands_ok"), true, "as selectAllCounted throws it, which readAnswers catches");
+  assert.equal(missingColumn(new Error("could not read the latest answers: column tracking_answers.brands_ok does not exist"), "brands_ok"), true, "wrapped, as loadLatestAnswers' read throws it");
   assert.equal(missingColumn(new Error("could not read the answers: column tracking_answers.brands_ok does not exist"), "brands_ok"), true, "wrapped by paged()");
   assert.equal(missingColumn({ message: "column tracking_answers.brands does not exist" }, "brands_ok"), false, "another column");
   assert.equal(missingColumn({ message: "duplicate key value violates unique constraint" }, "brands_ok"), false);

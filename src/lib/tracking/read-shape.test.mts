@@ -10,7 +10,7 @@ import { chartSeries, citeRows, placementsView } from "./placement-figures.ts";
 import { urlKey } from "./placements.ts";
 import { presets } from "./date-range.ts";
 import { PAGE } from "../supabase/page.ts";
-import { ANSWER_SELECT, type AnswersQuery, type AnswersTable, type ReadOpts, answerPlan, answerRow, boundStated, clusterQuestionIds, monthSlice, planPrompts, rangeFloor, readAnswers, reportSpan, selectColumns, shapeRead } from "./read-shape.ts";
+import { ANSWER_SELECT, type AnswersQuery, type AnswersTable, type ReadOpts, answerPlan, answerRow, boundStated, clusterQuestionIds, monthSlice, planPrompts, rangeFloor, readAnswers, reportSpan, selectColumns, shapeRead, withoutBrandsOk } from "./read-shape.ts";
 import { monthFigures, reportMonths } from "./report-months.ts";
 import { runNote } from "./run-note.ts";
 
@@ -102,8 +102,11 @@ function sameRows(got: readonly object[], want: readonly object[], what: string)
   if (i >= 0) assert.deepEqual(got[i], want[i], `${what}: row ${i}`);
 }
 
-/** A fake PostgREST holding one client's tracking_answers, ids in fixture order. */
-function postgrest(rows: readonly object[], clientId: string) {
+/**
+ * A fake PostgREST holding one client's tracking_answers, ids in fixture order. `lacks` is a column the table does
+ * not have yet (review of the integration, 8 Oct 2026): a select naming it is refused as PostgREST refuses it (42703).
+ */
+function postgrest(rows: readonly object[], clientId: string, lacks?: string) {
   const calls: string[][] = [];
   const table: AnswersTable = () => ({
     select(columns, options) {
@@ -120,6 +123,7 @@ function postgrest(rows: readonly object[], clientId: string) {
         order: (c) => (log.push(`order ${c}`), (byId = c === "id"), q),
         range: (a, b) => (([lo, hi] = [a, b]), q),
         then: (ok, fail) => {
+          if (lacks && columns.split(",").some((c) => c.trim() === lacks)) return Promise.resolve({ data: null, error: { message: `column tracking_answers.${lacks} does not exist` }, count: null }).then(ok, fail);
           const all = rows.map((r, id) => ({ id, ...r })).filter((r) => keep.every((k) => k(r)));
           // Unordered, the planner's order is not the id order: reversed here, so a dropped order shows.
           const ordered = byId ? all : all.reverse();
@@ -176,6 +180,51 @@ test("readAnswers asks PostgREST for the plan's columns and, for one cluster, on
   const none = postgrest(f.data.answers, f.client.id);
   assert.deepEqual(await readAnswers(none.table, plan, [], { clientId: f.client.id, from: r.from, to: r.to }), []);
   assert.equal(none.calls.length, 0, "a cluster with no prompts asks for nothing");
+});
+
+/**
+ * Review of the integration of audit packages A, B and C (8 Oct 2026): brands_ok arrives with 20261008020000, and
+ * a deploy can land before it (AGENTS.md). Package A read the overview again without the column; the merge with
+ * C's planned read dropped that, so every full-plan page threw until the migration was applied. On a table
+ * without the column the full plan reads every row, each as read, as the rows written before it are.
+ */
+test("readAnswers reads again without brands_ok when the table does not have it yet, and every row reads as read", async () => {
+  const strip = (rows: readonly object[]) => rows.map((a) => Object.fromEntries(Object.entries(a).filter(([k]) => k !== "brands_ok")));
+  let rows = 0;
+  for (const state of ["default", "brands-unread"]) {
+    const f = fixtures.find(([s]) => s === state)![1];
+    const r = { from: addDays(f.today, -55), to: f.today };
+    const where = { clientId: f.client.id, from: r.from, to: r.to };
+    // The table before 20261008020000: no brands_ok on any row, and a select naming it refused.
+    const before = strip(f.data.answers);
+    for (const cluster of [undefined, "c1"]) {
+      const plan = answerPlan({ cluster })!;
+      assert.match(plan.select, /\bbrands_ok\b/);
+      const db = postgrest(before, f.client.id, "brands_ok");
+      const got = await readAnswers(db.table, plan, planPrompts(plan, f.data), where);
+      const want = within(shapeRead({ ...f.data, answers: before as OverviewData["answers"] }, { cluster }), r).answers;
+      sameRows(got, want, `${state} ${cluster ?? "every cluster"}`);
+      assert.ok(got.every((a) => !("brands_ok" in a)), "every row reads as read");
+      assert.equal(db.calls[0]![0], `select ${ANSWER_SELECT.full} (count)`, "the plan's own columns first");
+      assert.equal(db.calls[1]![0], "select run_date, question_id, engine, answered, named, brands, citations (count)", "then the same without brands_ok");
+      assert.ok(db.calls.slice(1).every((c) => !c[0]!.includes("brands_ok")), "and no page after it names the column");
+      if (cluster) assert.ok(db.calls.slice(1).every((c) => c.includes("in question_id")), "the retry keeps the cluster's prompts");
+      rows += got.length;
+    }
+  }
+  assert.ok(rows > PAGE * 2, `only ${rows} rows read`);
+  // Once the column is there, the brands-unread state's unread answers come back unread.
+  const u = fixtures.find(([s]) => s === "brands-unread")![1];
+  const live = await readAnswers(postgrest(u.data.answers, u.client.id).table, answerPlan({})!, null, { clientId: u.client.id, from: addDays(u.today, -55), to: u.today });
+  assert.ok(live.filter((a) => a.brands_ok === false).length >= 40);
+  // Only brands_ok's absence is read past: another missing column, or a select that does not name brands_ok, throws.
+  const f = fixtures[0][1];
+  const where = { clientId: f.client.id, from: addDays(f.today, -6), to: f.today };
+  await assert.rejects(readAnswers(postgrest(f.data.answers, f.client.id, "citations").table, answerPlan({})!, null, where), /column tracking_answers\.citations does not exist/);
+  const odd = { select: "run_date, question_id, engine, answered, named, brands_ok_v2", cluster: null };
+  await assert.rejects(readAnswers(postgrest(f.data.answers, f.client.id, "brands_ok_v2").table, odd, null, where), /brands_ok_v2 does not exist/, "a select without brands_ok is not retried");
+  assert.equal(withoutBrandsOk(ANSWER_SELECT.full), "run_date, question_id, engine, answered, named, brands, citations");
+  for (const cols of [ANSWER_SELECT.cites, ANSWER_SELECT.verdicts]) assert.equal(withoutBrandsOk(cols), cols, "the narrow shapes never name it");
 });
 
 test("census: loadOverview takes its plan, prompts and read from read-shape.ts, and the fixture repo its shapeRead", () => {

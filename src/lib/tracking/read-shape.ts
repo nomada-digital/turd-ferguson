@@ -1,5 +1,6 @@
 import { selectAllCounted } from "../supabase/page.ts";
 
+import { missingColumn } from "./decide.ts";
 import { type AnswerRow, type CitationRow, type Day, type Range, addDays, comparisonRange } from "./figures.ts";
 import type { OverviewData } from "./overview-data.ts";
 
@@ -40,6 +41,7 @@ export type AnswerColumns = "full" | "cites" | "verdicts" | "none";
 /** The tracking_answers columns each shape selects; "none" reads no answer. */
 export const ANSWER_SELECT: Record<Exclude<AnswerColumns, "none">, string> = {
   // brands_ok (20261008020000, audit reliability-1): an answer whose brand extraction failed is out of every brand figure.
+  // Read again without it while the column is missing (readAnswers, review of the integration, 8 Oct 2026).
   full: "run_date, question_id, engine, answered, named, brands, brands_ok, citations",
   cites: "run_date, question_id, engine, answered, named, citations",
   verdicts: "run_date, question_id, engine, answered, named",
@@ -122,23 +124,52 @@ export type AnswersQuery = PromiseLike<{ data: unknown[] | null; error: { messag
 };
 export type AnswersTable = () => { select(columns: string, options: { count?: "exact" }): AnswersQuery };
 
+/** A select without brands_ok: what a read names while 20261008020000 has not been applied. */
+export function withoutBrandsOk(select: string): string {
+  return select
+    .split(",")
+    .map((c) => c.trim())
+    .filter((c) => c !== "brands_ok")
+    .join(", ");
+}
+
 /**
  * The answers read itself, on a plan: its columns, one client's days, its
  * prompts, ordered by id and paged (selectAllCounted). loadOverview runs it
  * on tracking_answers; read-shape.test.mts runs the same function on a fake
  * PostgREST serving the fixture and holds it equal to shapeRead.
+ *
+ * A select naming brands_ok on a table without it (review of the integration
+ * of audit packages A, B and C, 8 Oct 2026) is read again without it, and
+ * every row then reads as read - what the column's default says of the rows
+ * written before it. A deploy can land before its additive migration
+ * (AGENTS.md), and package A wrapped this fallback round the old overview
+ * read; the merge with package C's planned read dropped it, on the
+ * assumption that 20261008020000 is applied first, so until it was, the
+ * full plan's pages - Overview, Who is named, Cited pages, Clusters and one
+ * cluster - failed. Here rather than in loadOverview, so it runs under node
+ * --test on the fake PostgREST.
  */
 export async function readAnswers(table: AnswersTable, plan: AnswerPlan, ids: string[] | null, where: { clientId: string; from: Day; to: Day }): Promise<(AnswerRow & CitationRow)[]> {
   if (ids && !ids.length) return [];
-  const rows = await selectAllCounted<unknown>((lo, hi, count) => {
-    let q = table()
-      .select(plan.select, count ? { count: "exact" } : {})
-      .eq("client_domain_id", where.clientId)
-      .gte("run_date", where.from)
-      .lte("run_date", where.to);
-    if (ids) q = q.in("question_id", ids);
-    return q.order("id").range(lo, hi);
-  });
+  const read = (select: string) =>
+    selectAllCounted<unknown>((lo, hi, count) => {
+      let q = table()
+        .select(select, count ? { count: "exact" } : {})
+        .eq("client_domain_id", where.clientId)
+        .gte("run_date", where.from)
+        .lte("run_date", where.to);
+      if (ids) q = q.in("question_id", ids);
+      return q.order("id").range(lo, hi);
+    });
+  let rows: unknown[];
+  try {
+    rows = await read(plan.select);
+  } catch (err) {
+    const without = withoutBrandsOk(plan.select);
+    if (without === plan.select || !missingColumn(err, "brands_ok")) throw err;
+    rows = await read(without);
+  }
   return rows.map((a) => answerRow(a as Record<string, unknown>));
 }
 
