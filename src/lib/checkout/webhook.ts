@@ -22,8 +22,14 @@ export const SIGNATURE_TOLERANCE_S = 300;
  * activation-1): Stripe sends it three days before a trial ends, and it is
  * trial_ending's fallback trigger beside the daily cron. Acted on only once
  * the Stripe endpoint is subscribed to it - until then Stripe never posts it.
+ *
+ * invoice.payment_failed joined on 9 Oct 2026 (BL-2, payment.ts): each failed
+ * attempt carries the date Stripe tries again and the invoice's own page,
+ * which customer.subscription.updated does not - it fires once, when the
+ * status first moves to past_due. The same proviso: Stripe posts it only
+ * once the endpoint is subscribed to it.
  */
-export const HANDLED_EVENTS = ["checkout.session.completed", "customer.subscription.updated", "customer.subscription.deleted", "customer.subscription.trial_will_end"] as const;
+export const HANDLED_EVENTS = ["checkout.session.completed", "customer.subscription.updated", "customer.subscription.deleted", "customer.subscription.trial_will_end", "invoice.payment_failed"] as const;
 export type HandledEvent = (typeof HANDLED_EVENTS)[number];
 
 function hmacHex(secret: string, data: string): string {
@@ -53,7 +59,8 @@ export function signStripePayload(raw: string, secret: string, t: number): strin
   return `t=${t},v1=${hmacHex(secret, `${t}.${raw}`)}`;
 }
 
-export type StripeEvent = { id: string; type: string; data: { object: Record<string, unknown>; previous_attributes?: Record<string, unknown> } };
+/** `created` is when Stripe made the event, unix seconds: payment.ts orders by it, as Stripe does not order delivery. */
+export type StripeEvent = { id: string; type: string; created?: number; data: { object: Record<string, unknown>; previous_attributes?: Record<string, unknown> } };
 
 /** What checkout.session.completed carries that signup needs, read from the Session and its metadata. */
 export type CompletedOrder = {
@@ -216,11 +223,22 @@ export type WebhookDeps = {
   /** Undo `record` when the handler failed, so Stripe's retry is acted on. */
   forget: (id: string) => Promise<void>;
   completed: (order: CompletedOrder, eventId: string) => Promise<boolean>;
-  /** `previous` is the event's previous_attributes, which is how a trial's conversion is seen. */
-  updated: (sub: Record<string, unknown>, previous: Record<string, unknown>) => Promise<boolean>;
-  deleted: (sub: Record<string, unknown>) => Promise<boolean>;
+  /**
+   * `previous` is the event's previous_attributes, which is how a trial's
+   * conversion is seen. `at` is the event's created time (eventTime), which
+   * orders the payment writes.
+   */
+  updated: (sub: Record<string, unknown>, previous: Record<string, unknown>, at: number) => Promise<boolean>;
+  deleted: (sub: Record<string, unknown>, at: number) => Promise<boolean>;
   trialWillEnd: (sub: Record<string, unknown>) => Promise<boolean>;
+  /** invoice.payment_failed (BL-2, 9 Oct 2026); the object is the Invoice. */
+  paymentFailed: (invoice: Record<string, unknown>, at: number) => Promise<boolean>;
 };
+
+/** The event's created time; the moment it arrived when Stripe's is missing, so a write is never undated. */
+export function eventTime(event: { created?: unknown }, nowS: number = Math.floor(Date.now() / 1000)): number {
+  return typeof event.created === "number" && Number.isInteger(event.created) && event.created > 0 ? event.created : nowS;
+}
 
 export type WebhookAnswer = { status: number; body: { ok?: true; ignored?: string; error?: string } };
 
@@ -244,14 +262,17 @@ export async function handleWebhook(raw: string, signature: string | null, secre
 
   const obj = event.data.object;
   const type = event.type as HandledEvent;
+  const at = eventTime(event, nowS);
   const done =
     type === "checkout.session.completed"
       ? await deps.completed(completedOrder(obj), event.id)
       : type === "customer.subscription.updated"
-        ? await deps.updated(obj, event.data.previous_attributes ?? {})
+        ? await deps.updated(obj, event.data.previous_attributes ?? {}, at)
         : type === "customer.subscription.trial_will_end"
           ? await deps.trialWillEnd(obj)
-          : await deps.deleted(obj);
+          : type === "invoice.payment_failed"
+            ? await deps.paymentFailed(obj, at)
+            : await deps.deleted(obj, at);
   if (!done) {
     await deps.forget(event.id);
     return { status: 500, body: { error: "handler_failed" } };

@@ -6,9 +6,10 @@ import { appUrl } from "@/lib/app-host";
 import { sendOrderEmail } from "@/lib/checkout/order-mail";
 import { clustersToMake, orderEmailText, orderRow, packsOn, signupResume, subscriptionScanToken, trialConverted, trialEndsAtAfter, trialStillRunning, type CompletedOrder } from "@/lib/checkout/webhook";
 import { readSubscription } from "@/lib/checkout/stripe";
+import { PAYMENT_READ, afterFailedInvoice, afterSubscription, invoiceSubscription, newerThanRecorded, type PaymentRow, type PaymentStep } from "@/lib/checkout/payment";
 import { TRACKED_PRICE } from "@/config/pricing";
 import { trialCharge, trialMoment } from "@/config/trial";
-import { dayAfter, slugFor, trackingDay } from "@/lib/tracking/decide";
+import { dayAfter, missingColumn, slugFor, trackingDay } from "@/lib/tracking/decide";
 import { angleFor, CLUSTER_BASE, clusterLimitFor, insertCluster, insertKeyword, insertPrompts, namesBrandIn, PROMPTS_PER_CLUSTER } from "@/lib/tracking/limits";
 import { billingUrl, planEnded, trialTerms, welcome } from "@/lib/email/lifecycle";
 import { lifecycleOn, sendLifecycle } from "@/lib/email/lifecycle-mail";
@@ -333,8 +334,13 @@ async function clientOfSubscription(db: SupabaseClient, sub: Record<string, unkn
  * and the cron's trial emails would have told a paying client nothing is
  * charged). No client for the subscription: nothing to do. A failed write is
  * false, so Stripe retries.
+ *
+ * BL-2 (9 Oct 2026): then the subscription's status (payment.ts). past_due is
+ * recorded for the owner's banner; unpaid, paused and incomplete_expired end
+ * the client; canceled ends it as customer.subscription.deleted does; a
+ * client ended for payment whose subscription is paid again is made active.
  */
-export async function onSubscriptionUpdated(db: SupabaseClient, sub: Record<string, unknown>, previous: Record<string, unknown> = {}): Promise<boolean> {
+export async function onSubscriptionUpdated(db: SupabaseClient, sub: Record<string, unknown>, previous: Record<string, unknown> = {}, at: number = Math.floor(Date.now() / 1000)): Promise<boolean> {
   const clientId = await clientOfSubscription(db, sub);
   if (clientId === false) return false;
   if (trialConverted(sub, previous)) console.info(`[stripe] trial converted to paid: ${String(sub.id)} client ${clientId ?? "none"}`);
@@ -344,8 +350,73 @@ export async function onSubscriptionUpdated(db: SupabaseClient, sub: Record<stri
     .from("client_domains")
     .update({ cluster_limit: clusterLimitFor(packsOn(sub)), ...(trialEndsAt === undefined ? {} : { trial_ends_at: trialEndsAt }) })
     .eq("id", clientId);
-  if (error) console.error(`[stripe] cluster_limit${trialEndsAt === undefined ? "" : " and trial_ends_at"} not set: ${error.message}`);
-  return !error;
+  if (error) {
+    console.error(`[stripe] cluster_limit${trialEndsAt === undefined ? "" : " and trial_ends_at"} not set: ${error.message}`);
+    return false;
+  }
+  return recordPayment(db, clientId, String(sub.id), at, (row) => afterSubscription(row, sub, at), sub);
+}
+
+/**
+ * The payment columns for one client (BL-2). null while
+ * 20261009030000_payment_state.sql is not applied - logged, and the payment
+ * step is skipped, so the webhook behaves as it did before - and false on any
+ * other failed read, so Stripe retries.
+ */
+async function paymentRow(db: SupabaseClient, clientId: string): Promise<PaymentRow | null | false> {
+  const { data, error } = await db.from("client_domains").select(PAYMENT_READ).eq("id", clientId).maybeSingle();
+  if (error) {
+    if (missingColumn(error, "payment_")) {
+      console.warn(`[stripe] payment state not recorded for ${clientId}: 20261009030000_payment_state.sql is not applied`);
+      return null;
+    }
+    console.error(`[stripe] could not read the payment state of ${clientId}: ${error.message}`);
+    return false;
+  }
+  if (!data) return null;
+  const r = data as Record<string, unknown>;
+  const s = (k: string) => (typeof r[k] === "string" ? (r[k] as string) : null);
+  return { status: s("status"), payment_status: s("payment_status"), payment_status_at: s("payment_status_at"), payment_ended_at: s("payment_ended_at") };
+}
+
+/**
+ * One event's payment step, written in one update and only over an older
+ * event (newerThanRecorded). A cancelled subscription ends the client through
+ * endClient first, so plan_ended goes as it does on deletion. `sub` is the
+ * subscription when the event is one; an invoice never cancels.
+ */
+async function recordPayment(db: SupabaseClient, clientId: string, subId: string, at: number, decide: (row: PaymentRow) => PaymentStep, sub: Record<string, unknown> | null = null): Promise<boolean> {
+  const row = await paymentRow(db, clientId);
+  if (row === false) return false;
+  if (row === null) return true;
+  const step = decide(row);
+  if (step.cancel && sub && !(await endClient(db, clientId, sub))) return false;
+  if (!step.write) return true;
+  const { error } = await db.from("client_domains").update(step.write).eq("id", clientId).or(newerThanRecorded(at));
+  if (error) {
+    if (missingColumn(error, "payment_")) return true;
+    console.error(`[stripe] payment state ${step.write.payment_status} not recorded for ${clientId}: ${error.message}`);
+    return false;
+  }
+  if (step.end) console.info(`[stripe] client ${clientId} ended: subscription ${subId} is ${step.write.payment_status}`);
+  if (step.restore) console.info(`[stripe] client ${clientId} restored: subscription ${subId} is ${step.write.payment_status} again`);
+  return true;
+}
+
+/**
+ * invoice.payment_failed (BL-2, 9 Oct 2026): the subscription's client is
+ * past due, with the date Stripe tries again and the invoice's page for the
+ * owner's banner (afterFailedInvoice). An invoice with no subscription, or
+ * none of ours, is nothing to do. No email to the client: Stripe's own
+ * failed-payment emails are Danny's setting (LB4).
+ */
+export async function onInvoicePaymentFailed(db: SupabaseClient, invoice: Record<string, unknown>, at: number = Math.floor(Date.now() / 1000)): Promise<boolean> {
+  const owner = invoiceSubscription(invoice);
+  if (!owner) return true;
+  const clientId = await clientOfSubscription(db, owner);
+  if (clientId === false) return false;
+  if (!clientId) return true;
+  return recordPayment(db, clientId, owner.id, at, (row) => afterFailedInvoice(row, invoice, at));
 }
 
 /**
@@ -360,11 +431,20 @@ export async function onSubscriptionUpdated(db: SupabaseClient, sub: Record<stri
  * (planEndedOwners, lifecycle-sweep.ts). Which version is planEndedInTrial's:
  * Stripe's trial_end on this payload first, so a trial_ends_at that signup
  * failed to write cannot hand an uncharged trial the receipt line.
+ *
+ * BL-2 (9 Oct 2026): the subscription's canceled status is recorded too, so a
+ * client ended for payment and then cancelled stays ended when it is read.
  */
-export async function onSubscriptionDeleted(db: SupabaseClient, sub: Record<string, unknown>): Promise<boolean> {
+export async function onSubscriptionDeleted(db: SupabaseClient, sub: Record<string, unknown>, at: number = Math.floor(Date.now() / 1000)): Promise<boolean> {
   const clientId = await clientOfSubscription(db, sub);
   if (clientId === false) return false;
   if (!clientId) return true;
+  if (!(await endClient(db, clientId, sub))) return false;
+  return recordPayment(db, clientId, String(sub.id), at, (row) => ({ ...afterSubscription(row, { ...sub, status: "canceled" }, at), cancel: false }));
+}
+
+/** The end of a subscription, for .deleted and an .updated that says canceled: false only when Stripe should retry. */
+async function endClient(db: SupabaseClient, clientId: string, sub: Record<string, unknown>): Promise<boolean> {
   const { data: ended, error } = await db
     .from("client_domains")
     .update({ status: "ended" })
