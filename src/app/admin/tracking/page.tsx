@@ -5,7 +5,7 @@ import { supabaseAdmin, supabaseConfigured } from "@/lib/supabase/admin";
 import { selectAll } from "@/lib/supabase/page";
 import { ADMIN_LIMITS, UPSELL_MODES, trackingDay } from "@/lib/tracking/decide";
 import { PROMPTS_PER_CLUSTER, type Subject, namesBrandIn, trackingCounts } from "@/lib/tracking/limits";
-import { rerunMarker } from "@/lib/tracking/rerun";
+import { RERUN_BUTTON, rerunLine } from "@/lib/tracking/rerun";
 import { type HealthRun, RUN_STATES, type RunHealth, STATE_WORDS, readRunHealth, runState } from "@/lib/tracking/run-health";
 import { SETUP_CONFIRMED_EVENT, setupState } from "@/lib/tracking/setup-landing";
 
@@ -34,9 +34,10 @@ export const metadata: Metadata = {
  * the three cannot disagree. A run left `running` past 15 minutes reads as
  * stalled here rather than "running $0.00" until the 03:45 sweep, and "Run
  * now" on a failed, partial or stalled run re-reads what did not come back
- * (audit reliability-4, rerun.ts). The prompt, keyword and run reads are
- * paged (audit reliability-2): every client's rows in one select stop at
- * PostgREST's thousand.
+ * (audit reliability-4, rerun.ts), with where that re-run is beside it. The
+ * prompt, keyword, run and cluster reads are paged (audit reliability-2;
+ * clusters from the review of 348abbd): every client's rows in one select
+ * stop at PostgREST's thousand.
  */
 
 const input = {
@@ -82,7 +83,7 @@ export default async function TrackingAdmin() {
     health,
     { data: members, error: mErr },
     { data: accountRows, error: acErr },
-    { data: clusters, error: clErr },
+    clustersById,
     { data: setups, error: sErr },
   ] = await Promise.all([
     all<Row>("tracked questions", (from, to) => db.from("tracked_questions").select("id, client_domain_id, cluster_id, angle, text, source, added_on, stopped_on").in("client_domain_id", ids).order("id", { ascending: true }).range(from, to)),
@@ -100,20 +101,24 @@ export default async function TrackingAdmin() {
     readRunHealth(db, today, now).catch((err: unknown) => (err instanceof Error ? err.message : String(err))),
     db.from("dashboard_members").select("account_id, email, role").in("account_id", accounts).is("removed_at", null),
     db.from("accounts").select("id, upsell_mode, upsell_contact_email").in("id", accounts),
-    db
-      .from("tracked_clusters")
-      .select("id, client_domain_id, name, keyword_id, tier, started_on, stopped_on")
-      .in("client_domain_id", ids)
-      .is("stopped_on", null)
-      .order("created_at", { ascending: true }),
+    all<Row>("clusters", (from, to) =>
+      db
+        .from("tracked_clusters")
+        .select("id, client_domain_id, name, keyword_id, tier, started_on, stopped_on, created_at")
+        .in("client_domain_id", ids)
+        .is("stopped_on", null)
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
     // R166 step 6: who confirmed setup, and when.
     db.from("dashboard_events").select("client_domain_id, created_at, member_email").in("client_domain_id", ids).eq("event", SETUP_CONFIRMED_EVENT),
   ]);
   // Newest day first, as the run list below reads them; paged by id.
   const runs = [...runsById].sort((a, b) => String(b.run_date).localeCompare(String(a.run_date)));
+  // Oldest first, as they were made; paged by id.
+  const clusters = [...clustersById].sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
   if (mErr) throw new Error(`could not read dashboard members: ${mErr.message}`);
   if (acErr) throw new Error(`could not read accounts: ${acErr.message}`);
-  if (clErr) throw new Error(`could not read clusters: ${clErr.message}`);
   if (sErr) throw new Error(`could not read setup confirms: ${sErr.message}`);
 
   const of = (rows: Row[] | null, id: string, key = "client_domain_id") => (rows ?? []).filter((r) => r[key] === id);
@@ -157,6 +162,8 @@ export default async function TrackingAdmin() {
         const todayRun = rs.find((r) => r.run_date === today);
         const todayState = todayRun ? runState(todayRun as HealthRun, now) : null;
         const rerunnable = todayState === "failed" || todayState === "partial" || todayState === "stalled";
+        // Where today's re-run is, if one was asked (rerun.ts): the run's own status stays as it was until it closes.
+        const rerunNote = todayRun ? rerunLine(todayRun as { started_at: string | null; step_ms?: unknown }, now) : null;
         const cost14 = rs.reduce((n, r) => n + Number(r.dfs_cost ?? 0), 0);
         const ms = of(members, c.account_id as string, "account_id");
         const account = (accountRows ?? []).find((a) => a.id === c.account_id);
@@ -177,14 +184,14 @@ export default async function TrackingAdmin() {
                 </>
               ) : null}
             </p>
-            <ActionForm action={runNow} submit={rerunnable ? "Re-run failed reads" : "Run now"}>
+            <ActionForm action={runNow} submit={rerunnable ? RERUN_BUTTON : "Run now"}>
               <input type="hidden" name="client" value={id} maxLength={ADMIN_LIMITS.id} />
               <span style={{ fontSize: "12.5px", color: T.soft }}>
                 {rerunnable ? "Reads again only what did not come back today, under the same cap." : "The only manual spend."}
               </span>
               {todayRun && (todayState === "stuck" || todayState === "undispatched") ? (
                 <span style={{ fontSize: "12.5px", color: T.ink, fontWeight: 700 }}>
-                  stuck - queued since {String(rerunMarker(todayRun.step_ms)?.at || todayRun.created_at).slice(11, 16)}Z and never claimed:{" "}
+                  stuck - queued since {String(todayRun.created_at).slice(11, 16)}Z and never claimed:{" "}
                   {(todayRun.error as string | null) ?? "no dispatch error recorded"}
                 </span>
               ) : null}
@@ -193,6 +200,7 @@ export default async function TrackingAdmin() {
                   stalled - running since {String(todayRun.started_at).slice(11, 16)}Z and never closed; the platform stopped it
                 </span>
               ) : null}
+              {rerunNote ? <span style={{ fontSize: "12.5px", color: T.ink }}>{rerunNote}</span> : null}
             </ActionForm>
             <ActionForm action={addTracked} submit="Add prompt">
               <input type="hidden" name="client" value={id} maxLength={ADMIN_LIMITS.id} />

@@ -39,7 +39,22 @@ import { keywordsOnPage1, namedRate } from "./figures.ts";
 import { reportRunHealthSafely } from "./health-io.ts";
 import { sendLinkAlerts } from "./link-mail.ts";
 import { decideLinkCheck, isLinkCheckDay, type LinkRow, readPlacement } from "./placements.ts";
-import { type RunForRerun, dayRows, keepsOld, readKept, reopenRun, restored, rerunMarker, retryAnswers, retryKeywords, rerunVerdict } from "./rerun.ts";
+import {
+  type RunForRerun,
+  askRerun,
+  claimRerun,
+  closedMarker,
+  dayRows,
+  hasBrandsOk,
+  keepsOld,
+  readKept,
+  readStoredTexts,
+  rebrandAnswers,
+  restored,
+  retryAnswers,
+  retryKeywords,
+  rerunVerdict,
+} from "./rerun.ts";
 import { readTrackable } from "./run-health.ts";
 
 /**
@@ -130,17 +145,18 @@ export async function dispatchTrackingRun(runId: string): Promise<void> {
 /**
  * "Run now" on today's failed, partial or stalled run (9 Oct 2026, audit
  * reliability-4; rerun.ts). Refused by rerunVerdict - only today's, and never
- * a run still reading inside TRACKING_STALL_MS - and by the same switch and
- * daily cap the runner reads at its claim, before anything moves, so a
- * refused re-run never touches the row. Then reopened by a compare-and-swap;
- * the caller dispatches it as any queued run.
+ * a run or re-run still reading inside TRACKING_STALL_MS - and by the same
+ * switch and daily cap the runner reads at its claim, before anything is
+ * written. Then asked for by a compare-and-swap that writes only the marker:
+ * the run's status and error line stay as they are until a pass closes it
+ * (review of b2e0019). The caller dispatches it as any run.
  */
-export async function reopenForRerun(run: RunForRerun, today: string): Promise<{ ok: true } | { ok: false; message: string }> {
+export async function requestRerun(run: RunForRerun, today: string): Promise<{ ok: true } | { ok: false; message: string }> {
   const verdict = rerunVerdict(run, today);
   if (!verdict.ok) return verdict;
   const refusal = refuseRun(await trackingSettings(), await trackingSpentOn(today));
   if (refusal) return { ok: false, message: `Not re-run: ${refusal}.` };
-  if (!(await reopenRun(supabaseAdmin(), run, verdict.of))) return { ok: false, message: "Today's run changed while you asked. Refresh and look again." };
+  if (!(await askRerun(supabaseAdmin(), run, verdict.of))) return { ok: false, message: "Today's run changed while you asked. Refresh and look again." };
   return { ok: true };
 }
 
@@ -214,12 +230,14 @@ type AnswerRow = {
  * Idempotent by the claim: only a `queued` row moves to `running`, so a run
  * already running or finished is skipped, however many times it is posted.
  *
- * A re-run (9 Oct 2026, audit reliability-4; rerun.ts) is a run "Run now"
- * moved back to queued from failed, partial or stalled, with a marker in
- * step_ms. It is claimed and bounded the same way, reads again only what did
- * not come back, adds its spend to the run's, and is closed back to what it
- * was if the cap refuses it or it throws. The cron's pass carries no marker,
- * keeps nothing, and reads and writes exactly as before.
+ * A re-run (9 Oct 2026, audit reliability-4; rerun.ts) is a failed, partial
+ * or stalled run "Run now" asked to be read again, with a marker in step_ms
+ * and its status and error line left as they were. The queued claim does not
+ * take it; claimRerun does, by a compare-and-swap on the ask. It is bounded
+ * the same way, reads again only what did not come back, adds its spend to
+ * the run's, and if the cap refuses it or it throws, leaves the run as it
+ * was. The cron's pass is claimed as before, carries no marker, keeps
+ * nothing, and reads and writes exactly as before.
  *
  * Every run, as it closes, asks whether the day has settled with a client not
  * complete (run-health.ts reportRunHealth): the last one to close sends the
@@ -235,28 +253,34 @@ export async function runTrackingDay(runId: string): Promise<{ status: string; s
     .update({ status: "running", started_at: new Date().toISOString() })
     .eq("id", runId)
     .eq("status", "queued")
-    .select("id, client_domain_id, run_date, engines, dfs_cost, model_calls, step_ms");
+    .select("id, client_domain_id, run_date, engines");
   if (claimErr) throw new Error(`could not claim run ${runId}: ${claimErr.message}`);
-  const run = claimed?.[0];
+  // Not queued: a re-run "Run now" asked for, if one is waiting (rerun.ts
+  // claimRerun). Nothing else is claimed here, so a run posted twice is
+  // still skipped.
+  const again = claimed?.[0] ? null : await claimRerun(db, runId);
+  const run = claimed?.[0] ?? again?.run;
   if (!run) return { status: "skipped", skipped: "not queued - already running or finished" };
 
   // Null on the cron's pass. On a re-run, what the run was and what its
   // earlier passes spent: the day's cap sums dfs_cost off the run rows, so a
   // re-run adds to it rather than writing over what was already billed.
-  const rerun = rerunMarker(run.step_ms);
-  const prior = { dfs: Number(run.dfs_cost ?? 0) || 0, calls: Number(run.model_calls ?? 0) || 0 };
+  const rerun = again?.marker ?? null;
+  const prior = { dfs: Number(again?.run.dfs_cost ?? 0) || 0, calls: Number(again?.run.model_calls ?? 0) || 0 };
   const spend = { dfs: 0, calls: 0 };
   let domainForDebit: string | undefined;
 
-  const close = async (fields: Record<string, unknown>) => {
+  // `fields` null: a re-run that read nothing it can stand behind leaves the
+  // run's status, error line and finished_at as they were (rerun.ts restored),
+  // and says why on its marker.
+  const close = async (fields: Record<string, unknown> | null, why: string | null = null) => {
     const { error } = await db
       .from("tracking_runs")
       .update({
-        ...fields,
+        ...(fields ? { ...fields, finished_at: new Date().toISOString() } : {}),
         dfs_cost: Number((prior.dfs + spend.dfs).toFixed(4)),
         model_calls: prior.calls + spend.calls,
-        finished_at: new Date().toISOString(),
-        step_ms: { total: Date.now() - started, ...(rerun ? { rerun } : {}) },
+        step_ms: { total: Date.now() - started, ...(rerun ? { rerun: closedMarker(rerun, why) } : {}) },
       })
       .eq("id", runId);
     if (error) console.warn(`[track] could not close run ${runId}: ${error.message}`);
@@ -266,10 +290,11 @@ export async function runTrackingDay(runId: string): Promise<{ status: string; s
   try {
     const refusal = refuseRun(await trackingSettings(), await trackingSpentOn(run.run_date as string));
     if (refusal) {
-      const out = rerun ? restored(rerun, `re-run refused: ${refusal}`) : { status: "failed", error: refusal };
-      await close(out);
+      const why = `re-run refused: ${refusal}`;
+      const out = rerun ? restored(rerun, why) : { status: "failed", error: refusal };
+      await close(out, rerun ? why : null);
       await reportRunHealthSafely(run.run_date as string);
-      return { status: out.status, skipped: refusal };
+      return { status: out?.status ?? rerun!.of, skipped: refusal };
     }
 
     const { data: client, error: clErr } = await db
@@ -298,13 +323,19 @@ export async function runTrackingDay(runId: string): Promise<{ status: string; s
     const names = (prose: string) =>
       namesSubject(prose, brand, domain) || aliases.some((a) => namesSubject(prose, a));
 
-    // The day's reads. A re-run asks again only those the run holds no good
-    // row for (rerun.ts retryAnswers, retryKeywords); the cron's pass, with
-    // nothing kept, asks every one.
+    // The day's reads. A re-run asks again only those the run holds no
+    // answered row or position for (rerun.ts retryAnswers, retryKeywords),
+    // and reads the brands of an answer whose brands were not read from its
+    // stored text, never the engine (rebrandAnswers); the cron's pass, with
+    // nothing kept, asks every one and has nothing stored to read.
     const every = questions.flatMap((q) => engines.map((engine) => ({ q, engine })));
     const kept = rerun ? await readKept(db, runId) : null;
-    const askAgain = kept ? retryAnswers(kept, rerun!.error) : null;
+    const askAgain = kept ? retryAnswers(kept) : null;
+    const rebrand = kept ? rebrandAnswers(kept, rerun!.error) : null;
     const readAgain = kept ? retryKeywords(kept) : null;
+    const stored: AnswerRow[] = kept && rebrand
+      ? (await readStoredTexts(db, runId, kept, rebrand)).map((s) => ({ question_id: s.question_id, engine: s.engine as Engine, answered: true, named: s.named, response_text: s.response_text, citations: [], cost: 0, failed: false }))
+      : [];
     const jobs = askAgain ? every.filter(({ q, engine }) => askAgain(q.id as string, engine)) : every;
     const keywordJobs = readAgain ? keywords.filter((k) => readAgain(k.id as string)) : keywords;
     // A read that throws is retried where decide.ts says a retry is worth it
@@ -410,7 +441,7 @@ export async function runTrackingDay(runId: string): Promise<{ status: string; s
     const signal = AbortSignal.timeout(extractionWindowMs(remainingMs()));
     await Promise.all(
       engines.map(async (engine) => {
-        const read = answers.filter((a) => a.engine === engine && a.answered && a.response_text);
+        const read = [...answers, ...stored].filter((a) => a.engine === engine && a.answered && a.response_text);
         if (!read.length) return;
         const out = await extractWithRetry(read.map((a) => a.response_text!), (blocks, billed) => extractBrands(blocks, context, { signal, billed }), remainingMs, signal);
         spend.calls += out.calls;
@@ -422,11 +453,14 @@ export async function runTrackingDay(runId: string): Promise<{ status: string; s
         others.set(engine, [...seen.values()]);
         if (!out.unread.length) return;
         for (const i of out.unread) unread.add(read[i]!);
-        gaps.push({ engine, unread: out.unread.length, answered: read.length, reason: out.reason });
-        console.warn(`[track] ${runId} ${engine} brand extraction: other brands not read in ${out.unread.length} of ${read.length} answers (${out.reason})`);
+        // On a re-run, the engine's answered rows its extraction did not touch had their brands read: they are the day's answers too.
+        const answered = read.length + (kept ? kept.answers.filter((a) => a.engine === engine && a.answered && !rebrand!(a.question_id, a.engine)).length : 0);
+        gaps.push({ engine, unread: out.unread.length, answered, reason: out.reason });
+        console.warn(`[track] ${runId} ${engine} brand extraction: other brands not read in ${out.unread.length} of ${answered} answers (${out.reason})`);
       }),
     );
 
+    const brandsIn = (a: AnswerRow) => (a.response_text ? (others.get(a.engine) ?? []).filter((n) => namesSubject(a.response_text!, n)) : []);
     const answerRows = answers.map((a) => ({
       run_id: runId,
       client_domain_id: client.id,
@@ -436,7 +470,7 @@ export async function runTrackingDay(runId: string): Promise<{ status: string; s
       answered: a.answered,
       named: a.named,
       response_text: a.response_text,
-      brands: a.response_text ? (others.get(a.engine) ?? []).filter((n) => namesSubject(a.response_text!, n)) : [],
+      brands: brandsIn(a),
       citations: a.citations,
       cost: Number(a.cost.toFixed(4)),
     }));
@@ -458,6 +492,19 @@ export async function runTrackingDay(runId: string): Promise<{ status: string; s
         throw new Error(`could not store the answers: ${error.message}`);
       }
     }
+    // A stored answer whose brands were read again: only its brands, and
+    // brands_ok where the column exists, are written. One still unread is
+    // left brands_ok=false, and its engine is a gap on the error line.
+    await mapWithConcurrency(stored.filter((a) => !unread.has(a)), CONCURRENCY, async (a) => {
+      const brands = brandsIn(a);
+      const { error } = await db
+        .from("tracking_answers")
+        .update(hasBrandsOk(kept!) ? { brands, brands_ok: true } : { brands })
+        .eq("run_id", runId)
+        .eq("question_id", a.question_id)
+        .eq("engine", a.engine);
+      if (error) throw new Error(`could not store the brands read again: ${error.message}`);
+    });
 
     const serpRows = serp
       .filter((s) => !s.failed)
@@ -531,8 +578,9 @@ export async function runTrackingDay(runId: string): Promise<{ status: string; s
     await reportRunHealthSafely(day);
     return { status };
   } catch (err) {
-    // A re-run that throws leaves the day as it found it, with why.
-    await close(rerun ? restored(rerun, `re-run failed: ${message(err)}`) : { status: "failed", error: message(err) });
+    // A re-run that throws leaves the run as it found it, with why on its marker.
+    const why = `re-run failed: ${message(err)}`;
+    await close(rerun ? restored(rerun, why) : { status: "failed", error: message(err) }, rerun ? why : null);
     await reportRunHealthSafely(run.run_date as string);
     throw err;
   }

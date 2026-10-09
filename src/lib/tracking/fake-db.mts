@@ -27,12 +27,17 @@ export function fakeDb(tables: Tables, opts: { maxRows?: number; failInsert?: (t
   let nextId = 1;
   const calls: Call[] = [];
 
-  /** A column, or a `col->>key` JSON path as PostgREST reads it (text, or null). */
+  /**
+   * A column, or a JSON path as PostgREST reads it: `col->key` is the value
+   * (null when absent), and a last `->>key` is its text (or null).
+   */
   const get = (r: Row, c: string): unknown => {
-    const m = /^(\w+)->>(\w+)$/.exec(c);
-    if (!m) return r[c];
-    const o = r[m[1]!] as Row | null | undefined;
-    const v = o?.[m[2]!];
+    const m = /^(\w+)((?:->\w+)*)(?:->>(\w+))?$/.exec(c);
+    if (!m || (!m[2] && !m[3])) return r[c];
+    let v: unknown = r[m[1]!];
+    for (const key of m[2]!.split("->").filter(Boolean)) v = v && typeof v === "object" ? (v as Row)[key] : undefined;
+    if (!m[3]) return v ?? null;
+    v = v && typeof v === "object" ? (v as Row)[m[3]] : undefined;
     return v === undefined || v === null ? null : String(v);
   };
 
