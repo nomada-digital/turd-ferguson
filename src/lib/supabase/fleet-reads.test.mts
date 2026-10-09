@@ -9,6 +9,11 @@ import { blankComments, sourceFiles } from "../source-read.mts";
 /**
  * No read of a tracking table across every client is left to one page.
  *
+ * The tracking tables are the seven in TABLES. The first version (9 Oct
+ * 2026) walked five and said "a tracking table"; tracked_clusters and
+ * tracking_notes grow with the fleet the same way, and /admin/tracking read
+ * every client's clusters in one select (review of 348abbd, 9 Oct 2026).
+ *
  * PostgREST answers a select with at most db-max-rows rows - 1000 on a
  * default project - and says so nowhere (page.ts). The tracking tables grow
  * with every client and every day, and on 9 Oct 2026 (audit reliability-2)
@@ -25,8 +30,9 @@ import { blankComments, sourceFiles } from "../source-read.mts";
  * - **paged** - `.range(`, as `selectAll` and every paged read here call it;
  * - **counted** - `head: true`, which returns no rows;
  * - **limited** - `.limit(`, `.single()` or `.maybeSingle()`;
- * - **one client, run, cluster or row** - `.eq(` on client_domain_id, run_id,
- *   cluster_id, question_id or id. A client's rows are bounded by its
+ * - **one client, run, cluster, prompt, keyword or row** - `.eq(` on
+ *   client_domain_id, run_id, cluster_id, question_id, keyword_id or id. A
+ *   prompt or keyword is one client's, a client's rows are bounded by its
  *   allowance (limits.ts) and a day's by its prompts and engines, so these
  *   are not the read that grows with the fleet. `.in("client_domain_id", ...)`
  *   is not one of them: it is every client named;
@@ -42,7 +48,7 @@ import { blankComments, sourceFiles } from "../source-read.mts";
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..", "..", "..");
 
-const TABLES = ["tracked_questions", "tracked_keywords", "tracking_runs", "tracking_answers", "tracking_serp"];
+const TABLES = ["tracked_questions", "tracked_keywords", "tracked_clusters", "tracking_runs", "tracking_answers", "tracking_serp", "tracking_notes"];
 
 /** Reads across every client that may take one page, and why. Empty: a new entry is an argument, not a fix. */
 const FLEET_UNPAGED: Record<string, string> = {};
@@ -85,7 +91,7 @@ export function readsIn(file: string, src: string): Read[] {
         ? "counted"
         : /\.(limit\(|single\(\)|maybeSingle\(\))/.test(chain)
           ? "limited"
-          : /\.eq\(\s*"(client_domain_id|run_id|cluster_id|question_id|id)"/.test(chain)
+          : /\.eq\(\s*"(client_domain_id|run_id|cluster_id|question_id|keyword_id|id)"/.test(chain)
             ? "scoped"
             : null;
     out.push({ at: `${file}:${src.slice(0, m.index).split("\n").length}`, table: m[1]!, bound });
@@ -102,6 +108,10 @@ test("the probe reads a chain to its end, and classifies the shapes that are wro
   assert.equal(readsIn("f.ts", 'selectAll((a, b) => db.from("tracked_questions").select("x").is("stopped_on", null).order("id").range(a, b))')[0]!.bound, "paged");
   assert.equal(readsIn("f.ts", 'db.from("tracking_runs").select("id", { count: "exact", head: true }).in("status", s)')[0]!.bound, "counted");
   assert.equal(readsIn("f.ts", 'db.from("tracking_answers").select("x").eq("client_domain_id", c).eq("question_id", q)')[0]!.bound, "scoped");
+  // limits.ts linkKeyword: the live clusters holding one keyword, which is one client's.
+  assert.equal(readsIn("f.ts", 'db.from("tracked_clusters").select("id").eq("keyword_id", k).is("stopped_on", null)')[0]!.bound, "scoped");
+  // /admin/tracking's clusters before the review of 348abbd.
+  assert.equal(readsIn("f.ts", 'db.from("tracked_clusters").select("id").in("client_domain_id", ids).is("stopped_on", null).order("created_at", { ascending: true })')[0]!.bound, null);
   // A chain ends where its statement or argument does, so a sibling's .range() does not page it.
   const two = 'Promise.all([db.from("tracked_keywords").select("x").in("client_domain_id", ids), db.from("tracking_serp").select("y").eq("run_id", r).range(0, 9)])';
   assert.deepEqual(readsIn("f.ts", two).map((r) => r.bound), [null, "paged"]);
@@ -112,9 +122,11 @@ test("the probe reads a chain to its end, and classifies the shapes that are wro
 });
 
 test("the walk found the reads, so a clean sweep is not a blind one", () => {
-  // 9 Oct 2026: 40 selects of the five tables across the tree, 14 of them paged.
-  assert.ok(READS.length >= 30, `only ${READS.length} tracking-table selects found - the walk has drifted`);
-  assert.ok(READS.filter((r) => r.bound === "paged").length >= 10, "the paged reads are not being seen");
+  // 9 Oct 2026: 40 selects of the five tables across the tree, 14 of them paged. Later that day
+  // (review of 348abbd), with tracked_clusters and tracking_notes walked too: 60 selects, 17 paged.
+  assert.ok(READS.length >= 50, `only ${READS.length} tracking-table selects found - the walk has drifted`);
+  assert.ok(READS.filter((r) => r.bound === "paged").length >= 14, "the paged reads are not being seen");
+  assert.ok(READS.filter((r) => r.table === "tracked_clusters").length >= 12, "the cluster reads are not being seen");
   for (const at of ["src/lib/tracking/run-health.ts", "src/app/admin/tracking/page.tsx", "src/lib/tracking/runner.ts"]) {
     assert.ok(READS.some((r) => r.at.startsWith(`${at}:`)), `${at} has no tracking read the walk can see`);
   }
