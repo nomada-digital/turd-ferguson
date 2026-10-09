@@ -18,8 +18,8 @@ import { type SettingsData, loadSettings } from "./settings-data.ts";
 import { orderKeyword } from "./order-keyword.ts";
 import { loadOrderKeyword, loadSetupConfirmed } from "./setup-data.ts";
 import { type UpgradeContext, loadUpgradeContext } from "./upgrade-context.ts";
-import { type ClusterNote, type Compare, type OverviewData, loadClusterNotes, loadLatestAnswers, loadOverview, loadStructure } from "./overview-data.ts";
-import { type ReadOpts, type Structure, shapeRead } from "./read-shape.ts";
+import { type ClusterNote, type Compare, type OverviewData, loadAnswerDay, loadClusterNotes, loadOverview, loadStructure } from "./overview-data.ts";
+import { type DayPlan, type ReadOpts, type StoredAnswer, type Structure, shapeAnswerDay, shapeRead } from "./read-shape.ts";
 
 /**
  * The dashboard's data layer (R93, 29 Sep 2026; BRIEF-2 T9): one interface,
@@ -37,8 +37,8 @@ export interface TrackingRepo {
   loadOverview(clientId: string, range: Range, compare: Compare, opts?: ReadOpts): Promise<OverviewData>;
   /** The clusters, prompts and keywords, with no answer read (8 Oct 2026, audit perf-4). */
   structure(clientId: string): Promise<Structure>;
-  /** One prompt's answers, with their words, at its latest check on or before `to` (T7 part 3b). */
-  latestAnswers(clientId: string, questionId: string, to: Day): Promise<LatestAnswers>;
+  /** One prompt's answers, with their words, at the check the plan names: `?day=`'s, or the latest on or before the range's end (T7 part 3b; DB-2). */
+  answerDay(clientId: string, plan: DayPlan): Promise<LatestAnswers>;
   /** Notes on these prompts, any date, newest first (T7 part 4a). */
   clusterNotes(clientId: string, questionIds: string[]): Promise<ClusterNote[]>;
   /** The upsell mode and this member's hidden prompts (T11 part 4). */
@@ -57,7 +57,7 @@ export interface TrackingRepo {
   orderKeyword(clientId: string): Promise<string | null>;
 }
 
-const supabaseRepo: TrackingRepo = { sessionEmail, clientsFor, linkState: loadLinkState, setupConfirmed: loadSetupConfirmed, orderKeyword: loadOrderKeyword, loadOverview, structure: loadStructure, latestAnswers: loadLatestAnswers, clusterNotes: loadClusterNotes, upgradeContext: loadUpgradeContext, placements: loadPlacements, settings: loadSettings, today: () => trackingDay() };
+const supabaseRepo: TrackingRepo = { sessionEmail, clientsFor, linkState: loadLinkState, setupConfirmed: loadSetupConfirmed, orderKeyword: loadOrderKeyword, loadOverview, structure: loadStructure, answerDay: loadAnswerDay, clusterNotes: loadClusterNotes, upgradeContext: loadUpgradeContext, placements: loadPlacements, settings: loadSettings, today: () => trackingDay() };
 
 /**
  * The fixture as served, and as R168's writes leave it. On globalThis, because
@@ -119,20 +119,21 @@ const fixtureRepo: TrackingRepo = {
     const d = fixture().data;
     return clientId === fixture().client.id ? { clusters: d.clusters, questions: d.questions, keywords: d.keywords } : { clusters: [], questions: [], keywords: [] };
   },
-  async latestAnswers(clientId, questionId, to) {
+  async answerDay(clientId, plan) {
     const f = fixture();
     if (clientId !== f.client.id) return { day: null, rows: [] };
-    const mine = f.data.answers.filter((a) => a.question_id === questionId && a.run_date <= to);
-    // As loadLatestAnswers picks it (audit data-3): the latest day with an answer, so a failed day's blank rows never stand in.
-    const day = mine.reduce<Day | null>((d, a) => (a.answered && (d === null || a.run_date > d) ? a.run_date : d), null);
+    // The fixture's rows as tracking_answers holds them; the day is picked, and the rows cut, by read-shape.ts shapeAnswerDay.
     // The words exist for one check only (today's, or textsOn); an earlier day shows its verdicts without them.
     const at = ["05:10", "05:11", "05:12", "05:12"];
-    return {
-      day,
-      rows: mine
-        .filter((a) => a.run_date === day)
-        .map((a, i) => ({ ...a, text: day === (f.textsOn ?? f.today) ? (f.texts[`${questionId} ${a.engine}`] ?? null) : null, at: `${day}T${at[i % 4]}:00Z` })),
-    };
+    const nth = new Map<Day, number>();
+    const stored: StoredAnswer[] = f.data.answers
+      .filter((a) => a.question_id === plan.question)
+      .map((a) => {
+        const i = nth.get(a.run_date) ?? 0;
+        nth.set(a.run_date, i + 1);
+        return { ...a, response_text: a.run_date === (f.textsOn ?? f.today) ? (f.texts[`${plan.question} ${a.engine}`] ?? null) : null, created_at: `${a.run_date}T${at[i % 4]}:00Z` };
+      });
+    return shapeAnswerDay(stored, plan);
   },
   async clusterNotes(clientId, questionIds) {
     const f = fixture();

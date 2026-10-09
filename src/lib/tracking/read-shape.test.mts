@@ -10,7 +10,7 @@ import { chartSeries, citeRows, placementsView } from "./placement-figures.ts";
 import { urlKey } from "./placements.ts";
 import { presets } from "./date-range.ts";
 import { PAGE } from "../supabase/page.ts";
-import { ANSWER_SELECT, type AnswersQuery, type AnswersTable, type ReadOpts, answerPlan, answerRow, boundStated, clusterQuestionIds, monthSlice, planPrompts, rangeFloor, readAnswers, reportSpan, selectColumns, shapeRead, withoutBrandsOk } from "./read-shape.ts";
+import { ANSWER_SELECT, DAY_SELECT, type AnswersQuery, type AnswersTable, type DayQuery, type DayTable, type ReadOpts, type StoredAnswer, answerPlan, answerRow, boundStated, clusterQuestionIds, dayPlan, monthSlice, planPrompts, rangeFloor, readAnswerDay, readAnswers, reportSpan, selectColumns, shapeAnswerDay, shapeRead, withoutBrandsOk } from "./read-shape.ts";
 import { monthFigures, reportMonths } from "./report-months.ts";
 import { askedOnFor, runNote } from "./run-note.ts";
 
@@ -225,6 +225,150 @@ test("readAnswers reads again without brands_ok when the table does not have it 
   await assert.rejects(readAnswers(postgrest(f.data.answers, f.client.id, "brands_ok_v2").table, odd, null, where), /brands_ok_v2 does not exist/, "a select without brands_ok is not retried");
   assert.equal(withoutBrandsOk(ANSWER_SELECT.full), "run_date, question_id, engine, answered, named, brands, citations");
   for (const cols of [ANSWER_SELECT.cites, ANSWER_SELECT.verdicts]) assert.equal(withoutBrandsOk(cols), cols, "the narrow shapes never name it");
+});
+
+/**
+ * DB-2 (9 Oct 2026): the one-cluster page's answers panel reads one prompt's
+ * answers at one check - `?day=`'s, or the latest with an answer. Its read
+ * moved here from overview-data.ts so it runs on the same kind of fake as
+ * readAnswers: a table holding two clients' rows, `client_domain_id` on each,
+ * serving only the selected columns of the rows its filters keep - by `id`
+ * when ordered, the planner's order (reversed here) when not - and refusing a
+ * select that names a column it lacks, as PostgREST does (42703).
+ */
+function dayPostgrest(rows: readonly Record<string, unknown>[], lacks?: string) {
+  const calls: string[][] = [];
+  const table: DayTable = () => ({
+    select(columns) {
+      const log = [`select ${columns}`];
+      calls.push(log);
+      const keep: ((r: Record<string, unknown>) => boolean)[] = [];
+      let by: { column: string; up: boolean } | null = null;
+      let max = Number.MAX_SAFE_INTEGER;
+      const q: DayQuery = {
+        eq: (c, v) => (log.push(`eq ${c}`), keep.push((r) => r[c] === v), q),
+        lte: (c, v) => (log.push(`lte ${c}`), keep.push((r) => String(r[c]) <= v), q),
+        order: (c, o) => (log.push(`order ${c}${o.ascending ? "" : " desc"}`), (by = { column: c, up: o.ascending }), q),
+        limit: (n) => (log.push(`limit ${n}`), (max = n), q),
+        then: (ok, fail) => {
+          if (lacks && columns.split(",").some((c) => c.trim() === lacks)) return Promise.resolve({ data: null, error: { message: `column tracking_answers.${lacks} does not exist` } }).then(ok, fail);
+          const all = rows.map((r, id) => ({ id, ...r })).filter((r) => keep.every((k) => k(r)));
+          const o = by;
+          const cmp = (a: Record<string, unknown>, b: Record<string, unknown>) => {
+            const [x, y] = [a[o!.column], b[o!.column]];
+            const d = typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y));
+            return o!.up ? d : -d;
+          };
+          const ordered = o ? [...all].sort(cmp) : all.reverse();
+          return Promise.resolve({ data: ordered.slice(0, max).map((r) => selectColumns(r, columns)), error: null }).then(ok, fail);
+        },
+      };
+      return q;
+    },
+  });
+  return { table, calls };
+}
+
+/** One fixture state's answers as tracking_answers holds them for the panel: the words on the fixture's one check with words, and a stored time. */
+function stored(f: Fixture): StoredAnswer[] {
+  const on = f.textsOn ?? f.today;
+  return f.data.answers.map((a, i) => ({ ...a, response_text: a.run_date === on ? (f.texts[`${a.question_id} ${a.engine}`] ?? null) : null, created_at: `${a.run_date}T0${5 + (i % 2)}:1${i % 4}:00Z` }));
+}
+
+/** Two clients in one table: this one's rows, and another's - the same prompt ids, every verdict the other way. */
+function twoClients(rows: readonly StoredAnswer[], clientId: string) {
+  return [...rows.map((a) => ({ client_domain_id: clientId, ...a })), ...rows.map((a) => ({ client_domain_id: "someone-else", ...a, named: !a.named, response_text: "Not this client's words." }))];
+}
+
+test("DB-2: readAnswerDay, the panel's read, returns on PostgREST exactly what shapeAnswerDay gives the fixture", async () => {
+  let reads = 0;
+  let latest = 0;
+  let blank = 0;
+  let none = 0;
+  for (const state of ["default", "failed", "partial", "young", "stopped", "brands-unread", "pilot-mixed", "ungrouped"]) {
+    const f = fixtures.find(([s]) => s === state)![1];
+    const rows = stored(f);
+    const db = dayPostgrest(twoClients(rows, f.client.id));
+    const prompts = [...new Set(f.data.answers.map((a) => a.question_id))].filter((_, i) => i < 6 || i % 9 === 0);
+    // Latest on or before: today, ten days back, and before any answer; picked: today, yesterday, a mid day, the first, and a day with none.
+    const plans = (q: string) => [
+      ...[f.today, addDays(f.today, -10), "2026-08-01"].map((to) => dayPlan(q, to, null)),
+      ...[f.today, addDays(f.today, -1), "2026-09-14", "2026-08-05", "2026-07-01"].map((d) => dayPlan(q, f.today, d)),
+    ];
+    for (const q of prompts) {
+      for (const plan of plans(q)) {
+        const got = await readAnswerDay(db.table, plan, f.client.id);
+        const want = shapeAnswerDay(rows, plan);
+        assert.deepEqual(got, want, `${state} ${q} ${plan.day ?? `latest to ${plan.to}`}`);
+        reads++;
+        if (plan.day === null && got.day) latest++;
+        if (got.rows.length && got.rows.every((r) => !r.answered)) blank++;
+        if (plan.day && !got.rows.length) none++;
+        assert.ok(got.rows.every((r) => r.text !== "Not this client's words."), "another client's row was read");
+      }
+    }
+  }
+  assert.ok(reads >= 400, `only ${reads} reads compared`);
+  assert.ok(latest >= 100 && none >= 50, `${latest} latest days found, ${none} picked days with no check`);
+  assert.ok(blank >= 5, `${blank} failed checks read - the failed state's blank day went untested`);
+});
+
+test("DB-2: the latest skips a failed check; a picked day is read as it is; each read is one client's one prompt", async () => {
+  const f = fixtures.find(([s]) => s === "failed")![1];
+  const rows = stored(f);
+  const db = dayPostgrest(twoClients(rows, f.client.id));
+  const latest = await readAnswerDay(db.table, dayPlan("q1-1", f.today, null), f.client.id);
+  assert.equal(latest.day, f.textsOn, "the latest is the last check with an answer, not today's failed one");
+  assert.ok(latest.rows.some((r) => r.answered && r.text), "with its words");
+  assert.deepEqual(db.calls[0], ["select run_date", "eq client_domain_id", "eq question_id", "eq answered", "lte run_date", "order run_date desc", "limit 1"]);
+  assert.deepEqual(db.calls[1], [`select ${DAY_SELECT}`, "eq client_domain_id", "eq question_id", "eq run_date", "order id"]);
+  const failedDay = await readAnswerDay(db.table, dayPlan("q1-1", f.today, f.today), f.client.id);
+  assert.equal(failedDay.day, f.today);
+  assert.ok(failedDay.rows.length > 0 && failedDay.rows.every((r) => !r.answered), "today's failed check, as stored: every read unanswered");
+  assert.equal(db.calls.length, 3, "a picked day is one read, not two");
+  assert.deepEqual(await readAnswerDay(db.table, dayPlan("q1-1", f.today, "2026-07-01"), f.client.id), { day: "2026-07-01", rows: [] }, "a day with no check: the day, no rows");
+  // Another client's id, or a prompt that is not this client's, reads nothing - the page passes its own, never the URL's.
+  assert.deepEqual(await readAnswerDay(dayPostgrest(rows.map((a) => ({ client_domain_id: f.client.id, ...a }))).table, dayPlan("q1-1", f.today, null), "someone-else"), { day: null, rows: [] });
+  assert.deepEqual(await readAnswerDay(db.table, dayPlan("not-a-prompt", f.today, f.today), f.client.id), { day: f.today, rows: [] });
+});
+
+test("DB-2: the panel's read goes again without brands_ok while the column is missing, and only then", async () => {
+  const f = fixtures.find(([s]) => s === "brands-unread")![1];
+  const before = stored(f).map((a) => Object.fromEntries(Object.entries(a).filter(([k]) => k !== "brands_ok")) as StoredAnswer);
+  const db = dayPostgrest(before.map((a) => ({ client_domain_id: f.client.id, ...a })), "brands_ok");
+  const plan = dayPlan("q1-1", f.today, null);
+  const got = await readAnswerDay(db.table, plan, f.client.id);
+  assert.deepEqual(got, shapeAnswerDay(before, plan));
+  assert.ok(got.rows.length > 0 && got.rows.every((r) => !("brands_ok" in r)), "every row reads as read");
+  assert.deepEqual(db.calls.map((c) => c[0]), ["select run_date", `select ${DAY_SELECT}`, `select ${withoutBrandsOk(DAY_SELECT)}`]);
+  assert.equal(withoutBrandsOk(DAY_SELECT), "engine, answered, named, response_text, brands, citations, created_at", "the columns loadLatestAnswers read before the column");
+  const live = await readAnswerDay(dayPostgrest(stored(f).map((a) => ({ client_domain_id: f.client.id, ...a }))).table, plan, f.client.id);
+  assert.deepEqual(live, shapeAnswerDay(stored(f), plan));
+  await assert.rejects(readAnswerDay(dayPostgrest(before.map((a) => ({ client_domain_id: f.client.id, ...a })), "response_text").table, plan, f.client.id), /response_text does not exist/, "another missing column is not read past");
+});
+
+test("census DB-2: the panel's read is read-shape.ts's in Supabase and on the fixture, on the page's own client and prompt", () => {
+  const data = src("./overview-data.ts");
+  const at = data.indexOf("export async function loadAnswerDay(");
+  const load = data.slice(at, data.indexOf("\n}\n", at));
+  assert.ok(at >= 0, "loadAnswerDay not found");
+  assert.ok(load.includes('return readAnswerDay((() => db.from("tracking_answers")) as unknown as DayTable, plan, clientId);'), "loadAnswerDay no longer reads through readAnswerDay - hold its read to shapeAnswerDay again before updating this census");
+  assert.doesNotMatch(data, /\.select\([^)]*response_text/, "overview-data.ts selects the words itself again");
+  const repo = src("./repo.ts");
+  assert.match(repo, /answerDay: loadAnswerDay/);
+  assert.match(repo, /return shapeAnswerDay\(stored, plan\);/);
+  assert.match(repo, /if \(clientId !== f\.client\.id\) return \{ day: null, rows: \[\] \};\n[^]*?return shapeAnswerDay/, "the fixture answers only its own client");
+  // The scoping: the client is the session's member client, the prompt one of this cluster's, the day the only thing the URL moves.
+  const page = src("../../app/app/[client]/clusters/[cluster]/page.tsx");
+  for (const line of [
+    "const client = clients.find((c) => c.slug === slug);",
+    "const picked = detail.card.prompts[prompt];",
+    "const day = pickedDay(sp.day, today);",
+    'picked && detail.card.status !== "pending" ? repo.answerDay(client.id, dayPlan(picked.id, range.to, day)) : null,',
+  ]) {
+    assert.ok(page.includes(line), `the one-cluster page: "${line}" is gone`);
+  }
+  assert.equal((page.match(/repo\.answerDay\(/g) ?? []).length, 1, "one panel read");
 });
 
 test("census: loadOverview takes its plan, prompts and read from read-shape.ts, and the fixture repo its shapeRead", () => {

@@ -35,11 +35,13 @@ import { whoIsNamedCard } from "@/lib/tracking/named-figures";
 import type { Compare, OverviewData } from "@/lib/tracking/overview-data";
 import { type PlacementRow, chartMarkers } from "@/lib/tracking/placement-figures";
 import { MISSING_READS, brandGapNote, failedTodayNote, lostReads, runNote, sovGapNote, todayRun } from "@/lib/tracking/run-note";
+import { answerHref, answersByPromptDay, dayAnswerIn } from "@/lib/tracking/evidence";
 
 import ClusterChart from "./ClusterChart";
 import DatePicker from "./DatePicker";
 import Fig from "./Fig";
 import OverviewChart, { type ChartDay } from "./OverviewChart";
+import GridKeys from "./GridKeys";
 import ScrollCue from "./ScrollCue";
 import { SEE_ALL, navFrom } from "./nav";
 
@@ -360,6 +362,16 @@ export default function Overview({
   // read "not tracked yet" in the heat grid, though the cluster was tracked and only the check missed.
   const gapLabel = (startedOn: Day, d: Day) => (d >= startedOn ? "no reading" : "not tracked yet");
   const heatGap = heatRows.some((c) => gridDays.some((d, col) => !c.heat[gridFrom + col] && d >= c.started_on));
+  // DB-2 (9 Oct 2026): a cell with a reading opens one of the answers it counts, on the one-cluster page at that
+  // day and engine (evidence.ts dayAnswerIn) - a name when the cell counted one. None on /app/parity (no detailHref).
+  // Review of 95a8747 (same day): only the days the grid draws are indexed, not the range's comparison period too.
+  const byPromptDay = detailHref && heatRows.length ? answersByPromptDay(data.answers, { from: gridDays[0]!, to: gridDays[gridDays.length - 1]! }) : null;
+  const heatW = gridDays.length * 14 - 3;
+  const heatH = heatRows.length * 14 - 3;
+  const heatOpens = (c: ClusterCard, d: Day) => {
+    const at = byPromptDay && clustersPath ? dayAnswerIn(byPromptDay, c.prompts.map((p) => p.id), d, engines) : null;
+    return at ? answerHref(`${clustersPath}/${encodeURIComponent(c.id)}`, { ...rangeQuery, prompt: String(at.prompt) }, at) : null;
+  };
   const questionsAnswered = o.questions.den;
   const direction = (d: number) => (d > 0 ? "up from" : d < 0 ? "down from" : "the same as");
   const headlineRate = fig.now;
@@ -708,12 +720,28 @@ export default function Overview({
                   labels, it still fits the card (.app-heat-fit). */}
               <div id="ov-heat-scroll" className="app-heat-scroll app-heat-fit" role="group" aria-label="Daily checks by cluster" style={{ minWidth: 0, flex: "0 1 auto", overflowX: "auto" }}>
               <div className="app-heat-in" style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                <svg width={gridDays.length * 14 - 3} height={heatRows.length * 14 - 3} viewBox={`0 0 ${gridDays.length * 14 - 3} ${heatRows.length * 14 - 3}`} style={{ display: "block" }} role="img" aria-label={`Daily share of answers naming ${brand}, one row per cluster, ${formatDay(gridDays[0]!)} to ${formatDay(gridDays[gridDays.length - 1]!, true)}`}>
+                {/* DB-2 (9 Oct 2026): with links in it the grid is a group, not an image - an image's children are not read. */}
+                <svg width={gridDays.length * 14 - 3} height={heatRows.length * 14 - 3} viewBox={`0 0 ${gridDays.length * 14 - 3} ${heatRows.length * 14 - 3}`} style={{ display: "block" }} role={detailHref ? "group" : "img"} aria-label={`Daily share of answers naming ${brand}, one row per cluster, ${formatDay(gridDays[0]!)} to ${formatDay(gridDays[gridDays.length - 1]!, true)}${detailHref ? ". Each day opens its answers; the arrow keys move between days" : ""}`}>
                   {heatRows.map((c, row) =>
                     gridDays.map((d, col) => {
                       const cell = c.heat[gridFrom + col] ?? null;
                       const label = `${c.keyword ?? c.name}, ${formatDay(d)}: ${cell ? `${cell.pct}% (${cell.num} of ${cell.den})` : gapLabel(c.started_on, d)}`;
-                      return cell ? (
+                      const to = cell ? heatOpens(c, d) : null;
+                      // DB-2: a link the size of the cell's whole pitch, so a tap between two squares still lands on one -
+                      // held inside the grid at its edges (review of 95a8747, 9 Oct 2026), where the SVG cut the focus ring.
+                      // Its one name is its <title>, which is also the hover tip: an aria-label beside it read it twice.
+                      // Known gap, 9 Oct 2026 (target size): the pitch is 14px here and about 11px on a phone, under
+                      // WCAG 2.5.8's 24px. Not restructured: each cell's answers are also one tap from the one-cluster
+                      // page's day grid, whose squares are 24px wide.
+                      const hx = Math.max(0, col * 14 - 1.5);
+                      const hy = Math.max(0, row * 14 - 1.5);
+                      return to && cell ? (
+                        <a key={`${c.id}-${d}`} href={to} className="app-heat-a" data-row={row} data-col={col}>
+                          <title>{`${c.keyword ?? c.name}, ${formatDay(d, true)}: named you in ${cell.num} of ${cell.den} answers (${cell.pct}%). Open that day's answers.`}</title>
+                          <rect x={hx} y={hy} width={Math.min(heatW, col * 14 + 12.5) - hx} height={Math.min(heatH, row * 14 + 12.5) - hy} fill="transparent" />
+                          <rect x={col * 14} y={row * 14} width={11} height={11} rx={3} fill={heat(cell.pct)} />
+                        </a>
+                      ) : cell ? (
                         <rect key={`${c.id}-${d}`} x={col * 14} y={row * 14} width={11} height={11} rx={3} fill={heat(cell.pct)}>
                           <title>{label}</title>
                         </rect>
@@ -734,6 +762,8 @@ export default function Overview({
               </div>
             </div>
             <ScrollCue target="ov-heat-scroll" color={D.quiet} phone={false}>{`Swipe for the earlier days, back to ${formatDay(gridDays[0]!)}.`}</ScrollCue>
+            {/* DB-2: 280 day links are one tab stop with script, the arrow keys moving between days and clusters. */}
+            {detailHref ? <GridKeys target="ov-heat-scroll" version={`${range.from} ${range.to} ${compareMode}`} /> : null}
             <div className="app-hide-sm" style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "12px", color: D.quiet, flexWrap: "wrap" }}>
               {/* DS74 (2 Oct 2026): "up to" once a shown day had fewer answers - a partial check or a stopped prompt - so the count is never one a cell was not read on. */}
               {`Share of the cluster's ${heatRows.some((c) => gridDays.some((_, col) => { const h = c.heat[gridFrom + col]; return h && h.den < 5 * engines.length; })) ? "up to " : ""}${5 * engines.length} answers naming you that day`}

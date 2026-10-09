@@ -65,7 +65,11 @@ export function noteReturn(slug: string, sp: URLSearchParams): string | null {
   const compare = sp.get("compare");
   if (compare === "month" || compare === "none") keep.set("compare", compare);
   const prompt = sp.get("prompt");
-  keep.set("prompt", prompt && /^\d$/.test(prompt) ? prompt : "0");
+  // Two digits, as promptIndex reads it (review of 95a8747, 9 Oct 2026); the page bounds it by its list.
+  keep.set("prompt", prompt && /^\d{1,2}$/.test(prompt) ? prompt : "0");
+  // DB-2 (9 Oct 2026): a note added while reading one day's answers returns to that day; the page judges the day again (pickedDay).
+  const day = sp.get("day");
+  if (day && DAY.test(day)) keep.set("day", day);
   const engine = sp.get("engine");
   if (engine && /^[a-z_]{1,20}$/.test(engine)) keep.set("engine", engine);
   return appPath(`/${slug}/clusters/${cluster}?${keep}`);

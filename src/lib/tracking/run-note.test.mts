@@ -102,11 +102,18 @@ test("8 Oct 2026 (audit data-3 / reliability-3): the failed and partial fixture 
 });
 
 test("8 Oct 2026 (audit data-3): Latest answers picks the latest day with an answer, in Supabase and on the fixture", () => {
-  const loader = readFileSync(new URL("./overview-data.ts", import.meta.url), "utf8");
-  const pick = loader.slice(loader.indexOf("export async function loadLatestAnswers"), loader.indexOf(".limit(1);", loader.indexOf("export async function loadLatestAnswers")));
+  // Moved 9 Oct 2026 (DB-2): the pick left overview-data.ts loadLatestAnswers and repo.ts for read-shape.ts, as
+  // readAnswerDay (which loadAnswerDay runs on tracking_answers) and shapeAnswerDay (which the fixture repo runs),
+  // so read-shape.test.mts can hold the two equal on a fake PostgREST. The rule is unchanged; this reads it there.
+  const shape = readFileSync(new URL("./read-shape.ts", import.meta.url), "utf8");
+  const at = shape.indexOf("export async function readAnswerDay");
+  const pick = shape.slice(at, shape.indexOf(".limit(1);", at));
+  assert.ok(at >= 0 && pick.length > 100, "readAnswerDay's latest-day read not found");
   assert.match(pick, /\.eq\("answered", true\)/, "a failed run's unanswered rows are not the latest check");
-  const repo = readFileSync(new URL("./repo.ts", import.meta.url), "utf8");
-  assert.match(repo, /a\.answered && \(d === null \|\| a\.run_date > d\)/, "the fixture picks the same day");
+  const copy = shape.slice(shape.indexOf("export function shapeAnswerDay"), shape.indexOf("\n}\n", shape.indexOf("export function shapeAnswerDay")));
+  assert.match(copy, /a\.answered && \(d === null \|\| a\.run_date > d\)/, "the fixture picks the same day");
+  assert.match(readFileSync(new URL("./overview-data.ts", import.meta.url), "utf8"), /return readAnswerDay\(/, "Supabase reads through it");
+  assert.match(readFileSync(new URL("./repo.ts", import.meta.url), "utf8"), /return shapeAnswerDay\(stored, plan\);/, "the fixture reads through its copy");
 });
 
 test("8 Oct 2026 (review of audit data-3): on a range that ends before today, a failed check today claims nothing about the range", () => {

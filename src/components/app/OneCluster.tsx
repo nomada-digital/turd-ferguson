@@ -12,12 +12,15 @@ import { ENGINE_SPECS, type Engine } from "@/lib/scan/engines";
 import { type ClusterDetail, type ClusterInput, clusterChart, daysOfLine, positionMove, promptBrands, promptStrip } from "@/lib/tracking/cluster-figures";
 import { checkTime } from "@/lib/tracking/check-time";
 import { type Day, type Range, type Rate, addDays, basis as basisLine, brandGaps, comparisonLabel, daysIn, firstCheckDay, formatDay, periodPair, pointsDelta, resolveComparison } from "@/lib/tracking/figures";
-import { type AnswerTab, type LatestAnswers, answerTabs, brandRuns } from "@/lib/tracking/latest-answers";
+import { type AnswerTab, type LatestAnswers, answerTabs, brandRuns, pickedDayLine } from "@/lib/tracking/latest-answers";
 import { NOTE_SAID, type NoteState } from "@/lib/tracking/note";
 import type { ClusterNote, Compare, OverviewData } from "@/lib/tracking/overview-data";
-import { askedOnFor, latestAnswersNote, lostReads, runNote } from "@/lib/tracking/run-note";
+import { askedOnFor, latestAnswersNote, lostReads, runNote, todayRun } from "@/lib/tracking/run-note";
+import { answerAnchor, answerHref } from "@/lib/tracking/evidence";
 
+import AnswerFocus from "./AnswerFocus";
 import ClusterChart from "./ClusterChart";
+import GridKeys from "./GridKeys";
 import Fig from "./Fig";
 import ScrollCue from "./ScrollCue";
 import { PagePath } from "./PagePath";
@@ -31,6 +34,12 @@ import { Chip, PositionChip, noChange } from "./Overview";
  * prompt `?prompt=` picks, every check day by day, then what each engine
  * said at the latest check (`?engine=`, T7 part 3b). Each prompt row and
  * engine tab is a link, so picking works with JS off. Notes follow.
+ *
+ * DB-2 (9 Oct 2026): every square of the day grid is a link to that day's
+ * answer from that engine (`?day=&engine=`, ending on the answer's anchor,
+ * evidence.ts), and so are Who is named's, Cited pages' and the Overview's
+ * heat map's. With `?day=` the panel shows that check, says so, and links
+ * back to the latest.
  */
 
 const CARD: React.CSSProperties = { background: T.surface, border: `1px solid ${T.line}`, borderRadius: "18px" };
@@ -63,6 +72,7 @@ export default function OneCluster({
   total,
   prompt,
   latest,
+  day,
   engine,
   notes,
   canWrite,
@@ -86,8 +96,10 @@ export default function OneCluster({
   total: number;
   /** The picked prompt, 0-based, already clamped to the cluster's prompts. */
   prompt: number;
-  /** The picked prompt's latest check (T7 part 3b), and the engine tab `?engine=` picks. */
+  /** The picked prompt's latest check (T7 part 3b), or the `day`'s, and the engine tab `?engine=` picks. */
   latest: LatestAnswers | null;
+  /** DB-2: the check `?day=` picks (latest-answers.ts pickedDay), whose answers `latest` then holds; null for the latest. */
+  day: Day | null;
   engine: string;
   /** Notes on the cluster's prompts, newest first (T7 part 4a). */
   notes: ClusterNote[];
@@ -122,7 +134,10 @@ export default function OneCluster({
   const next = checkTime(addDays(today, 1), market);
   const rangeQuery = { from: range.from, to: range.to, ...(compareMode === "prev" ? {} : { compare: compareMode }) };
   const promptHref = (i: number) => `?${new URLSearchParams({ ...rangeQuery, prompt: String(i), ...(engine === engines[0] ? {} : { engine }) })}`;
-  const engineHref = (e: string) => `?${new URLSearchParams({ ...rangeQuery, prompt: String(prompt), ...(e === engines[0] ? {} : { engine: e }) })}`;
+  // DB-2: a picked day stays picked across the engine tabs; picking another prompt goes back to its latest.
+  const engineHref = (e: string) => `?${new URLSearchParams({ ...rangeQuery, prompt: String(prompt), ...(day ? { day, engine: e } : e === engines[0] ? {} : { engine: e }) })}`;
+  const latestHref = `?${new URLSearchParams({ ...rangeQuery, prompt: String(prompt), ...(engine === engines[0] ? {} : { engine }) })}#${answerAnchor(engine)}`;
+  const dayHref = (d: Day, e: string) => answerHref("", { ...rangeQuery, prompt: String(prompt) }, { day: d, engine: e });
   const back = `${clustersPath}?${new URLSearchParams(rangeQuery)}`;
   const where = market === "UK" ? "the United Kingdom" : "the United States";
   const days = daysIn(range);
@@ -130,13 +145,17 @@ export default function OneCluster({
   const stripDays = { "--days": days.length } as React.CSSProperties;
   const P = c.prompts[prompt] ?? null;
   const strip = P ? promptStrip({ answers: data.answers, range, engines }, P.id) : [];
+  // DB-2: a day some engine answered this prompt; its squares open that check, an engine that did not answer included.
+  const checked = new Set(days.filter((_, k) => strip.some((r) => r.cells[k] !== null)));
   const brands = P ? promptBrands({ answers: data.answers, range }, P.id, brand) : null;
   // 8 Oct 2026 (audit data-6): promptBrands leaves out answers whose other brands were not read.
   const brandsUnread = P ? brandGaps(data.answers.filter((a) => a.question_id === P.id), range).reduce((s, g) => s + g.answers, 0) : 0;
   const top = Math.max(1, ...(brands?.rows.map((b) => b.n) ?? []));
   const tabs = latest?.day ? answerTabs(latest.rows, engines, brand, market) : [];
   const tab = tabs.find((t) => t.engine === engine) ?? tabs[0] ?? null;
-  const latestNote = latest?.day ? latestAnswersNote(data.runs, latest.day, range, today) : null;
+  const latestNote = latest?.day && !day ? latestAnswersNote(data.runs, latest.day, range, today) : null;
+  // DB-2: a picked day with no row stored for this prompt - no tabs' verdicts to give, only that.
+  const noCheck = !!day && !!latest && latest.rows.length === 0;
   const kw = c.keyword ?? c.name;
   // DS66 (2 Oct 2026, R173 pass 7): a pending cluster read "Not in the top 20" before its first check; the prompt rows' words.
   // Audit data-7 (8 Oct 2026): "Not in the top 20" only for a keyword read and unranked, not one with no reading in the range.
@@ -358,7 +377,7 @@ export default function OneCluster({
               </h2>
               <p style={{ margin: 0, fontSize: "14px", color: T.ink }}>{`${P.angle ? `${cap(P.angle)}: ` : ""}${P.text}`}</p>
               {/* DS63 (2 Oct 2026, R173 pass 7): a pending cluster drew 28 empty squares and four "-" with nothing saying when they fill. */}
-              {strip.every((r) => !r.answered) ? <p style={{ margin: 0, fontSize: "13px", color: T.soft }}>{pending ? `First check tomorrow at ${next}. A square fills in for each engine every day from then.` : "No check of this prompt in this range. Pick another range to see its days."}</p> : null}
+              {strip.every((r) => !r.answered) ? <p style={{ margin: 0, fontSize: "13px", color: T.soft }}>{pending ? `First check tomorrow at ${next}. A square fills in for each engine every day from then.` : "No check of this prompt in this range. Pick another range to see its days."}</p> : <p style={{ margin: 0, fontSize: "13px", color: T.soft }}>Pick a square to read what that engine said that day.<span className="sr-only"> The arrow keys move between the squares.</span></p>}
             </div>
             <span style={{ display: "flex", alignItems: "center", gap: "16px", fontSize: "13px", color: T.soft, flexShrink: 0 }}>
               <span style={{ display: "flex", alignItems: "center", gap: "6px" }}>
@@ -371,22 +390,38 @@ export default function OneCluster({
               </span>
             </span>
           </div>
-          <div id="strip-scroll" className="app-strip-scroll" role="group" aria-labelledby="strip-h" tabIndex={0} style={{ display: "flex", flexDirection: "column", gap: "14px", overflowX: "auto", minWidth: 0 }}>
-          {strip.map((r) => (
+          {/* DB-2 (9 Oct 2026): 4px above and below, so a square's focus ring and the picked square's ring are not cut by the scroller. */}
+          <div id="strip-scroll" className="app-strip-scroll" role="group" aria-labelledby="strip-h" tabIndex={0} style={{ display: "flex", flexDirection: "column", gap: "14px", overflowX: "auto", minWidth: 0, padding: "4px 0" }}>
+          {strip.map((r, ri) => (
             <div key={r.engine} className="app-strip-row" style={{ display: "grid", gridTemplateColumns: "170px minmax(0, 1fr) 92px", alignItems: "center", gap: "16px", ...stripDays }}>
               <span className="app-strip-lab" style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "14px", fontWeight: 600 }}>
                 <EngineLogo engine={r.engine as Engine} size={20} />
                 <span className="app-strip-name">{ENGINE_SPECS[r.engine as Engine].label}</span>
               </span>
               <span style={{ display: "flex", gap: "4px" }}>
-                {r.cells.map((x, k) => (
-                  <span
-                    key={days[k]}
-                    title={`${formatDay(days[k]!)}: ${x === null ? "no answer" : x ? "named" : "not named"}`}
-                    className="app-strip-cell"
-                    style={{ flex: "1 1 0", maxWidth: "22px", height: "28px", borderRadius: "5px", boxSizing: "border-box", background: x ? T.accent : x === false ? T.hair : T.surface, border: x === null ? `1px dashed ${T.line}` : undefined }}
-                  />
-                ))}
+                {r.cells.map((x, k) => {
+                  const d = days[k]!;
+                  // DB-2 (9 Oct 2026): the day, the engine and the outcome in words, never the colour alone. Each square is
+                  // 24px wide (globals.css .app-strip-cell); on a phone .app-tap keeps it 28 tall and takes the tap 44px
+                  // tall, where a 44px link would stretch the grid.
+                  const said = `${formatDay(d, true)}, ${ENGINE_SPECS[r.engine as Engine].label}: ${x === null ? "no answer" : x ? "named you" : "didn't name you"}`;
+                  const look: React.CSSProperties = { flex: "1 1 0", maxWidth: "24px", height: "28px", borderRadius: "5px", boxSizing: "border-box", background: x ? T.accent : x === false ? T.hair : T.surface, border: x === null ? `1px dashed ${T.line}` : undefined };
+                  if (!checked.has(d)) return <span key={d} title={said} className="app-strip-cell" style={look} />;
+                  const on = day === d && r.engine === engine;
+                  return (
+                    <Link
+                      key={d}
+                      href={dayHref(d, r.engine)}
+                      data-row={ri}
+                      data-col={k}
+                      aria-label={`${said}. Open this answer.`}
+                      aria-current={on ? "true" : undefined}
+                      title={said}
+                      className="app-strip-cell app-strip-a app-tap"
+                      style={{ ...look, display: "block", boxShadow: on ? `0 0 0 2px ${T.surface}, 0 0 0 4px ${T.ink}` : undefined }}
+                    />
+                  );
+                })}
               </span>
               <span className="app-strip-n" style={{ fontSize: "14px", fontWeight: 700, textAlign: "right", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{r.answered ? `${r.named} of ${r.answered}` : "-"}</span>
             </div>
@@ -396,7 +431,7 @@ export default function OneCluster({
             <span style={{ display: "flex", gap: "4px" }}>
               {days.map((d, i) => (
                 // The last label ends at its square, so "Today" runs left rather than under the count.
-                <span key={d} className="app-strip-cell" style={{ flex: "1 1 0", maxWidth: "22px", display: "flex", justifyContent: i === days.length - 1 && i > 0 ? "flex-end" : "flex-start", fontSize: "12px", color: T.soft, whiteSpace: "nowrap" }}>
+                <span key={d} className="app-strip-cell" style={{ flex: "1 1 0", maxWidth: "24px", display: "flex", justifyContent: i === days.length - 1 && i > 0 ? "flex-end" : "flex-start", fontSize: "12px", color: T.soft, whiteSpace: "nowrap" }}>
                   {i === days.length - 1 && d === today ? "Today" : i % 7 === 0 || i === days.length - 1 ? formatDay(d) : ""}
                 </span>
               ))}
@@ -405,15 +440,20 @@ export default function OneCluster({
           </div>
           </div>
           <ScrollCue target="strip-scroll">{`Swipe for the earlier days, back to ${days.length ? formatDay(days[0]!) : "the start of the range"}.`}</ScrollCue>
+          {/* DB-2: the squares are one tab stop with script, the arrow keys moving between days and engines. */}
+          <GridKeys target="strip-scroll" version={`${P.id} ${day ?? ""} ${engine} ${range.from} ${range.to}`} />
         </section>
       ) : null}
 
       {P && tab && latest?.day ? (
-        <section aria-labelledby="ans-h" style={{ ...CARD, padding: "24px", display: "flex", flexDirection: "column", gap: "20px" }}>
+        // DB-2 (9 Oct 2026): the anchor a day's link ends on names the engine, and takes focus when a link lands on it.
+        <section id={answerAnchor(tab.engine)} tabIndex={-1} aria-labelledby="ans-h" className="app-answer" style={{ ...CARD, padding: "24px", display: "flex", flexDirection: "column", gap: "20px" }}>
+          <AnswerFocus id={answerAnchor(tab.engine)} at={`${latest.day} ${tab.engine}`} />
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "16px", flexWrap: "wrap" }}>
             <h2 id="ans-h" style={H2}>
-              Latest answers
+              {day ? `Answers on ${formatDay(day, true)}` : "Latest answers"}
             </h2>
+            {noCheck ? null : (
             <nav aria-label="Engines" style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
               {tabs.map((t) => {
                 const on = t.engine === tab.engine;
@@ -434,10 +474,25 @@ export default function OneCluster({
                 );
               })}
             </nav>
+            )}
           </div>
-          {latestNote ? <p style={{ margin: 0, fontSize: "14px", lineHeight: 1.5, color: T.ink }}>{latestNote}</p> : null}
-          <Answer tab={tab} brand={brand} day={latest.day} today={today} unsure={!data.lastRun || data.lastRun.run_date !== latest.day || lostReads(data.lastRun)} />
-          <p style={{ margin: 0, fontSize: "13px", color: T.soft }}>{`What each engine said at ${latest.day === today ? "today's" : `the ${formatDay(latest.day)}`} check, with link addresses taken out of the text.`}</p>
+          {day ? (
+            // DB-2: which check this is, in words, and the way back to the latest.
+            <p style={{ margin: 0, fontSize: "14px", lineHeight: 1.5, color: T.ink }}>
+              {`${pickedDayLine({ day, today, market, stored: !noCheck, run: todayRun(data.runs, today), label: ENGINE_SPECS[tab.engine as Engine].label, answered: tab.named !== null })} `}
+              <Link href={latestHref} style={{ fontWeight: 600, color: T.accent, textDecoration: "none", whiteSpace: "nowrap" }}>
+                See the latest answers
+              </Link>
+            </p>
+          ) : latestNote ? (
+            <p style={{ margin: 0, fontSize: "14px", lineHeight: 1.5, color: T.ink }}>{latestNote}</p>
+          ) : null}
+          {noCheck ? null : (
+            <>
+              <Answer tab={tab} brand={brand} day={latest.day} today={today} unsure={!data.lastRun || data.lastRun.run_date !== latest.day || lostReads(data.lastRun)} />
+              <p style={{ margin: 0, fontSize: "13px", color: T.soft }}>{`What each engine said at ${latest.day === today ? "today's" : `the ${formatDay(latest.day)}`} check, with link addresses taken out of the text.`}</p>
+            </>
+          )}
         </section>
       ) : null}
 
@@ -490,7 +545,7 @@ export default function OneCluster({
                 </svg>
                 Add a note
               </summary>
-              <form method="post" action={`${noteAction}?${new URLSearchParams({ ...rangeQuery, cluster: c.id, q: P.id, prompt: String(prompt), ...(engine === engines[0] ? {} : { engine }) })}`} style={{ display: "flex", flexDirection: "column", gap: "8px", marginTop: "12px" }}>
+              <form method="post" action={`${noteAction}?${new URLSearchParams({ ...rangeQuery, cluster: c.id, q: P.id, prompt: String(prompt), ...(day ? { day } : {}), ...(engine === engines[0] ? {} : { engine }) })}`} style={{ display: "flex", flexDirection: "column", gap: "8px", marginTop: "12px" }}>
                 <label htmlFor="note-text" style={{ fontSize: "13px", color: T.soft }}>{`Dated today, on this prompt. Up to ${APP_LIMITS.note} characters.`}</label>
                 <textarea id="note-text" name="text" autoFocus={noteState !== null && noteState !== "saved"} aria-describedby={noteState !== null && noteState !== "saved" ? "note-said" : undefined} required maxLength={APP_LIMITS.note} rows={2} style={{ font: "inherit", fontSize: "14px", padding: "10px 12px", border: `1px solid ${T.line}`, borderRadius: "10px", resize: "vertical" }} />
                 <SubmitButton busy="Saving..." style={{ alignSelf: "flex-start", height: "40px", padding: "0 16px", border: 0, borderRadius: "10px", background: T.accent, color: T.surface, fontFamily: "inherit", fontSize: "14px", fontWeight: 600 }}>

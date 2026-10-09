@@ -519,9 +519,14 @@ export function promptBrands(input: Pick<ClusterInput, "answers" | "range">, pro
   return { answers, rows };
 }
 
-/** `?prompt=` on the one-cluster page (T7 part 2b): a 0-based index into its prompts; anything else, or past the last, is the first. */
+/**
+ * `?prompt=` on the one-cluster page (T7 part 2b): a 0-based index into its prompts; anything else, or past the
+ * last, is the first. Two digits since the review of 95a8747 (9 Oct 2026): a cluster's list keeps the prompts
+ * stopped within the range beside its five live ones, so it can pass ten, and `prompt=10` - a link Who is named
+ * or Cited pages builds - opened prompt 0.
+ */
 export function promptIndex(raw: string | string[] | undefined, count: number): number {
-  const n = typeof raw === "string" && /^\d$/.test(raw) ? Number(raw) : 0;
+  const n = typeof raw === "string" && /^\d{1,2}$/.test(raw) ? Number(raw) : 0;
   return n < count ? n : 0;
 }
 

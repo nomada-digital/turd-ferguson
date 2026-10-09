@@ -99,6 +99,10 @@ const KEYS: Record<string, Record<string, string>> = {
     // R151 (3 Oct 2026): note.ts noteState - NOTE_SAID's own keys only (saved, empty, long, refused).
     note: "noteState(sp.note)",
     engine: "engineTab(sp.engine, engines)",
+    // DB-2 (9 Oct 2026): the check whose answers the panel shows - a real day up to today, else none
+    // (latest-answers.test.mts; tracking's start dropped as a floor in review, same day). Only the date: the read
+    // keeps the page's client and prompt (read-shape.test.mts).
+    day: "pickedDay(sp.day, today)",
   },
   "/named": {
     cluster: '(data.clusters ?? []).some((c) => c.id === one("cluster"))',
@@ -166,9 +170,10 @@ const ROLE_READS: Record<string, string[]> = {
  * Raised 2 Oct 2026 (R173 pass 2): 37 keys - the Overview's setup.
  * Raised 2 Oct 2026 (R173 pass 3, DS36): 10 pages - the [...rest] catch-all.
  * Raised 8 Oct 2026: 38 keys - Settings' trial, the Cancel trial route's way back.
+ * Raised 9 Oct 2026 (DB-2): 39 keys - the one-cluster page's day.
  */
 const PAGE_FLOOR = 10;
-const KEY_FLOOR = 38;
+const KEY_FLOOR = 39;
 
 /** The query keys a page reads by name, as written. */
 export function keysRead(src: string): string[] {
