@@ -2,7 +2,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { selectAll } from "../supabase/page.ts";
 import { liveOn, shouldTrack, trackingDay } from "./decide.ts";
-import { runIsStalled, runIsStuck } from "./dispatch.ts";
+import { TRACKING_STUCK_MS, runIsStalled } from "./dispatch.ts";
+import { rerunMarker } from "./rerun.ts";
 
 /**
  * Run health - whether each client that should have been read today was
@@ -62,6 +63,8 @@ export type HealthRun = {
   started_at: string | null;
   finished_at?: string | null;
   dfs_cost?: number | string | null;
+  /** Read for a reopened run's marker (rerun.ts): it is queued again from the reopen, not from the row's creation. */
+  step_ms?: unknown;
 };
 
 export type TrackableClient = {
@@ -98,9 +101,12 @@ export function runState(run: HealthRun | undefined, now: number): RunState {
     case "partial":
     case "failed":
       return run.status;
-    case "queued":
+    case "queued": {
       if (run.error) return "undispatched";
-      return runIsStuck(run, now) ? "stuck" : "queued";
+      // dispatch.ts runIsStuck, from the reopen for a re-run: its created_at is the morning's.
+      const since = Date.parse(rerunMarker(run.step_ms)?.at || run.created_at || "");
+      return Number.isFinite(since) && now - since > TRACKING_STUCK_MS ? "stuck" : "queued";
+    }
     case "running":
       return runIsStalled(run, now) ? "stalled" : "running";
     default:
@@ -266,7 +272,7 @@ export async function readDayRuns(db: SupabaseClient, day: string): Promise<Heal
     return await selectAll<HealthRun>((from, to) =>
       db
         .from("tracking_runs")
-        .select("client_domain_id, status, error, created_at, started_at, finished_at, dfs_cost")
+        .select("client_domain_id, status, error, created_at, started_at, finished_at, dfs_cost, step_ms")
         .eq("run_date", day)
         .order("id", { ascending: true })
         .range(from, to),

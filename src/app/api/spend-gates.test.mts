@@ -230,11 +230,18 @@ const EXEMPT: Record<string, { why: string; evidence: RegExp; where: string }> =
     evidence: /refuseRun\(await trackingSettings\(\), await trackingSpentOn\(day\)\)/,
     where: "src/lib/tracking/runner.ts",
   },
+  /**
+   * 9 Oct 2026 (audit reliability-4): /admin/tracking's "Run now" can move
+   * today's failed, partial or stalled run back to queued (rerun.ts), behind
+   * the admin's Basic auth and the same switch and cap; the claim below then
+   * reads it once more, only what did not come back.
+   */
   "track/run": {
     why:
       "Runs one client's day. Only a body signed with CRON_SECRET is accepted; the claim moves only a " +
       "queued row to running, so one run reads once however often it is posted; and the same " +
-      "tracking_enabled / daily cost cap refusal is re-read at the claim.",
+      "tracking_enabled / daily cost cap refusal is re-read at the claim. A run the admin reopened is " +
+      "read again the same way, only for the reads that did not come back, its spend added to the run's.",
     evidence: /\.eq\("status", "queued"\)/,
     where: "src/lib/tracking/runner.ts",
   },

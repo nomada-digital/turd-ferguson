@@ -55,6 +55,10 @@ test("a run's state: closed runs as they closed; in flight until stuck or stalle
   assert.equal(runState(run("a", "running"), now), "running");
   assert.equal(runState(run("a", "running"), Date.parse(`${DAY}T05:15:04Z`)), "stalled", "running past 15 minutes: the platform killed it");
   assert.equal(runState(run("a", "something new"), now), "failed", "a status this does not know is not read as fine");
+  // A run "Run now" reopened at 09:00 is queued from the reopen, not from its 05:00 row.
+  const reopened = run("a", "queued", { started_at: `${DAY}T05:00:03Z`, step_ms: { rerun: { of: "partial", error: null, at: `${DAY}T09:00:00Z`, n: 1, landed: true } } });
+  assert.equal(runState(reopened, Date.parse(`${DAY}T09:01:00Z`)), "queued");
+  assert.equal(runState(reopened, Date.parse(`${DAY}T09:31:00Z`)), "stuck");
 });
 
 test("the day's health: who should have run against what ran, problems first", () => {

@@ -5,6 +5,7 @@ import { supabaseAdmin, supabaseConfigured } from "@/lib/supabase/admin";
 import { selectAll } from "@/lib/supabase/page";
 import { ADMIN_LIMITS, UPSELL_MODES, trackingDay } from "@/lib/tracking/decide";
 import { PROMPTS_PER_CLUSTER, type Subject, namesBrandIn, trackingCounts } from "@/lib/tracking/limits";
+import { rerunMarker } from "@/lib/tracking/rerun";
 import { type HealthRun, RUN_STATES, type RunHealth, STATE_WORDS, readRunHealth, runState } from "@/lib/tracking/run-health";
 import { SETUP_CONFIRMED_EVENT, setupState } from "@/lib/tracking/setup-landing";
 
@@ -31,9 +32,11 @@ export const metadata: Metadata = {
  * Today's runs head the page (9 Oct 2026, audit reliability-6): run-health.ts
  * readRunHealth, the reading the summary mail and /api/health/runs make, so
  * the three cannot disagree. A run left `running` past 15 minutes reads as
- * stalled here rather than "running $0.00" until the 03:45 sweep. The prompt,
- * keyword and run reads are paged (audit reliability-2): every client's rows
- * in one select stop at PostgREST's thousand.
+ * stalled here rather than "running $0.00" until the 03:45 sweep, and "Run
+ * now" on a failed, partial or stalled run re-reads what did not come back
+ * (audit reliability-4, rerun.ts). The prompt, keyword and run reads are
+ * paged (audit reliability-2): every client's rows in one select stop at
+ * PostgREST's thousand.
  */
 
 const input = {
@@ -87,7 +90,7 @@ export default async function TrackingAdmin() {
     all<Row>("tracking runs", (from, to) =>
       db
         .from("tracking_runs")
-        .select("client_domain_id, run_date, status, dfs_cost, model_calls, error, created_at, started_at, finished_at")
+        .select("client_domain_id, run_date, status, dfs_cost, model_calls, error, created_at, started_at, finished_at, step_ms")
         .in("client_domain_id", ids)
         .gte("run_date", since)
         .order("id", { ascending: true })
@@ -153,6 +156,7 @@ export default async function TrackingAdmin() {
         const rs = of(runs, id);
         const todayRun = rs.find((r) => r.run_date === today);
         const todayState = todayRun ? runState(todayRun as HealthRun, now) : null;
+        const rerunnable = todayState === "failed" || todayState === "partial" || todayState === "stalled";
         const cost14 = rs.reduce((n, r) => n + Number(r.dfs_cost ?? 0), 0);
         const ms = of(members, c.account_id as string, "account_id");
         const account = (accountRows ?? []).find((a) => a.id === c.account_id);
@@ -173,12 +177,14 @@ export default async function TrackingAdmin() {
                 </>
               ) : null}
             </p>
-            <ActionForm action={runNow} submit="Run now">
+            <ActionForm action={runNow} submit={rerunnable ? "Re-run failed reads" : "Run now"}>
               <input type="hidden" name="client" value={id} maxLength={ADMIN_LIMITS.id} />
-              <span style={{ fontSize: "12.5px", color: T.soft }}>The only manual spend.</span>
+              <span style={{ fontSize: "12.5px", color: T.soft }}>
+                {rerunnable ? "Reads again only what did not come back today, under the same cap." : "The only manual spend."}
+              </span>
               {todayRun && (todayState === "stuck" || todayState === "undispatched") ? (
                 <span style={{ fontSize: "12.5px", color: T.ink, fontWeight: 700 }}>
-                  stuck - queued since {String(todayRun.created_at).slice(11, 16)}Z and never claimed:{" "}
+                  stuck - queued since {String(rerunMarker(todayRun.step_ms)?.at || todayRun.created_at).slice(11, 16)}Z and never claimed:{" "}
                   {(todayRun.error as string | null) ?? "no dispatch error recorded"}
                 </span>
               ) : null}

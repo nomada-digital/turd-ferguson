@@ -252,13 +252,19 @@ const SENDERS: Record<
    * when isLinkCheckDay says Sunday. One message per client per Sunday, to our
    * own contact destination, nothing when no row alerts.
    */
+  /**
+   * 9 Oct 2026 (audit reliability-4): a run can be claimed again, after "Run
+   * now" reopens a failed, partial or stalled one. A re-run does not repeat the
+   * link check (runner.ts, `if (rerun)` inside the Sunday branch), so the
+   * bound below still holds: one check per client a Sunday.
+   */
   "src/lib/tracking/link-mail.ts": {
     reach: "the tracking runner, once a client a Sunday",
     bound:
       "Mails only our own contact destination. One call per claimed Sunday tracking run, a run " +
-      "being one per client a day and claimed by a compare-and-swap on status queued; no alert " +
-      "lines, no message.",
-    evidence: /if \(isLinkCheckDay\(day\)\)/,
+      "being one per client a day and claimed by a compare-and-swap on status queued, and a " +
+      "re-run of the day not checking again; no alert lines, no message.",
+    evidence: /if \(isLinkCheckDay\(day\)\) \{\s*if \(rerun\) \{/,
     where: "src/lib/tracking/runner.ts",
   },
   /**
