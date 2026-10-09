@@ -12,12 +12,16 @@ import { ENGINE_SPECS } from "@/lib/scan/engines";
 import { TIER_PLAIN } from "@/lib/tier-text";
 import { ASKS_PER_MEMBER_PER_DAY } from "@/lib/tracking/ask";
 import { COMPARE_OPTIONS, presets } from "@/lib/tracking/date-range";
+import { clockIn } from "@/lib/tracking/check-time";
 import { UNRANKED_AS } from "@/lib/tracking/figures";
 import { ANGLES, BRANDED_CHIP, PROMPTS_PER_CLUSTER } from "@/lib/tracking/limits";
 import { BRANDS_NOT_READ } from "@/lib/tracking/report-csv";
 import { MISSING_READS } from "@/lib/tracking/run-note";
 import { LOGIN_PER_EMAIL_PER_HOUR, LOGIN_TTL_MS, SESSION_TTL_MS } from "@/lib/tracking/session";
-import { INVITES_PER_OWNER_PER_DAY, MEMBERS_PER_ACCOUNT } from "@/lib/tracking/team";
+import { INVITES_PER_OWNER_PER_DAY, MEMBERS_PER_CLIENT } from "@/lib/tracking/team";
+
+/** A moment to show what a time looks like in each market. The zone label is clockIn's, the one the trial strip uses, never typed here (check-time.test.mts, 9 Oct 2026). */
+const ZONE_EXAMPLE = "2026-10-23T05:00:00Z";
 
 /**
  * The help centre (MK-2, 9 Oct 2026): what an alwaystracked buyer needs to
@@ -415,10 +419,11 @@ export function helpContent(trialOn: boolean = TRIAL.enabled): HelpContent {
               steps: [
                 `In ${ui("Settings")}, under ${ui("Team")}, choose ${ui("Invite someone")}. Only owners see it.`,
                 "Enter their email address and pick Editor or Viewer.",
+                `If your account has more than one website, choose under ${ui("Who they see")}: only the website you are in, or every website on the account, including any added later.`,
                 `Choose ${ui("Send invite")}. We email them, and they sign in with that address.`,
               ],
             },
-            `A team has at most ${MEMBERS_PER_ACCOUNT} members, and each owner can send up to ${INVITES_PER_OWNER_PER_DAY} invites a day. Someone who was removed can be invited again.`,
+            `Each website has at most ${MEMBERS_PER_CLIENT} people on its team, and each owner can send up to ${INVITES_PER_OWNER_PER_DAY} invites a day. Someone who was removed can be invited again.`,
           ],
         },
         {
@@ -432,7 +437,7 @@ export function helpContent(trialOn: boolean = TRIAL.enabled): HelpContent {
           id: "websites",
           heading: "More than one website",
           blocks: [
-            "Team membership is per account. If your account has more than one website, everyone on its team sees all of them, and Settings says so before anyone is invited. Switch between them from the list of websites in the sidebar.",
+            "An account can hold more than one website. Each person sees the websites they were invited to: one, or every website on the account, which includes any added later. Owners see them all. Switch between the websites you can see from the list in the sidebar.",
           ],
         },
         {
@@ -465,7 +470,7 @@ export function helpContent(trialOn: boolean = TRIAL.enabled): HelpContent {
                 id: "trial-date",
                 heading: "Where to see when it ends",
                 blocks: [
-                  "While the trial runs, a strip across the top of every dashboard page says how many days are left and when the trial ends. Settings shows the same moment and what the first charge will be. The time is in your market's time: UK time on a UK plan, US Eastern on a US one.",
+                  `While the trial runs, a strip across the top of every dashboard page says how many days are left and when the trial ends. Settings shows the same moment and what the first charge will be. Both are in your market's time, written like ${clockIn(ZONE_EXAMPLE, "uk")} on a UK plan and ${clockIn(ZONE_EXAMPLE, "us")} on a US one.`,
                 ] as HelpBlock[],
               },
               {

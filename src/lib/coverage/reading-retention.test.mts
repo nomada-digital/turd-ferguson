@@ -304,9 +304,19 @@ const RETENTION_CLAIMS: {
  * its table in a variable counts, because the walk cannot tell which table it
  * reaches. Throws when the walk sees no delete at all, so a probe that stopped
  * matching cannot read as a tree that deletes nothing.
+ *
+ * One update is not a remover, and is pinned by its exact payload in
+ * BRANDS_ONLY: the re-run's (03510f7, merged 9 Oct 2026) writes the brands it
+ * read again from the stored text, and brands_ok, onto the row the first pass
+ * stored. response_text and what the engine said are not in it. Any other
+ * update, or this one writing another column, still counts; and a pinned
+ * payload the walk no longer finds is reported, so the entry cannot outlive it.
  */
+const BRANDS_ONLY = new Set([".update(hasBrandsOk(kept!) ? { brands, brands_ok: true } : { brands })"]);
+
 function trackedAnswerRemovers(): string[] {
   const out: string[] = [];
+  const pinned = new Set<string>();
   let deletes = 0;
   for (const rel of sourceFiles(ROOT)) {
     const src = code(readFileSync(join(ROOT, rel), "utf8"));
@@ -316,10 +326,14 @@ function trackedAnswerRemovers(): string[] {
       const table = /^\s*["'`](\w+)["'`]\s*$/.exec(m[1]!)?.[1] ?? null;
       const isDelete = /\.delete\(/.test(chain);
       if (isDelete) deletes++;
-      const reaches = isDelete ? table === null || table === "tracking_answers" : table === "tracking_answers" && /\.update\(/.test(chain);
-      if (reaches) out.push(`${rel}: ${chain.replace(/\s+/g, " ").slice(0, 120)}`);
+      const flat = chain.replace(/\s+/g, " ");
+      const brandsOnly = !isDelete && [...BRANDS_ONLY].find((p) => flat.includes(p) && flat.split(".update(").length === 2);
+      if (brandsOnly) pinned.add(brandsOnly);
+      const reaches = isDelete ? table === null || table === "tracking_answers" : table === "tracking_answers" && /\.update\(/.test(chain) && !brandsOnly;
+      if (reaches) out.push(`${rel}: ${flat.slice(0, 120)}`);
     }
   }
+  for (const p of BRANDS_ONLY) if (!pinned.has(p)) out.push(`BRANDS_ONLY pins ${p}, which the walk no longer finds - take it out`);
   if (deletes < 1) throw new Error("the walk for database deletes found none - the webhook's stripe_events delete is gone, or the probe has drifted");
   return out;
 }
